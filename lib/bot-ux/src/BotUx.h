@@ -59,9 +59,9 @@ public:
         uint16_t bgColor      = rgb565(0x0A, 0x0E, 0x14); // deep space blue
         uint16_t bodyColor    = rgb565(0xF4, 0xF6, 0xF8); // orb surface
         uint16_t accentColor  = rgb565(0x66, 0xAE, 0xFF); // status / secondary UI
-        uint16_t eyeColor     = rgb565(0x1A, 0x61, 0xAE); // eye marks
+        uint16_t eyeColor     = rgb565(0x20, 0x24, 0x29); // graphite eye marks
         uint16_t pupilColor   = rgb565(0x08, 0x2B, 0x55); // googly pupils
-        uint16_t mouthColor   = rgb565(0x1A, 0x61, 0xAE);
+        uint16_t mouthColor   = rgb565(0x20, 0x24, 0x29);
         uint16_t blushColor   = rgb565(0xFF, 0x8A, 0xA0);
 
         EyeStyle eyeStyle   = EyeStyle::Oval;

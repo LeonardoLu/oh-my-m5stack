@@ -15,6 +15,18 @@ constexpr uint32_t BLINK_OPEN_MS  = 100;
 constexpr uint32_t SURPRISE_MS    = 240;
 constexpr uint32_t HAPPY_MS       = 1180;
 
+uint32_t blinkCloseMs(BotUx::Mood mood) {
+    return (mood == BotUx::Mood::Sleepy) ? 180u : BLINK_CLOSE_MS;
+}
+
+uint32_t blinkHoldMs(BotUx::Mood mood) {
+    return (mood == BotUx::Mood::Sleepy) ? 360u : BLINK_HOLD_MS;
+}
+
+uint32_t blinkOpenMs(BotUx::Mood mood) {
+    return (mood == BotUx::Mood::Sleepy) ? 220u : BLINK_OPEN_MS;
+}
+
 int16_t min16(int16_t a, int16_t b) { return (a < b) ? a : b; }
 
 float clampf(float v, float lo, float hi) {
@@ -147,9 +159,12 @@ void BotUx::_updateBlink(uint32_t now) {
     }
 
     uint32_t t = now - _blinkStart;
-    if (_blinkPhase == 0 && t >= BLINK_CLOSE_MS) _blinkPhase = 1;
-    else if (_blinkPhase == 1 && t >= BLINK_CLOSE_MS + BLINK_HOLD_MS) _blinkPhase = 2;
-    else if (_blinkPhase == 2 && t >= BLINK_CLOSE_MS + BLINK_HOLD_MS + BLINK_OPEN_MS) {
+    uint32_t closeMs = blinkCloseMs(_effMood);
+    uint32_t holdMs = blinkHoldMs(_effMood);
+    uint32_t openMs = blinkOpenMs(_effMood);
+    if (_blinkPhase == 0 && t >= closeMs) _blinkPhase = 1;
+    else if (_blinkPhase == 1 && t >= closeMs + holdMs) _blinkPhase = 2;
+    else if (_blinkPhase == 2 && t >= closeMs + holdMs + openMs) {
         _blinking = false;
         _blinkSeed = _blinkSeed * 1103515245u + 12345u;
         _nextBlink = now + blinkDelay(_style, _blinkSeed);
@@ -224,10 +239,14 @@ void BotUx::_resolveMood(uint32_t now) {
             gazeX = -0.10f; gazeY = 0.48f; lift = 0.045f; stretch = -0.035f;
             break;
         case Mood::Sleepy:
+            targetOpen = 0.11f; targetAsym = 0.45f;
+            targetPairX = -0.12f; targetPairY = 0.19f; targetAngle = 1.80f;
+            gazeX = -0.18f; gazeY = 0.30f; lift = 0.055f; stretch = -0.045f;
+            break;
         case Mood::Waiting:
-            targetOpen = 0.16f; targetAsym = 0.22f;
-            targetPairX = 0.13f; targetPairY = -0.11f; targetAngle = 4.20f;
-            gazeX = 0.10f; gazeY = 0.16f; lift = 0.025f; stretch = -0.025f;
+            targetOpen = 0.16f; targetAsym = 0.14f;
+            targetPairX = 0.05f; targetPairY = -0.04f; targetAngle = 4.20f;
+            gazeX = 0.0f; gazeY = 0.0f; lift = 0.015f; stretch = -0.015f;
             break;
         case Mood::Surprised:
             targetOpen = 1.28f; targetAsym = 0.0f;
@@ -272,16 +291,20 @@ void BotUx::_resolveMood(uint32_t now) {
     float open = _openBase;
     if (_blinking && _effMood != Mood::Thinking && _effMood != Mood::Blocked) {
         uint32_t t = now - _blinkStart;
+        uint32_t closeMs = blinkCloseMs(_effMood);
+        uint32_t holdMs = blinkHoldMs(_effMood);
+        uint32_t openMs = blinkOpenMs(_effMood);
         float p;
-        if (_blinkPhase == 0) p = (float)t / BLINK_CLOSE_MS;
+        if (_blinkPhase == 0) p = (float)t / closeMs;
         else if (_blinkPhase == 1) p = 1.0f;
-        else p = 1.0f - (float)(t - BLINK_CLOSE_MS - BLINK_HOLD_MS) / BLINK_OPEN_MS;
+        else p = 1.0f - (float)(t - closeMs - holdMs) / openMs;
         open *= 1.0f - _smooth(clampf(p, 0.0f, 1.0f));
     }
     _open = clampf(open, 0.0f, 1.35f);
 
     uint32_t elapsed = now - _animStart;
-    float period = (_effMood == Mood::Sleepy || _effMood == Mood::Waiting) ? 5500.0f : 3800.0f;
+    float period = (_effMood == Mood::Sleepy) ? 7200.0f
+                 : (_effMood == Mood::Waiting) ? 4600.0f : 3800.0f;
     _breath = sinf(2.0f * kPi * elapsed / period);
     int16_t r = _m.bodyR ? _m.bodyR : (int16_t)(min16(_w, _h) * 0.39f);
     float dx = 0.0f;
@@ -438,20 +461,32 @@ void BotUx::_drawEyes() {
             continue;
         }
 
+        if (_effMood == Mood::Waiting && side <= 96) {
+            int16_t halfW = (side <= 48) ? 1 : 2;
+            _fillCapsule(ex, ey, halfW, 0, 1, _style.eyeColor);
+            continue;
+        }
+
         // At tiny toolbar sizes, use fixed pixel glyphs to avoid degenerate
         // capsule triangles and keep the pair readable after integer rounding.
         if (side <= 48) {
-            if (_effMood == Mood::Sleepy || _effMood == Mood::Waiting || _open < 0.20f)
+            if (_effMood == Mood::Sleepy) {
+                int16_t halfW = (s < 0) ? 2 : 1;
+                int16_t sleepyY = ey + ((s < 0) ? 1 : 0);
+                _fillCapsule(ex - 1, sleepyY, halfW, 0, 1, _style.eyeColor);
+            } else if (_effMood == Mood::Waiting || _open < 0.20f) {
                 _fillCapsule(ex, ey, 1, 0, 1, _style.eyeColor);
-            else
+            } else {
                 _fillCapsule(ex, ey, 1, 2, 1, _style.eyeColor);
+            }
             continue;
         }
 
         if (_open < 0.12f) {
-            int16_t halfW = (int16_t)(er * 0.62f);
+            int16_t halfW = (int16_t)(er * ((_effMood == Mood::Sleepy && s > 0) ? 0.38f : 0.62f));
             if (halfW < 1) halfW = 1;
-            _fillCapsule(ex, ey, halfW, 0, 1, _style.eyeColor);
+            int16_t sleepyY = (_effMood == Mood::Sleepy && s < 0) ? ey + (int16_t)(er * 0.22f) : ey;
+            _fillCapsule(ex, sleepyY, halfW, 0, 1, _style.eyeColor);
             continue;
         }
 

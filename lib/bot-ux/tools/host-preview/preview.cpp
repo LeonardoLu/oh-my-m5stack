@@ -108,9 +108,26 @@ static void checkLateUptimeHasNoPhantomReaction() {
     assert(canvas.svgBody().find("<polygon") != std::string::npos);
 }
 
+static void checkWaitingAndSleepyStayDistinct() {
+    const MoodCase sleepy = {botux::BotUx::Mood::Sleepy, "Sleepy", false};
+    const MoodCase waiting = {botux::BotUx::Mood::Waiting, "Waiting", false};
+    for (int size : {40, 72}) {
+        const std::string sleepySvg = render(sleepy, size, 0);
+        const std::string waitingSvg = render(waiting, size, 0);
+        const size_t sleepyBody = sleepySvg.find("<ellipse");
+        const size_t waitingBody = waitingSvg.find("<ellipse");
+        const size_t sleepyBodyEnd = sleepySvg.find("/>", sleepyBody);
+        const size_t waitingBodyEnd = waitingSvg.find("/>", waitingBody);
+        assert(sleepyBodyEnd != std::string::npos && waitingBodyEnd != std::string::npos);
+        assert(sleepySvg.substr(sleepyBodyEnd) != waitingSvg.substr(waitingBodyEnd));
+    }
+}
+
 int main(int argc, char** argv) {
+    assert(botux::BotUx().style().eyeColor == botux::rgb565(32, 36, 41));
     checkBodylessStateGlyphs();
     checkLateUptimeHasNoPhantomReaction();
+    checkWaitingAndSleepyStayDistinct();
     const char* outDir = (argc > 1) ? argv[1] : ".";
     std::string tiny = std::string(outDir) + "/moods-40.svg";
     std::string small = std::string(outDir) + "/moods-72.svg";

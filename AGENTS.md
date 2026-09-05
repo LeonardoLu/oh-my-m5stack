@@ -3,7 +3,7 @@
 M5Stack companion firmware. One shared **bot-ux** animation component ("grok bot"),
 integrated into two device apps:
 
-- `stopwatch/bot-ux-watch` — watch/stopwatch on M5StickC Plus2
+- `stopwatch/bot-ux-watch` — watch/stopwatch on M5Stack StopWatch (ESP32-S3)
 - `core2/bot-ux-codex-core2` — codex-style on-screen keyboard on M5Stack Core2
 
 ## Layout

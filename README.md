@@ -5,7 +5,7 @@ controllable "grok bot" face — integrated into two device apps.
 
 | App | Path | Device | What it does |
 |---|---|---|---|
-| **watch** | `stopwatch/bot-ux-watch/` | M5StickC Plus2 | Watch face + stopwatch + settings, with the bot as the face and state readout |
+| **watch** | `stopwatch/bot-ux-watch/` | M5Stack StopWatch (ESP32-S3) | Watch face + stopwatch + settings, with the bot as the face and state readout |
 | **codex** | `core2/bot-ux-codex-core2/` | M5Stack Core2 | Touch "codex" prompt app with a custom on-screen keyboard + chat + settings |
 | **bot-ux** | `lib/bot-ux/` | (shared) | The bot animation component — moods, blink, drift, breathing, reactions, personalization |
 

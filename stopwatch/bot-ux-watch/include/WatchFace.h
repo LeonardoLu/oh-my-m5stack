@@ -9,7 +9,7 @@
 
 class WatchFace {
 public:
-    void begin(M5Canvas* cv);
+    void begin(M5Canvas* cv, M5Canvas* botSprite);
 
     void setHour24(bool v)   { _hour24 = v; }
     void setBattery(uint8_t pct);

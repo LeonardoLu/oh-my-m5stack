@@ -65,14 +65,14 @@ void Stopwatch::draw(M5Canvas* cv, uint16_t accent, uint16_t text) {
     uint32_t s = (cs / 100) % 60;
     uint32_t c = cs % 100;
 
-    char buf[16];
+    char buf[24];
     cv->setTextDatum(middle_center);
-    cv->setTextSize(2.0f);
+    cv->setTextSize(4.0f);
     cv->setTextColor(accent);
     snprintf(buf, sizeof(buf), "%02u:%02u.%02u", (unsigned)m, (unsigned)s, (unsigned)c);
-    cv->drawString(buf, cv->width() / 2, 156);
+    cv->drawString(buf, cv->width() / 2, 200);
 
-    cv->setTextSize(1.0f);
+    cv->setTextSize(1.5f);
     cv->setTextColor(text);
     for (uint8_t i = 0; i < _lapCount; i++) {
         uint32_t lcs = _laps[i] / 10;
@@ -81,6 +81,6 @@ void Stopwatch::draw(M5Canvas* cv, uint16_t accent, uint16_t text) {
                  (unsigned)(lcs / 6000),
                  (unsigned)((lcs / 100) % 60),
                  (unsigned)(lcs % 100));
-        cv->drawString(buf, cv->width() / 2, 178 + i * 12);
+        cv->drawString(buf, cv->width() / 2, 300 + i * 36);
     }
 }

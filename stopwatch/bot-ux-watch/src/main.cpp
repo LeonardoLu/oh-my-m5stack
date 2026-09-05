@@ -1,8 +1,10 @@
-// bot-ux-watch — M5StickC Plus2 watch + stopwatch hosting the shared bot-ux bot.
+// bot-ux-watch — M5Stack StopWatch (ESP32-S3, 466x466 round AMOLED touch).
 //
-// main.cpp owns the mode state machine (Face / Stopwatch / Settings) and the
-// button gesture disambiguation. Modules are plain classes with one instance
-// each. No heap allocation in the loop; fixed buffers + C strings only.
+// main.cpp owns the mode state machine (Face / Stopwatch / Settings), the touch
+// + button gesture routing, and fixed-buffer rendering. The shared bot-ux bot is
+// the Face hero; stopwatch and settings are utilitarian touch screens. Modules
+// are plain classes, one instance each; no heap in the loop.
+
 #include <M5Unified.h>
 #include <BotUx.h>
 
@@ -17,24 +19,25 @@
 // ---- mode + gesture model -------------------------------------------------
 
 enum class Mode : uint8_t { Face, Stopwatch, Settings };
-
-// Settings sub-screens (value editors).
 enum class SetView : uint8_t { List, TimeHour, TimeMinute, Format, Theme, Style, Brightness };
-
 enum class MenuItem : uint8_t { TimeSet = 0, Format, Theme, Style, Brightness, Back, Count };
 
-// Gesture: TAP (<250 ms), DOUBLE (2 taps within 300 ms), LONG (>=600 ms).
-// A single tap waits a 300 ms disambiguation window before firing so a double
-// can be recognized first; a long press cancels any pending tap.
-enum class Gesture : uint8_t { None, Tap, Double, Long };
+// Buttons produce Tap/Double/Long; touch adds SwipeUp/SwipeDown.
+enum class Gesture : uint8_t { None, Tap, Double, Long, SwipeUp, SwipeDown };
 
 namespace {
-constexpr uint32_t LONG_MS     = 600;
-constexpr uint32_t TAP_MS      = 250;
-constexpr uint32_t DOUBLE_MS   = 300;
-constexpr uint32_t TIME_CANCEL_MS = 1200; // time editor: longer than LONG_MS so auto-repeat can ramp
-constexpr uint8_t  LOW_BATT    = 15;
-constexpr int8_t   SIGNAL_BARS = 4;   // placeholder: no NTP/WiFi in this build
+constexpr uint32_t LONG_MS      = 600;
+constexpr uint32_t TAP_MS       = 250;
+constexpr uint32_t DOUBLE_MS    = 300;
+constexpr uint32_t TIME_CANCEL_MS = 1200; // time editor: > LONG_MS so auto-repeat can ramp
+constexpr uint8_t  LOW_BATT     = 15;
+constexpr int8_t   SIGNAL_BARS  = 4;   // placeholder: no NTP/WiFi in this build
+
+// ---- layout (466x466 round AMOLED) ----
+constexpr int16_t kW = 466, kH = 466;
+constexpr int16_t kBotW = 200, kBotH = 200;
+constexpr int16_t kBotX = 133, kBotY = 15;   // (466-200)/2, bot body ~ y 15..215
+constexpr int16_t kMenuTop = 120, kMenuStep = 52;  // settings list rows
 
 const char* const kMenuLabels[(int)MenuItem::Count] = {
     "Time set", "Format", "Theme", "Style", "Brightness", "Back",
@@ -44,6 +47,7 @@ const char* const kMenuLabels[(int)MenuItem::Count] = {
 // ---- one instance each ----------------------------------------------------
 
 M5Canvas canvas(&M5.Display);
+M5Canvas botSprite(&M5.Display);
 WatchFace face;
 Stopwatch sw;
 Settings settings;
@@ -61,6 +65,11 @@ struct BtnState {
     bool     swallow  = false;   // 2nd tap of a double: skip its own single tap
 };
 BtnState _btnA, _btnB;
+
+// ---- touch state ----------------------------------------------------------
+uint32_t _tDownMs = 0;
+int16_t  _tx0 = 0, _ty0 = 0, _tx = 0, _ty = 0, _tapX = 0, _tapY = 0;
+bool     _tDown = false, _tMoved = false, _tLong = false, _tSwiped = false;
 
 uint8_t  _batt = 100;
 bool     _charging = false;
@@ -106,10 +115,14 @@ static void enterEditor(SetView v);
 static void liveApplyEdit();
 static void saveEdit();
 static void enterMenu();
-static void handleFaceGestures(Gesture ga, Gesture gb, uint32_t now);
-static void handleStopwatchGestures(Gesture ga, Gesture gb, uint32_t now);
-static void handleSettingsGestures(Gesture ga, Gesture gb, uint32_t now);
-static void handleGestures(Gesture ga, Gesture gb, uint32_t now);
+static void pokeBot();
+static void gotoStopwatch();
+static void startDoze();
+static void handleFaceButtons(Gesture ga, Gesture gb, uint32_t now);
+static void handleStopwatchButtons(Gesture ga, Gesture gb, uint32_t now);
+static void handleSettingsButtons(Gesture ga, Gesture gb, uint32_t now);
+static void handleButtons(Gesture ga, Gesture gb, uint32_t now);
+static void handleTouch(Gesture g, uint32_t now);
 static void refreshPower(uint32_t now);
 static void seedRtcIfNeeded();
 static void flushButtons();
@@ -149,9 +162,6 @@ static Gesture pollButton(Btn& b, BtnState& s, uint32_t now) {
     return Gesture::None;
 }
 
-// The time-set editor drives BtnA directly (immediate +1 and auto-repeat), so
-// pollButton's per-button state goes stale while it is active. Flush in-flight
-// gestures on entry/exit so a mode switch never replays an old edge.
 static void flushButtons() {
     _btnA.pending = false;
     _btnA.swallow = false;
@@ -159,6 +169,39 @@ static void flushButtons() {
     _btnB.swallow = false;
     if (M5.BtnA.isPressed()) _btnA.longDone = true;   // consume the held press
     if (M5.BtnB.isPressed()) _btnB.longDone = true;
+}
+
+// ---- touch gestures -------------------------------------------------------
+
+// Single-point touch → Tap (with _tapX/_tapY), SwipeUp, SwipeDown, or Long.
+static Gesture pollTouch(uint32_t now) {
+    auto t = M5.Touch.getDetail(0);
+    Gesture g = Gesture::None;
+
+    if (t.wasPressed()) {
+        _tDown = true; _tMoved = false; _tLong = false; _tSwiped = false;
+        _tx0 = _tx = (int16_t)t.x; _ty0 = _ty = (int16_t)t.y;
+        _tDownMs = now;
+    } else if (t.isPressed() && _tDown) {
+        _tx = (int16_t)t.x; _ty = (int16_t)t.y;
+        if (!_tMoved && (abs(_tx - _tx0) > 24 || abs(_ty - _ty0) > 24)) _tMoved = true;
+        if (!_tLong && !_tMoved && !_tSwiped && (now - _tDownMs) >= LONG_MS) {
+            _tLong = true;
+            g = Gesture::Long;
+        }
+        if (_tMoved && !_tSwiped) {
+            int16_t dx = _tx - _tx0, dy = _ty - _ty0;
+            if (dy < -50 && abs(dy) > abs(dx))      { _tSwiped = true; g = Gesture::SwipeUp; }
+            else if (dy > 50 && abs(dy) > abs(dx))  { _tSwiped = true; g = Gesture::SwipeDown; }
+        }
+    } else if (t.wasReleased() && _tDown) {
+        _tDown = false;
+        if (!_tLong && !_tMoved && !_tSwiped) {
+            _tapX = _tx; _tapY = _ty;
+            g = Gesture::Tap;
+        }
+    }
+    return g;
 }
 
 // ---- audio ----------------------------------------------------------------
@@ -182,7 +225,6 @@ static const char* bodyName(uint8_t b) {
     return (b < 4) ? n[b] : "?";
 }
 
-// Push the scratch edit into every live consumer (bot style, format, LCD).
 static void applyLiveSettings() {
     settings.data() = _editData;
     settings.rebuildStyle();
@@ -196,18 +238,19 @@ static void applyLiveSettings() {
 static void drawBrightnessBar(M5Canvas* cv, int16_t x, int16_t y, uint8_t level) {
     for (uint8_t i = 1; i <= 5; i++) {
         uint16_t c = (i <= level) ? settings.style().accentColor : botux::rgb565(0x30, 0x34, 0x3C);
-        cv->fillRoundRect(x + (i - 1) * 9, y, 7, 10, 2, c);
+        cv->fillRoundRect(x + (i - 1) * 18, y - 6, 14, 12, 3, c);
     }
 }
 
 static void drawPicker(M5Canvas* cv, const botux::BotUx::Style& st, int16_t cx, int16_t y, const char* value) {
     cv->setTextDatum(middle_center);
-    cv->setTextSize(2.0f);
+    cv->setTextSize(2.5f);
     cv->setTextColor(st.accentColor);
     cv->drawString(value, cx, y);
+    cv->setTextSize(2.0f);
     cv->setTextColor(st.eyeColor);
-    cv->drawString("<", cx - 55, y);
-    cv->drawString(">", cx + 55, y);
+    cv->drawString("<", cx - 130, y);
+    cv->drawString(">", cx + 130, y);
 }
 
 static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t now) {
@@ -215,7 +258,7 @@ static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t
     bool blink = ((now / 500) % 2) == 0;
 
     cv->setTextDatum(middle_center);
-    cv->setTextSize(3.0f);
+    cv->setTextSize(4.0f);
 
     char buf[4];
     uint8_t hdisp = _editHour;                 // 24 h internally; render 1..12 in 12 h mode
@@ -226,40 +269,42 @@ static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t
     snprintf(buf, sizeof(buf), "%02u", (unsigned)hdisp);
     bool showHour = (_setView != SetView::TimeHour) || blink;
     cv->setTextColor(showHour ? st.accentColor : st.bgColor);
-    cv->drawString(buf, cx - 34, 90);
+    cv->drawString(buf, cx - 70, 200);
 
     cv->setTextColor(st.eyeColor);
-    cv->drawString(":", cx, 90);
+    cv->drawString(":", cx, 200);
 
     snprintf(buf, sizeof(buf), "%02u", (unsigned)_editMinute);
     bool showMin = (_setView != SetView::TimeMinute) || blink;
     cv->setTextColor(showMin ? st.accentColor : st.bgColor);
-    cv->drawString(buf, cx + 34, 90);
+    cv->drawString(buf, cx + 70, 200);
 }
 
 static void drawMenuList(M5Canvas* cv, const botux::BotUx::Style& st) {
     for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; i++) {
-        int16_t y = 40 + i * 24;
+        int16_t y = kMenuTop + i * kMenuStep;
         bool sel = (i == (uint8_t)_menuSel);
-        cv->setTextDatum(top_left);
-        cv->setTextColor(sel ? st.accentColor : st.eyeColor);
-        cv->drawString(sel ? "> " : "  ", 6, y);
-        cv->drawString(kMenuLabels[i], 26, y);
+        if (sel) cv->fillRoundRect(40, y - 20, 386, 40, 10, st.bodyColor);
 
-        cv->setTextDatum(top_right);
+        cv->setTextDatum(middle_left);
+        cv->setTextSize(1.5f);
+        cv->setTextColor(sel ? st.accentColor : st.eyeColor);
+        cv->drawString(kMenuLabels[i], 60, y);
+
+        cv->setTextDatum(middle_right);
         cv->setTextColor(st.eyeColor);
         switch ((MenuItem)i) {
             case MenuItem::Format:
-                cv->drawString(settings.data().hour24 ? "24 h" : "12 h", 131, y);
+                cv->drawString(settings.data().hour24 ? "24 h" : "12 h", 406, y);
                 break;
             case MenuItem::Theme:
-                cv->drawString(Settings::themeName(settings.data().theme), 131, y);
+                cv->drawString(Settings::themeName(settings.data().theme), 406, y);
                 break;
             case MenuItem::Style:
-                cv->drawString(eyeName(settings.data().eyeStyle), 131, y);
+                cv->drawString(eyeName(settings.data().eyeStyle), 406, y);
                 break;
             case MenuItem::Brightness:
-                drawBrightnessBar(cv, 88, y, settings.data().brightness);
+                drawBrightnessBar(cv, 300, y, settings.data().brightness);
                 break;
             default: break;
         }
@@ -280,12 +325,12 @@ static const char* editorTitle() {
 
 static const char* hintForView() {
     switch (_setView) {
-        case SetView::List:        return "[A] select  [B] next  [long A] back";
+        case SetView::List:        return "tap select · swipe down back · [B] next";
         case SetView::TimeHour:
-        case SetView::TimeMinute:  return "[A] +1  [B] next  [hold A] repeat";
-        case SetView::Style:       return "[A] eye  [B] body  [long A] save";
-        case SetView::Brightness:  return "[A] up  [B] down  [long A] save";
-        default:                   return "[A] change  [long A] save";
+        case SetView::TimeMinute:  return "tap +1 · [B] next · swipe down save";
+        case SetView::Style:       return "tap eye · [B] body · swipe down save";
+        case SetView::Brightness:  return "tap up · [B] down · swipe down save";
+        default:                   return "tap change · swipe down save";
     }
 }
 
@@ -295,9 +340,9 @@ static void drawEditor(uint32_t now) {
     int16_t cx = cv->width() / 2;
 
     cv->setTextDatum(top_left);
-    cv->setTextSize(1.0f);
+    cv->setTextSize(1.5f);
     cv->setTextColor(st.eyeColor);
-    cv->drawString(editorTitle(), 6, 20);
+    cv->drawString(editorTitle(), 60, 60);
 
     switch (_setView) {
         case SetView::TimeHour:
@@ -305,22 +350,23 @@ static void drawEditor(uint32_t now) {
             drawTimeEditor(cv, st, now);
             break;
         case SetView::Format:
-            drawPicker(cv, st, cx, 96, settings.data().hour24 ? "24 h" : "12 h");
+            drawPicker(cv, st, cx, 200, settings.data().hour24 ? "24 h" : "12 h");
             break;
         case SetView::Theme:
-            drawPicker(cv, st, cx, 96, Settings::themeName(settings.data().theme));
+            drawPicker(cv, st, cx, 200, Settings::themeName(settings.data().theme));
             break;
         case SetView::Style:
-            cv->setTextDatum(top_left);
+            cv->setTextDatum(middle_left);
+            cv->setTextSize(2.0f);
             cv->setTextColor(st.accentColor);
-            cv->drawString("Eye", 30, 70);
-            cv->drawString("Body", 30, 96);
+            cv->drawString("Eye", 90, 180);
+            cv->drawString("Body", 90, 230);
             cv->setTextColor(st.eyeColor);
-            cv->drawString(eyeName(settings.data().eyeStyle), 80, 70);
-            cv->drawString(bodyName(settings.data().bodyStyle), 80, 96);
+            cv->drawString(eyeName(settings.data().eyeStyle), 200, 180);
+            cv->drawString(bodyName(settings.data().bodyStyle), 200, 230);
             break;
         case SetView::Brightness:
-            drawBrightnessBar(cv, cx - 22, 96, settings.data().brightness);
+            drawBrightnessBar(cv, cx - 40, 200, settings.data().brightness);
             break;
         default: break;
     }
@@ -331,17 +377,18 @@ static void drawSettings(uint32_t now) {
     const botux::BotUx::Style& st = settings.style();
     cv->fillSprite(st.bgColor);
 
-    cv->setTextDatum(top_left);
-    cv->setTextSize(1.0f);
+    cv->setTextDatum(middle_center);
+    cv->setTextSize(2.0f);
     cv->setTextColor(st.accentColor);
-    cv->drawString("Settings", 6, 6);
+    cv->drawString("Settings", cv->width() / 2, 40);
 
     if (_setView == SetView::List) drawMenuList(cv, st);
     else drawEditor(now);
 
-    cv->setTextDatum(bottom_left);
+    cv->setTextDatum(bottom_center);
+    cv->setTextSize(1.0f);
     cv->setTextColor(st.eyeColor);
-    cv->drawString(hintForView(), 6, 234);
+    cv->drawString(hintForView(), cv->width() / 2, 450);
 }
 
 static void drawHints() {
@@ -349,9 +396,9 @@ static void drawHints() {
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.style().eyeColor);
     const char* hint = (_mode == Mode::Stopwatch)
-        ? "[A] start/lap/reset  [B] stop/resume"
-        : "[A] poke  [B] stopwatch";
-    canvas.drawString(hint, 67, 236);
+        ? "tap start/lap/reset · [B] stop/resume · swipe down back"
+        : "tap bot poke · swipe up settings · [B] stopwatch";
+    canvas.drawString(hint, canvas.width() / 2, 450);
 }
 
 // ---- mood ----------------------------------------------------------------
@@ -368,19 +415,16 @@ static botux::BotUx::Mood resolveMood(uint32_t now) {
     }
 }
 
-// ---- mode transitions ----------------------------------------------------
+// ---- mode transitions + actions ------------------------------------------
 
-static void enterSettings() {
-    _mode = Mode::Settings;
-    _setView = SetView::List;
-    _menuSel = MenuItem::TimeSet;
-    soundConfirm();
-}
+static void enterSettings() { _mode = Mode::Settings; _setView = SetView::List; _menuSel = MenuItem::TimeSet; soundConfirm(); }
+static void exitSettings()  { _mode = Mode::Face; _setView = SetView::List; _menuSel = MenuItem::TimeSet; soundCancel(); }
+static void pokeBot()       { face.bot().poke(); soundPoke(); }
+static void gotoStopwatch() { _mode = Mode::Stopwatch; soundHappy(); }
 
-static void exitSettings() {
-    _mode = Mode::Face;
-    _setView = SetView::List;
-    _menuSel = MenuItem::TimeSet;
+static void startDoze() {
+    _dozing = true;
+    power.setBrightness(76);   // ~30% — dim doze
     soundCancel();
 }
 
@@ -416,7 +460,6 @@ static void handleTimeEditor(uint32_t now) {
                 _setView = SetView::List;
             }
         } else if (held >= 300) {
-            // accelerate 8 Hz -> 20 Hz over the first second
             uint32_t t = (held < 1000) ? held : 1000;
             float hz = 8.0f + 12.0f * (float)t / 1000.0f;
             uint32_t interval = (uint32_t)(1000.0f / hz);
@@ -433,8 +476,6 @@ static void handleTimeEditor(uint32_t now) {
         else { commitTime(); flushButtons(); _setView = SetView::List; soundConfirm(); }
     }
 }
-
-// ---- settings editors (non-time) -----------------------------------------
 
 static void enterEditor(SetView v) {
     _setView = v;
@@ -469,13 +510,12 @@ static void enterMenu() {
     }
 }
 
-// ---- gesture routing ------------------------------------------------------
+// ---- button routing -------------------------------------------------------
 
-static void handleFaceGestures(Gesture ga, Gesture gb, uint32_t now) {
+static void handleFaceButtons(Gesture ga, Gesture gb, uint32_t now) {
     (void)now;
     if (ga == Gesture::Tap) {
-        face.bot().poke();
-        soundPoke();
+        pokeBot();
     } else if (ga == Gesture::Double) {
         settings.data().hour24 = !settings.data().hour24;
         settings.save();
@@ -485,22 +525,19 @@ static void handleFaceGestures(Gesture ga, Gesture gb, uint32_t now) {
         enterSettings();
     }
     if (gb == Gesture::Tap) {
-        _mode = Mode::Stopwatch;
-        soundHappy();
+        gotoStopwatch();
     } else if (gb == Gesture::Long) {
-        _dozing = true;
-        power.setBrightness(76);   // ~30% — dim doze
-        soundCancel();
+        startDoze();
     }
 }
 
-static void handleStopwatchGestures(Gesture ga, Gesture gb, uint32_t now) {
+static void handleStopwatchButtons(Gesture ga, Gesture gb, uint32_t now) {
     if (ga == Gesture::Tap) {
         Stopwatch::State before = sw.state();
         sw.pressPrimary();
-        if (before == Stopwatch::State::Idle)        { soundClick(); }                       // start
-        else if (before == Stopwatch::State::Running){ face.bot().poke(); soundClick(); }    // lap
-        else                                         { _sadUntil = now + 700; soundSad(); }  // reset
+        if (before == Stopwatch::State::Idle)        { soundClick(); }
+        else if (before == Stopwatch::State::Running){ pokeBot(); soundClick(); }
+        else                                         { _sadUntil = now + 700; soundSad(); }
     } else if (ga == Gesture::Long) {
         soundCancel();
         _mode = Mode::Face;
@@ -508,12 +545,12 @@ static void handleStopwatchGestures(Gesture ga, Gesture gb, uint32_t now) {
     if (gb == Gesture::Tap) {
         Stopwatch::State before = sw.state();
         sw.pressSecondary();
-        if (before == Stopwatch::State::Running) soundClick();    // stop
-        else if (before == Stopwatch::State::Stopped) soundHappy(); // resume
+        if (before == Stopwatch::State::Running) soundClick();
+        else if (before == Stopwatch::State::Stopped) soundHappy();
     }
 }
 
-static void handleSettingsGestures(Gesture ga, Gesture gb, uint32_t now) {
+static void handleSettingsButtons(Gesture ga, Gesture gb, uint32_t now) {
     (void)now;
     if (_setView == SetView::List) {
         if (ga == Gesture::Tap)        { soundClick(); enterMenu(); }
@@ -545,11 +582,59 @@ static void handleSettingsGestures(Gesture ga, Gesture gb, uint32_t now) {
     }
 }
 
-static void handleGestures(Gesture ga, Gesture gb, uint32_t now) {
+static void handleButtons(Gesture ga, Gesture gb, uint32_t now) {
     switch (_mode) {
-        case Mode::Face:      handleFaceGestures(ga, gb, now); break;
-        case Mode::Stopwatch: handleStopwatchGestures(ga, gb, now); break;
-        case Mode::Settings:  handleSettingsGestures(ga, gb, now); break;
+        case Mode::Face:      handleFaceButtons(ga, gb, now); break;
+        case Mode::Stopwatch: handleStopwatchButtons(ga, gb, now); break;
+        case Mode::Settings:  handleSettingsButtons(ga, gb, now); break;
+    }
+}
+
+// ---- touch routing --------------------------------------------------------
+
+static void handleTouch(Gesture g, uint32_t now) {
+    switch (_mode) {
+        case Mode::Face:
+            if (g == Gesture::Tap) {
+                if (_tapY < 250) pokeBot(); else gotoStopwatch();
+            } else if (g == Gesture::SwipeUp) {
+                enterSettings();
+            } else if (g == Gesture::SwipeDown || g == Gesture::Long) {
+                startDoze();
+            }
+            break;
+
+        case Mode::Stopwatch:
+            if (g == Gesture::Tap) {
+                handleStopwatchButtons(Gesture::Tap, Gesture::None, now);
+            } else if (g == Gesture::SwipeDown || g == Gesture::Long) {
+                soundCancel();
+                _mode = Mode::Face;
+            }
+            break;
+
+        case Mode::Settings:
+            if (g == Gesture::Tap) {
+                if (_setView == SetView::List) {
+                    for (int i = 0; i < (int)MenuItem::Count; i++) {
+                        int16_t ry = kMenuTop + i * kMenuStep;
+                        if (_tapY >= ry - 20 && _tapY < ry + 20) {
+                            _menuSel = (MenuItem)i;
+                            soundClick();
+                            enterMenu();
+                            break;
+                        }
+                    }
+                } else {
+                    // editor: tap advances the value (same as button A)
+                    handleSettingsButtons(Gesture::Tap, Gesture::None, now);
+                }
+            } else if (g == Gesture::SwipeDown) {
+                if (_setView == SetView::List) exitSettings(); else saveEdit();
+            } else if (g == Gesture::Long) {
+                if (_setView == SetView::List) exitSettings(); else saveEdit();
+            }
+            break;
     }
 }
 
@@ -567,7 +652,6 @@ static void seedRtcIfNeeded() {
     auto dt = M5.Rtc.getDateTime();
     if (dt.date.year >= 2020) return;   // already plausible
 
-    // BM8563 has no coin cell on the StickC — seed from compile time.
     int y = 2026, mo = 1, d = 1, h = 0, mi = 0, s = 0;
     char mon[4];
     sscanf(__DATE__, "%3s %d %d", mon, &d, &y);
@@ -596,9 +680,11 @@ void setup() {
     settings.begin();
 
     canvas.setColorDepth(16);
-    canvas.createSprite(M5.Display.width(), M5.Display.height());
+    canvas.createSprite(kW, kH);
+    botSprite.setColorDepth(16);
+    botSprite.createSprite(kBotW, kBotH);
 
-    face.begin(&canvas);
+    face.begin(&canvas, &botSprite);
     sw.begin();
 
     settings.rebuildStyle();
@@ -620,7 +706,8 @@ void loop() {
     refreshPower(now);
 
     if (_dozing) {
-        if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+        // wake on any button or touch
+        if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.Touch.getDetail(0).wasPressed()) {
             _dozing = false;
             flushButtons();
             power.applyLevel(settings.data().brightness);
@@ -633,8 +720,10 @@ void loop() {
         } else {
             Gesture ga = pollButton(M5.BtnA, _btnA, now);
             Gesture gb = pollButton(M5.BtnB, _btnB, now);
-            handleGestures(ga, gb, now);
+            handleButtons(ga, gb, now);
         }
+        Gesture gt = pollTouch(now);
+        if (gt != Gesture::None) handleTouch(gt, now);
     }
 
     face.setBattery(_batt);
@@ -645,14 +734,21 @@ void loop() {
     sw.update(now);
 
     face.bot().update(now);
+
     if (_mode == Mode::Settings) {
         drawSettings(now);
     } else {
-        face.bot().draw();
+        canvas.fillSprite(settings.style().bgColor);
+        face.bot().draw();                       // into botSprite
+        botSprite.pushSprite(&canvas, kBotX, kBotY);
         if (_mode == Mode::Stopwatch) {
+            canvas.setTextDatum(middle_center);
+            canvas.setTextSize(1.5f);
+            canvas.setTextColor(settings.style().eyeColor);
+            canvas.drawString("STOPWATCH", kW / 2, 40);
             sw.draw(&canvas, settings.style().accentColor, settings.style().eyeColor);
         } else {
-            face.draw();
+            face.draw();                          // clock + status (over bot sprite corners)
         }
         drawHints();
     }

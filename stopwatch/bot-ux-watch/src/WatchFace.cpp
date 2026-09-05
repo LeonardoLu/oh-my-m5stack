@@ -2,9 +2,13 @@
 #include <stdio.h>
 #include <string.h>
 
-void WatchFace::begin(M5Canvas* cv) {
+// Layout is tuned for the StopWatch's 466x466 round AMOLED. The bot renders into
+// a dedicated 200x200 sprite (pushed by main at kBotX,kBotY); this file draws the
+// status row (signal + battery) and the large hero clock onto the full canvas.
+
+void WatchFace::begin(M5Canvas* cv, M5Canvas* botSprite) {
     _cv = cv;
-    _bot.begin(cv);
+    _bot.begin(botSprite);
 }
 
 void WatchFace::setBattery(uint8_t pct) {
@@ -20,7 +24,7 @@ void WatchFace::update(uint32_t nowMs) {
     _ss = (uint8_t)dt.time.seconds;
 
     // Feed the bot the battery for its low-battery droop, but hide its own
-    // battery bar — the watch draws its own (with % and a charging bolt).
+    // battery icon — the watch draws its own (with % and a charging bolt).
     _bot.setBattery(_battery);
     _bot.setBatteryVisible(false);
 }
@@ -35,10 +39,10 @@ void WatchFace::draw() {
 void WatchFace::_drawSignal(uint16_t accent, uint16_t dim) {
     if (_signal < 0) return;
     for (int i = 0; i < 4; i++) {
-        int16_t bh = 3 + i * 2;
-        int16_t bx = 4 + i * 5;
-        int16_t by = 14 - bh;
-        _cv->fillRect(bx, by, 4, bh, (i < _signal) ? accent : dim);
+        int16_t bh = 4 + i * 3;
+        int16_t bx = 40 + i * 9;
+        int16_t by = 30 - bh;
+        _cv->fillRect(bx, by, 7, bh, (i < _signal) ? accent : dim);
     }
 }
 
@@ -46,16 +50,16 @@ void WatchFace::_drawBattery(uint16_t accent, uint16_t warn) {
     bool low = (_battery <= 15);
     char buf[8];
     snprintf(buf, sizeof(buf), "%u%%", (unsigned)_battery);
-    int16_t textW = (int16_t)(strlen(buf) * 6);
+    int16_t textW = (int16_t)(strlen(buf) * 9);
 
     _cv->setTextDatum(top_right);
-    _cv->setTextSize(1.0f);
-    if (_charging) _drawBolt(_cv, 131 - textW - 10, 3, accent);
+    _cv->setTextSize(1.5f);
+    if (_charging) _drawBolt(_cv, 426 - textW - 16, 20, accent);
 
     if (low && ((_now / 500) % 2) != 0) return;   // blink off half-cycle
 
     _cv->setTextColor(low ? warn : accent);
-    _cv->drawString(buf, 131, 3);
+    _cv->drawString(buf, 426, 18);
 }
 
 void WatchFace::_drawClock(uint16_t accent, uint16_t text) {
@@ -70,14 +74,14 @@ void WatchFace::_drawClock(uint16_t accent, uint16_t text) {
     }
 
     _cv->setTextDatum(middle_center);
-    _cv->setTextSize(3.0f);
+    _cv->setTextSize(4.0f);
     _cv->setTextColor(accent);
-    _cv->drawString(buf, _cv->width() / 2, 172);
+    _cv->drawString(buf, _cv->width() / 2, 330);
 
     if (!_hour24) {
-        _cv->setTextSize(1.0f);
+        _cv->setTextSize(1.5f);
         _cv->setTextColor(text);
-        _cv->drawString((h >= 12) ? "PM" : "AM", _cv->width() / 2, 196);
+        _cv->drawString((h >= 12) ? "PM" : "AM", _cv->width() / 2, 385);
     }
 }
 

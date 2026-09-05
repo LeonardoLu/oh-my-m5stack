@@ -23,6 +23,9 @@ void setup() {
     canvas.createSprite(M5.Display.width(), M5.Display.height());
 
     bot.begin(&canvas);
+    bot.setAnimation(botux::BotUx::Animation::Auto);
+    bot.setAnimationSpeed(1.0f);
+    bot.setMotionAmount(1.0f);
     bot.setBattery(87);
     bot.setBatteryVisible(false);
 }

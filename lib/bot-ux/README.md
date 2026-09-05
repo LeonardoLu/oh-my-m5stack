@@ -43,9 +43,18 @@ void loop() {
 - **Personalization** — `Style` holds the background, orb, eye, and status colors;
   eye mark style; silhouette style; eye scale; and blink rate. `Round` + `Oval`
   is the closest match to the default Grok visual language.
+- **Expressions** — `setExpression()` selects `Neutral`, `Curious`, `Focused`,
+  `Joy`, `Skeptical`, `Bashful`, `Wink`, `Dizzy`, or `Alarmed`, independently
+  of lifecycle mood. `Auto` follows the mood. Pass a transition duration, or
+  zero to switch directly on the next update.
+- **Choreography** — `setAnimation()` selects `Calm`, `Curious`, `Orbit`,
+  `Bounce`, `Glitch`, `Wave`, or `Sparkle`. `Auto` assigns distinct motion to
+  each lifecycle state. `setAnimationSpeed()`, `setMotionAmount()`, and
+  `setReducedMotion()` are suitable for device settings.
 - **Status** — `setBattery`, `setSignal`, `setTime`, `setLabel`.
 - **Interaction** — `poke()` (quick surprise→happy), `setTalking(bool)` to
-  drive the speaking pulse.
+  drive the speaking pulse, and `setMotion(tiltX, tiltY, shake)` for normalized
+  IMU input.
 - **Frame loop** — `update(nowMs)` then `draw()`.
 
 The component renders into whatever canvas you give it and scales itself to
@@ -61,6 +70,13 @@ The shared default uses a warm-white orb, dark graphite eye marks, and blue only
 for status accents. `Waiting` uses centred horizontal marks, while `Sleepy`
 settles into a lower asymmetric pose and a longer blink.
 
+The expanded control model was also informed by two public implementations:
+[ngocdevv/grok-bot-emoji](https://github.com/ngocdevv/grok-bot-emoji) separates
+controlled expression selection from motion and supports reduced motion, while
+[nasawz/GrokBot](https://github.com/nasawz/GrokBot) separates persistent state,
+shape, gaze, and transient commands. BotUx uses its own compact geometry and
+timings for M5GFX; it does not embed their vector paths or extracted assets.
+
 ## Integration in a PlatformIO project
 
 ```ini
@@ -74,4 +90,8 @@ lib_deps =
 
 `tools/host-preview/render.sh` compiles the real `BotUx.cpp` against a small
 SVG-emitting `M5Canvas` stand-in. It generates source-derived 40, 72, and 200 px
-mood contact sheets for layout review without claiming device raster fidelity.
+mood sheets plus expression and animation pickers. `animation-player.html`
+plays 60 real C++-rendered frames for every choreography, the automatic
+lifecycle, expression transitions, and IMU motion. Assertions cover visibly
+distinct choices, direct and eased transitions, IMU response, reduced motion,
+and sparse-frame blink catch-up without claiming device raster fidelity.

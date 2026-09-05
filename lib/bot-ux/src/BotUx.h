@@ -54,6 +54,34 @@ public:
         Hexagon,         // lightly faceted orb
     };
 
+    // Face pose can follow Mood (Auto) or be selected independently. This is
+    // useful for an appearance preview and for brief host-driven reactions.
+    enum class Expression : uint8_t {
+        Auto = 0,
+        Neutral,
+        Curious,
+        Focused,
+        Joy,
+        Skeptical,
+        Bashful,
+        Wink,
+        Dizzy,
+        Alarmed,
+    };
+
+    // Persistent choreography layered over the current mood/expression.
+    // Auto chooses the lifecycle motion associated with the effective mood.
+    enum class Animation : uint8_t {
+        Auto = 0,
+        Calm,
+        Curious,
+        Orbit,
+        Bounce,
+        Glitch,
+        Wave,
+        Sparkle,
+    };
+
     // Everything that makes one bot "this bot".
     struct Style {
         uint16_t bgColor      = rgb565(0x0A, 0x0E, 0x14); // deep space blue
@@ -97,6 +125,23 @@ public:
     // Persistent mood. Transient reactions (poke) override for their duration
     // then return to this mood.
     void setMood(Mood m);
+    void setMood(Mood m, uint16_t transitionMs);
+
+    // Select a face pose. transitionMs=0 snaps on the next update; other
+    // values ease to the new geometry without depending on frame rate.
+    void setExpression(Expression expression, uint16_t transitionMs = 180);
+    Expression expression() const { return _expression; }
+
+    // Animation settings are deliberately scalar so device settings screens
+    // can expose them without owning animation details.
+    void setAnimation(Animation animation);
+    Animation animation() const { return _animation; }
+    void setAnimationSpeed(float speed);       // 0.25..3.0, default 1.0
+    float animationSpeed() const { return _animationSpeed; }
+    void setMotionAmount(float amount);        // 0..2, default 1.0
+    float motionAmount() const { return _motionAmount; }
+    void setReducedMotion(bool reduced);
+    bool reducedMotion() const { return _reducedMotion; }
 
     // Drive the body pulse while Speaking.
     void setTalking(bool on);
@@ -121,6 +166,10 @@ public:
     // Surprise for ~240ms, settle through Happy, then return to the prior mood.
     void poke();
 
+    // Feed normalized IMU input. tiltX/tiltY are -1..1 and shake is 0..1.
+    // Inputs are smoothed in update(); hosts may call this at any sensor rate.
+    void setMotion(float tiltX, float tiltY, float shake = 0.0f);
+
     // ---- frame loop -------------------------------------------------------
     // Advance animation. Pass 0 (or nothing) to use millis() internally.
     void update(uint32_t nowMs = 0);
@@ -143,6 +192,7 @@ private:
 
     void _drawBody();
     void _drawEyes();
+    void _drawAnimationFx();
     void _drawOverlays(); // battery/signal/label/time
     void _fillCapsule(int16_t cx, int16_t cy, int16_t halfDx, int16_t halfDy,
                       int16_t radius, uint16_t color);
@@ -153,6 +203,14 @@ private:
     Metrics _m;
 
     Mood _mood = Mood::Idle;
+    Expression _expression = Expression::Auto;
+    Animation _animation = Animation::Auto;
+    Animation _activeAnimation = Animation::Calm;
+    float _animationSpeed = 1.0f;
+    float _motionAmount = 1.0f;
+    bool _reducedMotion = false;
+    uint16_t _transitionMs = 180;
+    bool _snapPose = false;
 
     bool   _talking = false;
     uint8_t _battery = 100;  // 0..100
@@ -167,6 +225,7 @@ private:
     uint32_t _now = 0;
     uint32_t _lastNow = 0;   // previous update() timestamp, for framerate-independent easing
     Mood   _effMood = Mood::Idle;
+    Expression _effExpression = Expression::Neutral;
     float  _openBase = 1.0f; // eased base openness (mood/sleep), before blink
     float  _open = 1.0f;     // eye openness 0..1 (blink + sleep + mood)
     float  _pupilDX = 0.0f;  // eased gaze, -1..1
@@ -182,6 +241,16 @@ private:
     float  _eyePairX = 0.26f; // pair centre, fractions of body radius
     float  _eyePairY = -0.38f;
     float  _eyeAngle = 0.34f; // horizontal / vertical major-axis ratio
+    float  _eyeTwist = 0.0f;  // expression rotation of the eye pair
+    float  _animEyeTwist = 0.0f;
+
+    // Smoothed normalized IMU state.
+    float _motionTargetX = 0.0f;
+    float _motionTargetY = 0.0f;
+    float _shakeTarget = 0.0f;
+    float _motionX = 0.0f;
+    float _motionY = 0.0f;
+    float _shake = 0.0f;
 
     // Idle gaze changes target at irregular intervals, then eases into place.
     float    _wanderX = 0.0f;

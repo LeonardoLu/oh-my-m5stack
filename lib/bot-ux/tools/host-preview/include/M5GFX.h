@@ -13,15 +13,18 @@ public:
 
     int32_t width() const { return _w; }
     int32_t height() const { return _h; }
-    void clear() { _out.str(""); _out.clear(); }
+    void clear() { _out.str(""); _out.clear(); _outOfBounds = false; }
     std::string svgBody() const { return _out.str(); }
+    bool outOfBounds() const { return _outOfBounds; }
 
     void fillSprite(uint32_t c) { rect(0, 0, _w, _h, 0, c, true); }
     void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t c) {
+        if (x - r < 0 || y - r < 0 || x + r >= _w || y + r >= _h) _outOfBounds = true;
         _out << "<circle cx='" << x << "' cy='" << y << "' r='" << r
              << "' fill='" << color(c) << "'/>\n";
     }
     void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t c) {
+        if (x - rx < 0 || y - ry < 0 || x + rx >= _w || y + ry >= _h) _outOfBounds = true;
         _out << "<ellipse cx='" << x << "' cy='" << y << "' rx='" << rx
              << "' ry='" << ry << "' fill='" << color(c) << "'/>\n";
     }
@@ -36,11 +39,15 @@ public:
     }
     void fillTriangle(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
                       int32_t x3, int32_t y3, uint32_t c) {
+        if (pointOutside(x1, y1) || pointOutside(x2, y2) || pointOutside(x3, y3))
+            _outOfBounds = true;
         _out << "<polygon points='" << x1 << "," << y1 << " " << x2 << "," << y2
              << " " << x3 << "," << y3 << "' fill='" << color(c) << "'/>\n";
     }
     void fillArc(int32_t x, int32_t y, int32_t inner, int32_t outer,
                  float start, float end, uint32_t c) {
+        if (x - outer < 0 || y - outer < 0 || x + outer >= _w || y + outer >= _h)
+            _outOfBounds = true;
         float a0 = start * 3.14159265358979f / 180.0f;
         float a1 = end * 3.14159265358979f / 180.0f;
         float ox0 = x + cosf(a0) * outer, oy0 = y + sinf(a0) * outer;
@@ -72,6 +79,9 @@ public:
     }
 
 private:
+    bool pointOutside(int32_t x, int32_t y) const {
+        return x < 0 || y < 0 || x >= _w || y >= _h;
+    }
     static std::string color(uint32_t c) {
         uint8_t r = (uint8_t)(((c >> 11) & 31u) * 255u / 31u);
         uint8_t g = (uint8_t)(((c >> 5) & 63u) * 255u / 63u);
@@ -85,6 +95,7 @@ private:
     }
     void rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r,
               uint32_t c, bool fill) {
+        if (x < 0 || y < 0 || x + w > _w || y + h > _h) _outOfBounds = true;
         _out << "<rect x='" << x << "' y='" << y << "' width='" << w << "' height='" << h
              << "' rx='" << r << "' " << (fill ? "fill='" : "fill='none' stroke='")
              << color(c) << "'/>\n";
@@ -94,5 +105,6 @@ private:
     textdatum_t _datum = top_left;
     uint32_t _textColor = 0;
     float _textSize = 1.0f;
+    bool _outOfBounds = false;
     std::ostringstream _out;
 };

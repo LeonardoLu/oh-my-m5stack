@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 
 static uint32_t gNow = 1000;
@@ -28,6 +29,47 @@ static const MoodCase kMoods[] = {
     {botux::BotUx::Mood::Blocked, "Blocked", false},
     {botux::BotUx::Mood::Done, "Done", false},
 };
+
+struct ExpressionCase {
+    botux::BotUx::Expression expression;
+    const char* label;
+};
+
+static const ExpressionCase kExpressions[] = {
+    {botux::BotUx::Expression::Neutral, "Neutral"},
+    {botux::BotUx::Expression::Curious, "Curious"},
+    {botux::BotUx::Expression::Focused, "Focused"},
+    {botux::BotUx::Expression::Joy, "Joy"},
+    {botux::BotUx::Expression::Skeptical, "Skeptical"},
+    {botux::BotUx::Expression::Bashful, "Bashful"},
+    {botux::BotUx::Expression::Wink, "Wink"},
+    {botux::BotUx::Expression::Dizzy, "Dizzy"},
+    {botux::BotUx::Expression::Alarmed, "Alarmed"},
+};
+
+struct AnimationCase {
+    botux::BotUx::Animation animation;
+    const char* label;
+};
+
+static const AnimationCase kAnimations[] = {
+    {botux::BotUx::Animation::Calm, "Calm"},
+    {botux::BotUx::Animation::Curious, "Curious"},
+    {botux::BotUx::Animation::Orbit, "Orbit"},
+    {botux::BotUx::Animation::Bounce, "Bounce"},
+    {botux::BotUx::Animation::Glitch, "Glitch"},
+    {botux::BotUx::Animation::Wave, "Wave"},
+    {botux::BotUx::Animation::Sparkle, "Sparkle"},
+};
+
+static size_t countToken(const std::string& value, const char* token) {
+    size_t count = 0, pos = 0;
+    while ((pos = value.find(token, pos)) != std::string::npos) {
+        ++count;
+        pos += 1;
+    }
+    return count;
+}
 
 static std::string render(const MoodCase& item, int size, int index) {
     gNow = 1000;
@@ -72,6 +114,243 @@ static bool writeSheet(const char* path, int size) {
     }
     out << "</svg>\n";
     return true;
+}
+
+static std::string renderExpression(const ExpressionCase& item, int size) {
+    gNow = 1000;
+    M5Canvas canvas((int16_t)size, (int16_t)size);
+    botux::BotUx bot;
+    bot.begin(&canvas);
+    bot.setAnimation(botux::BotUx::Animation::Calm);
+    bot.setMotionAmount(0.0f);
+    bot.setExpression(item.expression, 0);
+    bot.update(gNow);
+    bot.draw();
+    return canvas.svgBody();
+}
+
+static std::string renderAnimation(const AnimationCase& item, int size,
+                                   bool reduced = false) {
+    gNow = 1000;
+    M5Canvas canvas((int16_t)size, (int16_t)size);
+    botux::BotUx bot;
+    bot.begin(&canvas);
+    bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+    bot.setAnimation(item.animation);
+    bot.setAnimationSpeed(1.25f);
+    bot.setReducedMotion(reduced);
+    bot.update(2473);
+    bot.draw();
+    return canvas.svgBody();
+}
+
+template <typename Case, size_t N, typename RenderFn>
+static bool writePickerSheet(const char* path, const Case (&items)[N], RenderFn renderItem) {
+    const int size = 120, columns = 3, labelH = 20;
+    const int rows = ((int)N + columns - 1) / columns;
+    std::ofstream out(path);
+    if (!out) return false;
+    out << "<svg xmlns='http://www.w3.org/2000/svg' width='" << columns * size
+        << "' height='" << rows * (size + labelH) << "'>\n"
+        << "<rect width='100%' height='100%' fill='#11151D'/>\n";
+    for (int i = 0; i < (int)N; ++i) {
+        int x = (i % columns) * size;
+        int y = (i / columns) * (size + labelH);
+        out << "<g transform='translate(" << x << " " << y << ")'>\n"
+            << renderItem(items[i], size) << "</g>\n"
+            << "<text x='" << x + size / 2 << "' y='" << y + size + 14
+            << "' text-anchor='middle' font-family='sans-serif' font-size='12' fill='#D7DFEA'>"
+            << items[i].label << "</text>\n";
+    }
+    out << "</svg>\n";
+    return true;
+}
+
+static void writeJsString(std::ofstream& out, const std::string& value) {
+    out << '"';
+    for (char c : value) {
+        switch (c) {
+            case '\\': out << "\\\\"; break;
+            case '"': out << "\\\""; break;
+            case '\n': out << "\\n"; break;
+            case '\r': break;
+            default: out << c; break;
+        }
+    }
+    out << '"';
+}
+
+static bool writeAnimationPlayer(const char* path) {
+    std::ofstream out(path);
+    if (!out) return false;
+    out << "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
+        << "<title>BotUx source-rendered animation preview</title>"
+        << "<style>body{margin:0;background:#11151d;color:#d7dfea;font:16px system-ui;display:grid;"
+        << "place-items:center;min-height:100vh}.card{width:min(88vw,520px);display:grid;gap:14px}"
+        << "#stage{aspect-ratio:1;border:1px solid #29313d;border-radius:20px;overflow:hidden}"
+        << "#stage svg{width:100%;height:100%;display:block}.row{display:flex;gap:10px;align-items:center}"
+        << "select,button,input{font:inherit}select{flex:1;padding:8px}input{width:100%}</style>"
+        << "<main class='card'><h1>BotUx actual-source preview</h1><div id='stage'></div>"
+        << "<div class='row'><select id='mode'></select><button id='play'>Pause</button></div>"
+        << "<input id='scrub' type='range' min='0' max='59' value='0'>"
+        << "<small>60 frames per mode at 15 fps, generated by BotUx.cpp. "
+        << "The browser only plays the captured M5GFX primitive calls.</small></main><script>\n"
+        << "const modes=[\n";
+
+    const int modeCount = 10;
+    for (int mode = 0; mode < modeCount; ++mode) {
+        const char* name = (mode == 0) ? "Auto lifecycle"
+                         : (mode <= 7) ? kAnimations[mode - 1].label
+                         : (mode == 8) ? "Expression transitions" : "IMU tilt + shake";
+        out << "{name:";
+        writeJsString(out, name);
+        out << ",frames:[\n";
+
+        gNow = 1000;
+        M5Canvas canvas(200, 200);
+        botux::BotUx bot;
+        bot.begin(&canvas);
+        bot.setAnimationSpeed(1.25f);
+        if (mode == 0) {
+            bot.setAnimation(botux::BotUx::Animation::Auto);
+        } else if (mode <= 7) {
+            bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+            bot.setAnimation(kAnimations[mode - 1].animation);
+        } else {
+            bot.setAnimation(botux::BotUx::Animation::Calm);
+        }
+
+        std::set<std::string> uniqueFrames;
+        for (int frame = 0; frame < 60; ++frame) {
+            gNow = 1000u + (uint32_t)frame * 67u;
+            if (mode == 0 && frame % 10 == 0) {
+                static const botux::BotUx::Mood lifecycle[] = {
+                    botux::BotUx::Mood::Idle, botux::BotUx::Mood::Listening,
+                    botux::BotUx::Mood::Working, botux::BotUx::Mood::Waiting,
+                    botux::BotUx::Mood::Blocked, botux::BotUx::Mood::Done,
+                };
+                bot.setMood(lifecycle[frame / 10], 180);
+            } else if (mode == 8) {
+                if (frame == 0) bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+                else if (frame == 15) bot.setExpression(botux::BotUx::Expression::Skeptical, 500);
+                else if (frame == 30) bot.setExpression(botux::BotUx::Expression::Wink, 500);
+                else if (frame == 45) bot.setExpression(botux::BotUx::Expression::Joy, 500);
+            } else if (mode == 9) {
+                float tiltX = sinf(frame * 0.14f);
+                float tiltY = cosf(frame * 0.11f) * 0.75f;
+                float shake = (frame >= 26 && frame <= 33) ? 0.85f : 0.0f;
+                bot.setMotion(tiltX, tiltY, shake);
+            }
+            canvas.clear();
+            bot.update(gNow);
+            bot.draw();
+            std::string frameSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'>\n";
+            frameSvg += canvas.svgBody();
+            frameSvg += "</svg>";
+            uniqueFrames.insert(frameSvg);
+            writeJsString(out, frameSvg);
+            out << ((frame == 59) ? "\n" : ",\n");
+        }
+        assert(uniqueFrames.size() >= 8);
+        out << "]}" << ((mode == modeCount - 1) ? "\n" : ",\n");
+    }
+
+    out << "];const mode=document.querySelector('#mode'),stage=document.querySelector('#stage'),"
+        << "scrub=document.querySelector('#scrub'),play=document.querySelector('#play');"
+        << "modes.forEach((m,i)=>mode.add(new Option(m.name,i)));let frame=0,running=true;"
+        << "function draw(){stage.innerHTML=modes[+mode.value].frames[frame];scrub.value=frame}"
+        << "mode.onchange=()=>{frame=0;draw()};scrub.oninput=()=>{frame=+scrub.value;draw()};"
+        << "play.onclick=()=>{running=!running;play.textContent=running?'Pause':'Play'};"
+        << "setInterval(()=>{if(running){frame=(frame+1)%60;draw()}},67);draw();</script>\n";
+    return true;
+}
+
+static void checkExpressionAndAnimationRange() {
+    std::set<std::string> expressions;
+    for (const auto& item : kExpressions) expressions.insert(renderExpression(item, 200));
+    assert(expressions.size() == sizeof(kExpressions) / sizeof(kExpressions[0]));
+
+    std::set<std::string> animations;
+    for (const auto& item : kAnimations) {
+        const std::string svg = renderAnimation(item, 200);
+        animations.insert(svg);
+        assert(countToken(svg, "<") <= 24); // bounded primitive count per frame
+    }
+    assert(animations.size() == sizeof(kAnimations) / sizeof(kAnimations[0]));
+}
+
+static void checkTransitionsMotionAndSparseFrames() {
+    M5Canvas canvas(200, 200);
+    botux::BotUx bot;
+    gNow = 1000;
+    bot.begin(&canvas);
+    bot.setAnimation(botux::BotUx::Animation::Calm);
+    bot.setAnimationSpeed(99.0f);
+    assert(bot.animationSpeed() == 3.0f);
+    bot.setAnimationSpeed(-1.0f);
+    assert(bot.animationSpeed() == 0.25f);
+    bot.setAnimationSpeed(1.0f);
+    bot.setMotionAmount(99.0f);
+    assert(bot.motionAmount() == 2.0f);
+    bot.setMotionAmount(1.0f);
+    bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+    bot.update(gNow);
+    bot.draw();
+    const std::string neutral = canvas.svgBody();
+
+    canvas.clear();
+    bot.setExpression(botux::BotUx::Expression::Skeptical, 600);
+    bot.update(1016);
+    bot.draw();
+    const std::string transition = canvas.svgBody();
+    canvas.clear();
+    bot.update(3016);
+    bot.draw();
+    const std::string settled = canvas.svgBody();
+    assert(neutral != transition && transition != settled && neutral != settled);
+
+    canvas.clear();
+    bot.setMotion(1.0f, -0.8f, 0.7f);
+    bot.update(3316); // 3 fps sensor/render loop still converges in real time.
+    bot.draw();
+    const std::string moved = canvas.svgBody();
+    assert(moved != settled);
+    assert(moved.find("nan") == std::string::npos);
+
+    const AnimationCase bounce = {botux::BotUx::Animation::Bounce, "Bounce"};
+    assert(renderAnimation(bounce, 200, false) != renderAnimation(bounce, 200, true));
+
+    // A very late frame must finish an overdue blink rather than holding a
+    // stale intermediate phase until several future frames arrive.
+    canvas.clear();
+    bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+    bot.setMotion(0.0f, 0.0f, 0.0f);
+    bot.update(10000);
+    bot.update(11000);
+    bot.draw();
+    assert(canvas.svgBody().find("<polygon") != std::string::npos);
+}
+
+static void checkMotionStaysInCanvas() {
+    for (int size : {40, 72, 200, 310}) {
+        for (const auto& item : kAnimations) {
+            gNow = 1000;
+            M5Canvas canvas((int16_t)size, (int16_t)size);
+            botux::BotUx bot;
+            bot.begin(&canvas);
+            bot.setExpression(botux::BotUx::Expression::Curious, 0);
+            bot.setAnimation(item.animation);
+            for (int frame = 0; frame < 60; ++frame) {
+                float direction = (frame < 30) ? 1.0f : -1.0f;
+                bot.setMotion(direction, -direction, 1.0f);
+                gNow = 1000u + (uint32_t)frame * 67u;
+                canvas.clear();
+                bot.update(gNow);
+                bot.draw();
+                assert(!canvas.outOfBounds());
+            }
+        }
+    }
 }
 
 static void checkBodylessStateGlyphs() {
@@ -128,15 +407,26 @@ int main(int argc, char** argv) {
     checkBodylessStateGlyphs();
     checkLateUptimeHasNoPhantomReaction();
     checkWaitingAndSleepyStayDistinct();
+    checkExpressionAndAnimationRange();
+    checkTransitionsMotionAndSparseFrames();
+    checkMotionStaysInCanvas();
     const char* outDir = (argc > 1) ? argv[1] : ".";
     std::string tiny = std::string(outDir) + "/moods-40.svg";
     std::string small = std::string(outDir) + "/moods-72.svg";
     std::string large = std::string(outDir) + "/moods-200.svg";
+    std::string expressions = std::string(outDir) + "/expressions.svg";
+    std::string animations = std::string(outDir) + "/animations.svg";
+    std::string player = std::string(outDir) + "/animation-player.html";
     if (!writeSheet(tiny.c_str(), 40) || !writeSheet(small.c_str(), 72) ||
-        !writeSheet(large.c_str(), 200)) {
+        !writeSheet(large.c_str(), 200) ||
+        !writePickerSheet(expressions.c_str(), kExpressions, renderExpression) ||
+        !writePickerSheet(animations.c_str(), kAnimations,
+            [](const AnimationCase& item, int size) { return renderAnimation(item, size); }) ||
+        !writeAnimationPlayer(player.c_str())) {
         std::cerr << "could not write preview sheets\n";
         return 1;
     }
-    std::cout << tiny << "\n" << small << "\n" << large << "\n";
+    std::cout << tiny << "\n" << small << "\n" << large << "\n"
+              << expressions << "\n" << animations << "\n" << player << "\n";
     return 0;
 }

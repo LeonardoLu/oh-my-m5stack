@@ -8,12 +8,13 @@
 class Settings {
 public:
     struct Data {
-        uint8_t speed;
         uint8_t theme;
         uint8_t audio;
         uint8_t brightness;
         uint8_t reducedMotion;
         uint8_t ledBrightness;
+        uint8_t animation;
+        uint8_t motion;
     };
 
     static constexpr uint8_t kThemeCount = 3;
@@ -24,7 +25,7 @@ public:
     const Data& data() const { return _data; }
 
     bool isOpen() const { return _open; }
-    void open();
+    void open(uint8_t page = 0);
     void close();
     void touchBegin(int16_t x, int16_t y);
     void touchMove(int16_t x, int16_t y);
@@ -39,7 +40,7 @@ private:
     void _activate(int8_t target);
     void _save() const;
 
-    Data _data{1, 0, 1, 3, 0, 2};
+    Data _data{0, 1, 3, 0, 2, 0, 2};
     bool _open = false;
     uint8_t _page = 0;
     int8_t _pressed = -1;

@@ -2,13 +2,14 @@
 
 #include <stdint.h>
 
-#include "AgentModel.h"
+#include "LightingState.h"
 
 class BottomLeds {
 public:
     bool begin();
     void setBrightness(uint8_t level);
-    void update(const AgentModel& model, uint32_t nowMs, bool reducedMotion);
+    void update(const LightingState& lighting, uint32_t nowMs, bool reducedMotion,
+                bool connected);
     bool available() const { return _available; }
 
 private:

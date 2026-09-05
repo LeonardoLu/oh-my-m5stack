@@ -8,34 +8,51 @@ namespace {
 constexpr uint8_t kCount = 10;
 constexpr int8_t kDataPin = 25;
 constexpr uint8_t kBrightness[4] = {0, 16, 38, 72};
-constexpr uint8_t kAgentLed[AgentModel::kAgentCount] = {0, 1, 2, 7, 8, 9};
+constexpr uint8_t kAgentLed[LightingState::kSlotCount] = {0, 1, 2, 7, 8, 9};
 
-RGBColor colorFor(AgentModel::Status status, uint8_t scale)
+uint8_t triangle(uint32_t nowMs, uint16_t period, uint8_t floor)
 {
-    struct RGB { uint8_t r, g, b; };
-    static const RGB colors[] = {
-        {68, 68, 66}, {144, 82, 232}, {48, 116, 238},
-        {238, 159, 45}, {47, 180, 104}, {224, 62, 62},
-    };
-    const RGB& c = colors[static_cast<uint8_t>(status)];
-    return RGBColor{
-        static_cast<uint8_t>((static_cast<uint16_t>(c.r) * scale) / 255),
-        static_cast<uint8_t>((static_cast<uint16_t>(c.g) * scale) / 255),
-        static_cast<uint8_t>((static_cast<uint16_t>(c.b) * scale) / 255),
-    };
+    const uint16_t phase = nowMs % period;
+    const uint16_t half = period / 2;
+    const uint16_t rising = phase < half ? phase : period - phase;
+    return floor + static_cast<uint8_t>((static_cast<uint32_t>(255 - floor) * rising) / half);
 }
 
-uint8_t animationScale(AgentModel::Status status, uint32_t nowMs, bool reduced)
+RGBColor renderZone(const LightingZone& zone, uint8_t index, uint32_t nowMs, bool reduced)
 {
-    if (reduced || status == AgentModel::Status::Idle || status == AgentModel::Status::Done)
-        return 255;
-    const uint16_t period = status == AgentModel::Status::Error ? 520 :
-                            (status == AgentModel::Status::Waiting ? 1500 : 1050);
-    uint16_t phase = nowMs % period;
-    uint16_t half = period / 2;
-    uint16_t tri = phase < half ? phase : period - phase;
-    uint8_t floor = status == AgentModel::Status::Error ? 65 : 105;
-    return floor + static_cast<uint8_t>((static_cast<uint32_t>(255 - floor) * tri) / half);
+    if (!zone.active()) return RGBColor{};
+    uint8_t scale = zone.brightness;
+    const uint16_t period = 1800 - static_cast<uint16_t>(zone.speed) * 5;
+    if (!reduced && (zone.effect == 4 || zone.effect == 6))
+        scale = static_cast<uint8_t>((static_cast<uint16_t>(scale) *
+                 triangle(nowMs, period < 400 ? 400 : period, zone.effect == 6 ? 170 : 70)) / 255);
+    if (!reduced && zone.effect == 2)
+    {
+        const uint8_t head = static_cast<uint8_t>((nowMs / (40 + (255 - zone.speed) / 4)) % kCount);
+        if (index != head) scale = static_cast<uint8_t>(scale / 7);
+    }
+    if (!reduced && zone.effect == 3)
+    {
+        const uint8_t phase = static_cast<uint8_t>(nowMs / 15 + index * 23);
+        if (phase < 85)
+            return RGBColor{static_cast<uint8_t>((static_cast<uint16_t>(255 - phase * 3) * scale) / 255),
+                            static_cast<uint8_t>((static_cast<uint16_t>(phase * 3) * scale) / 255), 0};
+        if (phase < 170)
+        {
+            const uint8_t p = phase - 85;
+            return RGBColor{0, static_cast<uint8_t>((static_cast<uint16_t>(255 - p * 3) * scale) / 255),
+                            static_cast<uint8_t>((static_cast<uint16_t>(p * 3) * scale) / 255)};
+        }
+        const uint8_t p = phase - 170;
+        return RGBColor{static_cast<uint8_t>((static_cast<uint16_t>(p * 3) * scale) / 255), 0,
+                        static_cast<uint8_t>((static_cast<uint16_t>(255 - p * 3) * scale) / 255)};
+    }
+    const uint8_t r = static_cast<uint8_t>((zone.color >> 16) & 0xFF);
+    const uint8_t g = static_cast<uint8_t>((zone.color >> 8) & 0xFF);
+    const uint8_t b = static_cast<uint8_t>(zone.color & 0xFF);
+    return RGBColor{static_cast<uint8_t>((static_cast<uint16_t>(r) * scale) / 255),
+                    static_cast<uint8_t>((static_cast<uint16_t>(g) * scale) / 255),
+                    static_cast<uint8_t>((static_cast<uint16_t>(b) * scale) / 255)};
 }
 }
 
@@ -71,25 +88,20 @@ void BottomLeds::setBrightness(uint8_t level)
     if (_available) M5.Led.setBrightness(kBrightness[_brightness]);
 }
 
-void BottomLeds::update(const AgentModel& model, uint32_t nowMs, bool reducedMotion)
+void BottomLeds::update(const LightingState& lighting, uint32_t nowMs, bool reducedMotion,
+                        bool connected)
 {
     if (!_available || nowMs - _lastFrameMs < 50) return;
     _lastFrameMs = nowMs;
 
     RGBColor colors[kCount]{};
-    for (uint8_t i = 0; i < AgentModel::kAgentCount; ++i)
+    if (connected)
     {
-        const AgentModel::Status status = model.agent(i).status;
-        const uint8_t scale = animationScale(status, nowMs + i * 73, reducedMotion);
-        colors[kAgentLed[i]] = colorFor(status, scale);
+        for (uint8_t i = 0; i < LightingState::kSlotCount; ++i)
+            colors[kAgentLed[i]] = renderZone(lighting.slots[i], i, nowMs, reducedMotion);
+        for (uint8_t i = 3; i <= 6; ++i)
+            colors[i] = renderZone(lighting.ambient, i, nowMs, reducedMotion);
     }
-    const AgentModel::Status selected = model.selectedAgent().status;
-    const uint8_t selectedScale = animationScale(selected, nowMs, reducedMotion);
-    const RGBColor selectedColor = colorFor(selected, selectedScale);
-    colors[3] = selectedColor;
-    colors[4] = selectedColor;
-    colors[5] = selectedColor;
-    colors[6] = selectedColor;
     M5.Led.setColors(colors, 0, kCount);
     M5.Led.display();
 }

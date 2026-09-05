@@ -1,52 +1,49 @@
-# core2 — codex keyboard app (M5Stack Core2)
+# core2 — Codex Micro local simulation (M5Stack Core2)
 
-A touch-first "codex" prompt app that hosts the shared `bot-ux` bot and a custom
-on-screen keyboard.
+This app adapts the Codex Micro control model to a 320x240 touch display. It is
+an honest local simulation: it never claims to control a host, send audio, or
+synchronize real Codex tasks.
 
 ## Hardware
 
-- Device: M5Stack Core2, 320×240 landscape ILI9342C + FT6336U capacitive touch, RGB565.
-  PlatformIO `board = m5stack-core2` (espressif32 platform), AXP192 PMU.
-- Haptics: `M5.Power.setVibration(level)` (motor) + `M5.Speaker.tone()` (I2S speaker).
-- Touch via `M5.Touch.getDetail(0)` (`.x/.y/.wasPressed()/…`); coords are already
-  rotation-mapped — do not remap manually. There is no `getTouchPoint()`/`isPressed()`.
-- 8 MB PSRAM — the 320×240@16bpp sprite (153 KB) is trivial.
+- M5Stack Core2 v1.3, landscape ILI9342C display and FT6336U touch.
+- M5GO Battery Bottom2 v1.3 replaces the stock Core2 bottom.
+- Bottom2 has ten SK6812 LEDs on GPIO 25, three bytes per LED in GRB order.
+- Bottom2 does not provide the stock bottom's vibration motor. Feedback uses the
+  speaker and side LEDs; do not add vibration behavior or a vibration setting.
 
 ## Module layout
 
 ```
 core2/bot-ux-codex-core2/
-  platformio.ini
-  include/CodexKeyboard.h   # layout, hit-test, render, key→char
-  include/ChatView.h        # transcript + bot mood wiring
-  include/Settings.h        # prefs (keyboard layout, brightness, haptics, theme)
-  include/Haptics.h         # beeps + vibration
-  src/main.cpp              # touch dispatch + frame loop
-  src/CodexKeyboard.cpp
-  src/ChatView.cpp
-  src/Settings.cpp
-  src/Haptics.cpp
+  include/AgentModel.h       fixed six-agent simulation state machine
+  include/AudioFeedback.h    short speaker feedback
+  include/BottomLeds.h       Bottom2 SK6812 status mirror
+  include/Settings.h         NVS settings and two-page settings UI
+  src/main.cpp               touch dispatch, rendering, bounded frame loop
+  test/agent_model_test.cpp  platform-independent model checks
 ```
 
-## Integration with bot-ux
+## Product behavior
 
-Same `M5Canvas` + `bot.update(millis())` + `bot.draw()` + `pushSprite` loop as the
-watch. The bot shrinks to a ~60 px tile on the left during typing and is full-screen
-when idle. Use `bot.metrics()` to find its bounds for touch hit-testing.
+- Six agent keys start in idle, thinking, running, waiting, done, and error.
+- Selecting a key only changes selection. `NEW`, released push-to-talk, or a
+  Review/Debug/Refactor workflow starts simulated work.
+- Timed work advances thinking -> running -> waiting/done. Accept and Reject
+  only act on a selected waiting agent.
+- `HOLD MIC` listens only while the finger remains on the key. Release submits a
+  simulated voice task; moving off cancels it.
+- Reasoning Low/Medium/High affects the next run duration.
+- `SIM` stays visible. There is no BLE, Wi-Fi, USB host control, or mic capture.
 
-## Interaction (full spec in `tmp/ux-design.md` PART C)
+## Engineering rules
 
-- Prompt loop: tap prompt → Listening → type → SEND → Thinking (…) → Speaking
-  (canned reply types out) → Idle.
-- Keyboard: 3-row compact QWERTY + command-chip row (`what time`, `joke`, `hello`)
-  + SEND. `⇧` toggles case, `123` toggles symbol layer.
-- Bot gestures: tap = `poke()`, swipe L/R = cycle theme, swipe up = Settings,
-  long press = nap (Sleepy).
-- Canned replies matched by substring; default → "interesting — tell me more".
-
-## Rules
-
-- Match existing code style; no per-frame heap allocation.
-- Touch dispatch + frame loop live in `main.cpp`; modules are plain classes.
-- Persist settings with `Preferences` (NVS). Do not over-engineer edge cases.
-- See `tmp/architecture.md` §3b/§5 and `tmp/ux-design.md` PART C for the full design.
+- `AgentModel` stays free of Arduino/display dependencies and uses fixed storage.
+- Controls activate on a valid release in the original target. All primary touch
+  targets are at least 40 px high.
+- Rendering runs at a bounded 25 fps. Avoid allocation in update/draw paths.
+- Check both sprite allocations before binding or drawing BotUx.
+- Settings persist with `Preferences`; keep display, audio, simulation speed,
+  theme, reduced motion, and Bottom2 LED brightness.
+- Keep UI text colors independent of `BotUx::Style::eyeColor`; the shared bot's
+  default eyes are intentionally dark.

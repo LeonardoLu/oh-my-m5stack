@@ -1,307 +1,208 @@
-// Settings implementation. See Settings.h for the contract.
 #include "Settings.h"
 
-#include <M5Unified.h>  // M5.Display.setBrightness
-#include <Preferences.h> // NVS persistence
+#include <M5Unified.h>
+#include <Preferences.h>
 
 namespace {
+constexpr uint16_t kPaper = botux::rgb565(238, 236, 229);
+constexpr uint16_t kWarm = botux::rgb565(244, 232, 215);
+constexpr uint16_t kGraphite = botux::rgb565(38, 40, 45);
+constexpr uint16_t kInk = botux::rgb565(33, 36, 42);
+constexpr uint16_t kLine = botux::rgb565(199, 197, 190);
+constexpr uint16_t kBlue = botux::rgb565(60, 124, 232);
+constexpr uint8_t kDisplayBrightness[5] = {40, 88, 144, 204, 255};
+constexpr int16_t kRowY[4] = {40, 80, 120, 160};
 
-constexpr int16_t kW = 320;
-
-// list row bands (y ranges)
-constexpr int16_t kRowY[4] = {40, 72, 104, 136};
-constexpr int16_t kRowH = 28;
-constexpr int16_t kDoneY = 180;
-constexpr int16_t kDoneH = 36;
-
-const uint8_t kBright[5] = {32, 88, 144, 200, 255}; // level 1..5 → 0..255
-
-// dim "off" segment color (unlit slider / empty bars)
-uint16_t dim(uint8_t r, uint8_t g, uint8_t b) { return botux::rgb565(r, g, b); }
-
-void drawRow(M5Canvas* cv, const botux::BotUx::Style& st, int16_t y, const char* label, const char* value)
+const char* speedName(uint8_t value)
 {
-    cv->fillRoundRect(8, y, kW - 16, kRowH, 6, st.bodyColor);
-    cv->setTextDatum(middle_left);
-    cv->setTextSize(1.0f);
-    cv->setTextColor(st.eyeColor);
-    cv->drawString(label, 18, y + kRowH / 2);
-    cv->setTextDatum(middle_right);
-    cv->setTextColor(st.accentColor);
-    cv->drawString(value, kW - 8, y + kRowH / 2);
+    static const char* names[] = {"FAST", "NORMAL", "SLOW"};
+    return names[value > 2 ? 1 : value];
 }
 
-} // namespace
+const char* onOff(uint8_t value) { return value ? "ON" : "OFF"; }
 
-const char* Settings::themeName(int i)
+const char* ledName(uint8_t value)
 {
-    static const char* names[kThemeCount] = {"Grok Teal", "Sunset", "Mono"};
-    int n = i % kThemeCount;
-    if (n < 0) n += kThemeCount;
-    return names[n];
+    static const char* names[] = {"OFF", "LOW", "MED", "HIGH"};
+    return names[value > 3 ? 2 : value];
 }
 
-botux::BotUx::Style Settings::themeStyle(int i)
+void drawRow(M5Canvas& cv, int16_t y, const char* label, const char* value,
+             bool down, uint16_t bg, uint16_t fg, uint16_t accent)
 {
-    botux::BotUx::Style s;
-    int n = i % kThemeCount;
-    if (n < 0) n += kThemeCount;
+    const uint16_t pressedFill = fg == kInk ? botux::rgb565(218, 224, 230)
+                                          : botux::rgb565(73, 79, 90);
+    const uint16_t fill = down ? pressedFill : bg;
+    cv.fillRoundRect(6, y + 2, 308, 36, 7, fill);
+    cv.drawRoundRect(6, y + 2, 308, 36, 7, kLine);
+    cv.setTextSize(1.0f);
+    cv.setTextDatum(middle_left);
+    cv.setTextColor(fg);
+    cv.drawString(label, 16, y + 20);
+    cv.setTextDatum(middle_right);
+    cv.setTextColor(accent);
+    cv.drawString(value, 304, y + 20);
+}
+}
 
-    switch (n)
-    {
-        default: // 0 — Grok Teal
-            s.bgColor     = botux::rgb565(0x0A, 0x0E, 0x14);
-            s.bodyColor   = botux::rgb565(0x2A, 0x2E, 0x38);
-            s.accentColor = botux::rgb565(0x2E, 0xD9, 0xC8);
-            s.eyeColor    = botux::rgb565(0xFF, 0xFF, 0xFF);
-            s.pupilColor  = botux::rgb565(0x0A, 0x12, 0x22);
-            s.mouthColor  = botux::rgb565(0xFF, 0xFF, 0xFF);
-            s.blushColor  = botux::rgb565(0xFF, 0x8A, 0xA0);
-            s.eyeStyle    = botux::BotUx::EyeStyle::Round;
-            s.bodyStyle   = botux::BotUx::BodyStyle::Round;
-            break;
-        case 1: // Sunset
-            s.bgColor     = botux::rgb565(0x1A, 0x0F, 0x14);
-            s.bodyColor   = botux::rgb565(0x4A, 0x2A, 0x30);
-            s.accentColor = botux::rgb565(0xFF, 0x9F, 0x43);
-            s.eyeColor    = botux::rgb565(0xFF, 0xE8, 0xC8);
-            s.pupilColor  = botux::rgb565(0x2A, 0x15, 0x20);
-            s.mouthColor  = botux::rgb565(0xFF, 0xD9, 0xA0);
-            s.blushColor  = botux::rgb565(0xFF, 0x6B, 0x81);
-            s.eyeStyle    = botux::BotUx::EyeStyle::Oval;
-            s.bodyStyle   = botux::BotUx::BodyStyle::RoundedSquare;
-            break;
-        case 2: // Mono
-            s.bgColor     = botux::rgb565(0x0F, 0x0F, 0x0F);
-            s.bodyColor   = botux::rgb565(0x2E, 0x2E, 0x2E);
-            s.accentColor = botux::rgb565(0xE6, 0xE6, 0xE6);
-            s.eyeColor    = botux::rgb565(0xFF, 0xFF, 0xFF);
-            s.pupilColor  = botux::rgb565(0x11, 0x11, 0x11);
-            s.mouthColor  = botux::rgb565(0xFF, 0xFF, 0xFF);
-            s.blushColor  = botux::rgb565(0x77, 0x77, 0x77);
-            s.eyeStyle    = botux::BotUx::EyeStyle::Square;
-            s.bodyStyle   = botux::BotUx::BodyStyle::Hexagon;
-            break;
-    }
-    return s;
+const char* Settings::themeName(uint8_t value)
+{
+    static const char* names[kThemeCount] = {"PAPER", "WARM", "DARK"};
+    return names[value < kThemeCount ? value : 0];
+}
+
+botux::BotUx::Style Settings::themeStyle(uint8_t value)
+{
+    botux::BotUx::Style style;
+    style.bgColor = value == 1 ? kWarm : (value == 2 ? kGraphite : kPaper);
+    style.bodyColor = botux::rgb565(252, 252, 250);
+    style.accentColor = value == 1 ? botux::rgb565(224, 112, 55) : kBlue;
+    style.eyeColor = kInk;
+    style.pupilColor = botux::rgb565(12, 14, 18);
+    style.mouthColor = kInk;
+    style.blushColor = botux::rgb565(238, 130, 126);
+    style.eyeStyle = botux::BotUx::EyeStyle::Oval;
+    style.bodyStyle = botux::BotUx::BodyStyle::Round;
+    return style;
 }
 
 void Settings::begin()
 {
-    Preferences p;
-    p.begin("codex", true); // read-only
-    _data.kbdLayout  = p.getUChar("kbd", 0);
-    _data.theme      = p.getUChar("theme", 0);
-    _data.haptics    = p.getUChar("hapt", 1);
-    _data.brightness = p.getUChar("bright", 3);
-    p.end();
-
-    // clamp
-    if (_data.kbdLayout > 1) _data.kbdLayout = 0;
-    if (_data.theme > 2) _data.theme = 0;
-    if (_data.haptics > 1) _data.haptics = 1;
+    Preferences prefs;
+    prefs.begin("codexmicro", true);
+    _data.speed = prefs.getUChar("speed", 1);
+    _data.theme = prefs.getUChar("theme", 0);
+    _data.audio = prefs.getUChar("audio", 1);
+    _data.brightness = prefs.getUChar("display", 3);
+    _data.reducedMotion = prefs.getUChar("reduce", 0);
+    _data.ledBrightness = prefs.getUChar("led", 2);
+    prefs.end();
+    if (_data.speed > 2) _data.speed = 1;
+    if (_data.theme >= kThemeCount) _data.theme = 0;
+    if (_data.audio > 1) _data.audio = 1;
     if (_data.brightness < 1 || _data.brightness > 5) _data.brightness = 3;
+    if (_data.reducedMotion > 1) _data.reducedMotion = 0;
+    if (_data.ledBrightness > 3) _data.ledBrightness = 2;
 }
 
-void Settings::_save()
+void Settings::_save() const
 {
-    Preferences p;
-    p.begin("codex", false);
-    p.putUChar("kbd", _data.kbdLayout);
-    p.putUChar("theme", _data.theme);
-    p.putUChar("hapt", _data.haptics);
-    p.putUChar("bright", _data.brightness);
-    p.end();
+    Preferences prefs;
+    prefs.begin("codexmicro", false);
+    prefs.putUChar("speed", _data.speed);
+    prefs.putUChar("theme", _data.theme);
+    prefs.putUChar("audio", _data.audio);
+    prefs.putUChar("display", _data.brightness);
+    prefs.putUChar("reduce", _data.reducedMotion);
+    prefs.putUChar("led", _data.ledBrightness);
+    prefs.end();
 }
 
-void Settings::apply(botux::BotUx* bot)
+void Settings::apply(botux::BotUx& bot) const
 {
-    bot->setStyle(themeStyle(_data.theme));
+    bot.setStyle(themeStyle(_data.theme));
     applyBrightness();
 }
 
-void Settings::applyBrightness()
+void Settings::applyBrightness() const
 {
-    uint8_t lvl = _data.brightness;
-    if (lvl < 1) lvl = 1;
-    if (lvl > 5) lvl = 5;
-    M5.Display.setBrightness(kBright[lvl - 1]);
-}
-
-void Settings::cycleTheme(int dir)
-{
-    int t = (int)_data.theme + dir;
-    while (t < 0) t += kThemeCount;
-    while (t >= kThemeCount) t -= kThemeCount;
-    _data.theme = (uint8_t)t;
-    _save();
+    M5.Display.setBrightness(kDisplayBrightness[_data.brightness - 1]);
 }
 
 void Settings::open()
 {
     _open = true;
-    _sub = List;
-    _down = false;
-    _dragRow = -1;
+    _page = 0;
+    _pressed = -1;
 }
 
 void Settings::close()
 {
     _open = false;
-    _down = false;
-    _dragRow = -1;
+    _pressed = -1;
 }
 
-int16_t Settings::_rowAt(int16_t x, int16_t y) const
+int8_t Settings::_hit(int16_t x, int16_t y) const
 {
-    (void)x;
-    for (int i = 0; i < 4; i++)
-    {
-        if (y >= kRowY[i] && y < kRowY[i] + kRowH) return i;
-    }
-    if (y >= kDoneY && y < kDoneY + kDoneH) return 4;
+    if (x < 0 || x >= 320 || y < 0 || y >= 240) return -1;
+    if (x >= 244 && y >= 0 && y < 40) return 0;
+    for (int8_t i = 0; i < (_page == 0 ? 4 : 2); ++i)
+        if (y >= kRowY[i] && y < kRowY[i] + 40) return i + 1;
+    if (y >= 200 && y < 240) return 5;
     return -1;
 }
 
-void Settings::_setBrightnessFromX(int16_t x)
-{
-    int16_t sx = x;
-    if (sx < 120) sx = 120;
-    if (sx > 294) sx = 294;
-    int level = 1 + (sx - 120) * 5 / 175; // 0..174 → 0..4
-    if (level < 1) level = 1;
-    if (level > 5) level = 5;
-    if (level != _data.brightness)
-    {
-        _data.brightness = (uint8_t)level;
-        _save();
-        applyBrightness();
-    }
-}
-
-void Settings::touchBegin(int16_t x, int16_t y)
-{
-    _px = x; _py = y;
-    _down = true;
-    _swiped = false;
-    _dragRow = (_sub == List) ? _rowAt(x, y) : -1;
-    if (_dragRow == 3) _setBrightnessFromX(x); // brightness row → start drag now
-}
+void Settings::touchBegin(int16_t x, int16_t y) { _pressed = _hit(x, y); }
 
 void Settings::touchMove(int16_t x, int16_t y)
 {
-    if (!_down) return;
-    if (_sub == Carousel)
-    {
-        int16_t dx = x - _px;
-        if (!_swiped)
-        {
-            if (dx > 40)      { cycleTheme(+1); _swiped = true; }
-            else if (dx < -40) { cycleTheme(-1); _swiped = true; }
-        }
-    }
-    else if (_dragRow == 3)
-    {
-        _setBrightnessFromX(x);
-    }
-    (void)y;
+    if (_pressed >= 0 && _hit(x, y) != _pressed) _pressed = -1;
 }
 
 void Settings::touchEnd(int16_t x, int16_t y)
 {
-    if (!_down) return;
-    if (_sub == Carousel)
-    {
-        if (!_swiped) _sub = List; // tap = select current theme, back to list
-    }
-    else if (_dragRow != 3)
-    {
-        _handleRow(_rowAt(x, y));
-    }
-    _down = false;
-    _dragRow = -1;
+    const int8_t released = _hit(x, y);
+    if (_pressed >= 0 && released == _pressed) _activate(_pressed);
+    _pressed = -1;
 }
 
-void Settings::_handleRow(int16_t row)
+void Settings::_activate(int8_t target)
 {
-    switch (row)
+    if (target == 0) { close(); return; }
+    if (target == 5) { _page ^= 1; return; }
+    if (_page == 0)
     {
-        case 0: // keyboard layout cycle
-            _data.kbdLayout = (_data.kbdLayout + 1) % 2;
-            _save();
-            break;
-        case 1: // theme → carousel
-            _sub = Carousel;
-            break;
-        case 2: // haptics toggle
-            _data.haptics = _data.haptics ? 0 : 1;
-            _save();
-            break;
-        case 4: // Done
-            close();
-            break;
-        default:
-            break;
+        if (target == 1) _data.speed = (_data.speed + 1) % 3;
+        else if (target == 2) _data.brightness = (_data.brightness % 5) + 1;
+        else if (target == 3) _data.audio ^= 1;
+        else if (target == 4) _data.theme = (_data.theme + 1) % kThemeCount;
     }
+    else
+    {
+        if (target == 1) _data.reducedMotion ^= 1;
+        else if (target == 2) _data.ledBrightness = (_data.ledBrightness + 1) % 4;
+    }
+    _save();
+    applyBrightness();
 }
 
-void Settings::draw(M5Canvas* cv, M5Canvas* botSprite)
+void Settings::draw(M5Canvas& cv, M5Canvas& botSprite) const
 {
-    botux::BotUx::Style st = themeStyle(_data.theme);
-    cv->fillSprite(st.bgColor);
+    const botux::BotUx::Style style = themeStyle(_data.theme);
+    const uint16_t fg = _data.theme == 2 ? botux::rgb565(238, 238, 234) : kInk;
+    const uint16_t rowBg = _data.theme == 2 ? botux::rgb565(57, 60, 66) : botux::rgb565(250, 249, 245);
+    cv.fillSprite(style.bgColor);
+    botSprite.pushSprite(&cv, 2, 0);
+    cv.setTextSize(1.0f);
+    cv.setTextDatum(middle_left);
+    cv.setTextColor(fg);
+    cv.drawString(_page ? "SETTINGS 2/2" : "SETTINGS 1/2", 48, 20);
+    cv.fillRoundRect(244, 2, 72, 36, 8, style.accentColor);
+    cv.setTextDatum(middle_center);
+    cv.setTextColor(botux::rgb565(255, 255, 255));
+    cv.drawString("DONE", 280, 20);
 
-    // title bar
-    cv->setTextDatum(middle_center);
-    cv->setTextSize(1.0f);
-    cv->setTextColor(st.accentColor);
-    cv->drawString("Settings", 40, 12);
-    cv->setTextColor(st.eyeColor);
-    cv->drawString("Done", kW - 40, 12);
-
-    if (_sub == List)
+    if (_page == 0)
     {
-        drawRow(cv, st, kRowY[0], "Keyboard", _data.kbdLayout ? "Chips" : "QWERTY");
-        drawRow(cv, st, kRowY[1], "Theme", themeName(_data.theme));
-        drawRow(cv, st, kRowY[2], "Haptics", _data.haptics ? "ON" : "OFF");
-
-        // brightness slider row
-        cv->fillRoundRect(8, kRowY[3], kW - 16, kRowH, 6, st.bodyColor);
-        cv->setTextDatum(middle_left);
-        cv->setTextSize(1.0f);
-        cv->setTextColor(st.eyeColor);
-        cv->drawString("Brightness", 18, kRowY[3] + kRowH / 2);
-        for (int i = 0; i < 5; i++)
-        {
-            uint16_t c = (i < _data.brightness) ? st.accentColor : dim(0x30, 0x34, 0x3C);
-            cv->fillRoundRect(120 + i * 36, kRowY[3] + 10, 30, 8, 3, c);
-        }
-
-        // Done button
-        cv->fillRoundRect(8, kDoneY, kW - 16, kDoneH, 8, st.accentColor);
-        cv->setTextDatum(middle_center);
-        cv->setTextColor(st.bgColor);
-        cv->drawString("Done", kW / 2, kDoneY + kDoneH / 2);
+        char level[2] = {static_cast<char>('0' + _data.brightness), '\0'};
+        drawRow(cv, kRowY[0], "SIM SPEED", speedName(_data.speed), _pressed == 1, rowBg, fg, style.accentColor);
+        drawRow(cv, kRowY[1], "DISPLAY", level, _pressed == 2, rowBg, fg, style.accentColor);
+        drawRow(cv, kRowY[2], "AUDIO FEEDBACK", onOff(_data.audio), _pressed == 3, rowBg, fg, style.accentColor);
+        drawRow(cv, kRowY[3], "THEME", themeName(_data.theme), _pressed == 4, rowBg, fg, style.accentColor);
     }
-    else // Carousel
+    else
     {
-        // three theme cards
-        for (int i = 0; i < kThemeCount; i++)
-        {
-            bool sel = (i == _data.theme);
-            cv->fillRoundRect(16 + i * 100, 32, 88, 22, 6, sel ? st.accentColor : st.bodyColor);
-            cv->setTextDatum(middle_center);
-            cv->setTextSize(1.0f);
-            cv->setTextColor(sel ? st.bgColor : st.eyeColor);
-            cv->drawString(themeName(i), 16 + i * 100 + 44, 43);
-        }
-
-        // live preview — push the (already rendered) bot sprite
-        int16_t pw = botSprite->width();
-        botSprite->pushSprite(cv, (kW - pw) / 2, 70);
-
-        cv->setTextDatum(middle_center);
-        cv->setTextSize(1.0f);
-        cv->setTextColor(st.eyeColor);
-        cv->drawString("swipe to change - tap to select", kW / 2, 220);
+        drawRow(cv, kRowY[0], "REDUCED MOTION", onOff(_data.reducedMotion), _pressed == 1, rowBg, fg, style.accentColor);
+        drawRow(cv, kRowY[1], "BOTTOM LEDs", ledName(_data.ledBrightness), _pressed == 2, rowBg, fg, style.accentColor);
+        cv.setTextDatum(middle_left);
+        cv.setTextColor(fg);
+        cv.drawString("LOCAL SIMULATION", 16, 138);
+        cv.drawString("No host actions or mic recording", 16, 155);
+        cv.drawString("Bottom2: 10 RGB lights", 16, 181);
     }
+
+    cv.fillRoundRect(6, 202, 308, 36, 7, _pressed == 5 ? style.accentColor : rowBg);
+    cv.setTextDatum(middle_center);
+    cv.setTextColor(_pressed == 5 ? botux::rgb565(255, 255, 255) : fg);
+    cv.drawString(_page ? "<  GENERAL" : "MORE SETTINGS  >", 160, 220);
 }

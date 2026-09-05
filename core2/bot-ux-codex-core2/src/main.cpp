@@ -1,434 +1,547 @@
-// bot-ux-codex-core2 — codex prompt app for the M5Stack Core2.
-//
-// Owns the frame loop, touch dispatch, the prompt buffer, the device clock, and the
-// single botux::BotUx instance. Modules: CodexKeyboard (keys), ChatView (transcript +
-// mood wiring), Settings (prefs + screen), Haptics (beeps). The bot renders into a
-// small 72px sprite and is pushSprite()'d onto the full-screen canvas each frame.
-
 #include <M5Unified.h>
 
+#include "AgentModel.h"
+#include "AudioFeedback.h"
 #include "BotUx.h"
-#include "ChatView.h"
-#include "CodexKeyboard.h"
-#include "Haptics.h"
+#include "BottomLeds.h"
 #include "Settings.h"
 
-#include <stdio.h>  // snprintf
-#include <string.h> // strlen
+#include <stdio.h>
 
-// ---- screen layout (320x240 landscape) ------------------------------------
+namespace {
 constexpr int16_t kScreenW = 320;
 constexpr int16_t kScreenH = 240;
-constexpr int16_t kStatusH = 24;
-constexpr int16_t kBotX = 0, kBotY = 24, kBotW = 72, kBotH = 72; // bot tile
-constexpr int16_t kPromptY = 96, kPromptH = 32;
-constexpr int16_t kKbY = 128; // keyboard top
+constexpr int16_t kBotSize = 40;
+constexpr uint32_t kFrameMs = 40;
 
-constexpr int kPromptLen = 48;
+constexpr uint16_t kInk = botux::rgb565(31, 34, 39);
+constexpr uint16_t kKey = botux::rgb565(252, 251, 247);
+constexpr uint16_t kLine = botux::rgb565(193, 191, 184);
+constexpr uint16_t kMuted = botux::rgb565(105, 106, 108);
+constexpr uint16_t kWhite = botux::rgb565(255, 255, 255);
+constexpr uint16_t kStatusColors[] = {
+    botux::rgb565(105, 106, 108), botux::rgb565(135, 82, 222),
+    botux::rgb565(48, 112, 224), botux::rgb565(224, 145, 35),
+    botux::rgb565(39, 164, 91), botux::rgb565(215, 53, 53),
+};
 
-// ---- modules (one instance each) ------------------------------------------
-M5Canvas _canvas(&M5.Display);
-M5Canvas _botSprite(&M5.Display);
-botux::BotUx _bot;
-CodexKeyboard _kb;
-ChatView _chat;
-Settings _settings;
-Haptics _haptics;
+enum class Page : uint8_t { Agents, Control };
+enum class TargetType : uint8_t { None, Settings, PageAgents, PageControl, Agent, Command, Workflow, Reasoning };
 
-// ---- prompt + device state ------------------------------------------------
-char _prompt[kPromptLen];
-int  _promptLen = 0;
+struct Target {
+    Target(TargetType targetType = TargetType::None, int8_t targetIndex = -1)
+        : type(targetType), index(targetIndex) {}
+    TargetType type;
+    int8_t index;
+};
 
-char _clockBuf[8];   // "HH:MM"
-char _statusBuf[24]; // "bat 87% - no signal"
-uint32_t _epochMs = 0;      // millis() at boot
-uint32_t _timeBaseMs = 0;   // ms-of-day at boot (from __TIME__)
+M5Canvas canvas(&M5.Display);
+M5Canvas botSprite(&M5.Display);
+botux::BotUx bot;
+AgentModel model;
+Settings settings;
+AudioFeedback audio;
+BottomLeds bottomLeds;
 
-// ---- touch gesture state ---------------------------------------------------
-enum Zone : uint8_t { ZONE_OTHER, ZONE_BOT, ZONE_KEY, ZONE_PROMPT, ZONE_SETTINGS };
+Page page = Page::Agents;
+Target pressed;
+bool touching = false;
+bool screenTouchGesture = false;
+bool listening = false;
+uint32_t listenStartedMs = 0;
+uint32_t nowMs = 0;
+uint32_t lastFrameMs = 0;
+uint32_t lastPowerMs = 0;
+int8_t battery = -1;
+bool charging = false;
+Settings::Data appliedSettings{};
+int16_t lastTouchX = 0;
+int16_t lastTouchY = 0;
+bool reducedBotActive = false;
+uint32_t reducedBotTimeMs = 0;
+uint8_t lastBotStatus = 0xFF;
+bool lastBotListening = false;
 
-uint32_t _now = 0;
-int16_t _px = 0, _py = 0, _lastX = 0, _lastY = 0;
-uint32_t _pMs = 0;
-bool _down = false;
-bool _moved = false;
-bool _swiped = false;
-bool _longFired = false;
-int16_t _curKey = -1;
-Zone _zone = ZONE_OTHER;
-uint32_t _napUntil = 0;
-uint32_t _lastPowerMs = 0;
-
-// settings-change trackers (for apply + feedback)
-int _lastTheme = -1, _lastBright = -1, _lastHaptics = -1, _lastLayout = -1;
-
-// ---- helpers ---------------------------------------------------------------
-static uint32_t compileTimeMs()
+bool sameTarget(const Target& a, const Target& b)
 {
-    // __TIME__ = "HH:MM:SS" — a deterministic boot time, no RTC dependency.
-    uint8_t h = (uint8_t)((__TIME__[0] - '0') * 10 + (__TIME__[1] - '0'));
-    uint8_t m = (uint8_t)((__TIME__[3] - '0') * 10 + (__TIME__[4] - '0'));
-    uint8_t s = (uint8_t)((__TIME__[6] - '0') * 10 + (__TIME__[7] - '0'));
-    return ((uint32_t)h * 3600u + (uint32_t)m * 60u + (uint32_t)s) * 1000u;
+    return a.type == b.type && a.index == b.index;
 }
 
-static void updateClock()
+Target hitTarget(int16_t x, int16_t y)
 {
-    // mod each term first so the sum can't overflow uint32 on long uptimes
-    uint32_t elapsed = (_now - _epochMs) % 86400000uL;
-    uint32_t tod = (_timeBaseMs + elapsed) % 86400000uL;
-    uint8_t hh = (uint8_t)(tod / 3600000uL);
-    uint8_t mm = (uint8_t)((tod % 3600000uL) / 60000uL);
-    snprintf(_clockBuf, sizeof(_clockBuf), "%02u:%02u", hh, mm);
-}
-
-static bool inBot(int16_t x, int16_t y)
-{
-    const botux::BotUx::Metrics& m = _bot.metrics();
-    int16_t cx = kBotX + m.cx;
-    int16_t cy = kBotY + m.cy;
-    int16_t r = (m.bodyR > 0) ? m.bodyR : m.eyeRadius * 3;
-    return (x >= cx - r && x <= cx + r && y >= cy - r && y <= cy + r);
-}
-
-static void setPrompt(const char* s)
-{
-    int n = 0;
-    while (s[n] && n < kPromptLen - 1) { _prompt[n] = s[n]; n++; }
-    _prompt[n] = 0;
-    _promptLen = n;
-}
-
-static void submitPrompt()
-{
-    if (_promptLen == 0) return;
-    _chat.submit(_prompt);
-    _promptLen = 0;
-    _prompt[0] = 0;
-    _haptics.sendTone();
-    _haptics.vibrate(60);
-}
-
-static void applyKey(int16_t id)
-{
-    switch (_kb.kind(id))
+    if (x < 0 || x >= kScreenW || y < 0 || y >= kScreenH) return {};
+    if (y < 40 && x >= 272) return {TargetType::Settings, 0};
+    if (y >= 200)
+        return {x < 160 ? TargetType::PageAgents : TargetType::PageControl, 0};
+    if (page == Page::Agents)
     {
-        case CodexKeyboard::K_CHAR:
+        if (y >= 40 && y < 176)
         {
-            char c = _kb.keyChar(id);
-            if (c && _promptLen < kPromptLen - 1)
-            {
-                _prompt[_promptLen++] = c;
-                _prompt[_promptLen] = 0;
-            }
-            _chat.setListening();
-            _haptics.keyTick();
-            break;
+            const int8_t col = x / 106;
+            const int8_t row = (y - 40) / 68;
+            const int8_t index = row * 3 + col;
+            if (col < 3 && index < AgentModel::kAgentCount) return {TargetType::Agent, index};
         }
-        case CodexKeyboard::K_SPACE:
-            if (_promptLen < kPromptLen - 1)
-            {
-                _prompt[_promptLen++] = ' ';
-                _prompt[_promptLen] = 0;
-            }
-            _chat.setListening();
-            _haptics.keyTick();
-            break;
-        case CodexKeyboard::K_BACKSPACE:
-            if (_promptLen > 0) _prompt[--_promptLen] = 0;
-            _haptics.keyTick();
-            break;
-        case CodexKeyboard::K_SHIFT:
-            _kb.toggleShift();
-            _haptics.click();
-            break;
-        case CodexKeyboard::K_LAYER:
-            _kb.toggleLayer();
-            _haptics.click();
-            break;
-        case CodexKeyboard::K_CHIP:
+    }
+    else
+    {
+        if (y >= 52 && y < 96)
         {
-            const char* t = _kb.keyText(id);
-            if (t) setPrompt(t);
-            _chat.setListening();
-            _haptics.click();
-            break;
+            const int8_t index = x / 80;
+            if (index < 2 && model.selectedAgent().status != AgentModel::Status::Waiting) return {};
+            return {TargetType::Command, index};
         }
-        case CodexKeyboard::K_ENTER:
-        case CodexKeyboard::K_SEND:
-            submitPrompt();
+        if (y >= 100 && y < 144) return {TargetType::Workflow, static_cast<int8_t>(x / 80)};
+        if (y >= 148 && y < 192)
+        {
+            const int8_t index = x < 107 ? 0 : (x < 214 ? 1 : 2);
+            return {TargetType::Reasoning, index};
+        }
+    }
+    return {};
+}
+
+void setBotMood()
+{
+    if (listening)
+    {
+        bot.setMood(botux::BotUx::Mood::Listening);
+        return;
+    }
+    switch (model.selectedAgent().status)
+    {
+        case AgentModel::Status::Thinking: bot.setMood(botux::BotUx::Mood::Thinking); break;
+        case AgentModel::Status::Running:  bot.setMood(botux::BotUx::Mood::Working); break;
+        case AgentModel::Status::Waiting:  bot.setMood(botux::BotUx::Mood::Waiting); break;
+        case AgentModel::Status::Done:     bot.setMood(botux::BotUx::Mood::Done); break;
+        case AgentModel::Status::Error:    bot.setMood(botux::BotUx::Mood::Blocked); break;
+        default:                           bot.setMood(botux::BotUx::Mood::Idle); break;
+    }
+}
+
+void syncSettings()
+{
+    const Settings::Data& data = settings.data();
+    if (data.theme != appliedSettings.theme) bot.setStyle(Settings::themeStyle(data.theme));
+    if (data.speed != appliedSettings.speed) model.setSpeed(data.speed);
+    if (data.audio != appliedSettings.audio) audio.setEnabled(data.audio != 0);
+    if (data.ledBrightness != appliedSettings.ledBrightness)
+        bottomLeds.setBrightness(data.ledBrightness);
+    appliedSettings = data;
+}
+
+void activate(const Target& target)
+{
+    switch (target.type)
+    {
+        case TargetType::Settings:
+            settings.open();
+            audio.select();
+            break;
+        case TargetType::PageAgents:
+            page = Page::Agents;
+            audio.select();
+            break;
+        case TargetType::PageControl:
+            page = Page::Control;
+            audio.select();
+            break;
+        case TargetType::Agent:
+            model.select(target.index);
+            audio.select();
+            break;
+        case TargetType::Command:
+            if (target.index == 0) model.accept(nowMs) ? audio.confirm() : audio.error();
+            else if (target.index == 1) model.reject() ? audio.reject() : audio.error();
+            else if (target.index == 2) { model.submitVoice(nowMs); audio.action(); }
+            else { model.startNew(nowMs); audio.action(); }
+            break;
+        case TargetType::Workflow:
+            model.startWorkflow(static_cast<AgentModel::Workflow>(target.index), nowMs);
+            audio.action();
+            break;
+        case TargetType::Reasoning:
+            model.setReasoning(static_cast<AgentModel::Reasoning>(target.index));
+            audio.select();
             break;
         default:
             break;
     }
+    setBotMood();
 }
 
-// ---- touch dispatch --------------------------------------------------------
-static void touchBegin(int16_t x, int16_t y)
+void touchBegin(int16_t x, int16_t y)
 {
-    _down = true;
-    _moved = false;
-    _swiped = false;
-    _longFired = false;
-    _px = x; _py = y; _lastX = x; _lastY = y;
-    _pMs = _now;
-    _curKey = -1;
-
-    if (_settings.isOpen())
+    touching = true;
+    screenTouchGesture = x >= 0 && x < kScreenW && y >= 0 && y < kScreenH;
+    lastTouchX = x;
+    lastTouchY = y;
+    if (settings.isOpen())
     {
-        _zone = ZONE_SETTINGS;
-        _settings.touchBegin(x, y);
+        settings.touchBegin(x, y);
         return;
     }
-    if (inBot(x, y))
+    pressed = hitTarget(x, y);
+    if (pressed.type == TargetType::Command && pressed.index == 2)
     {
-        _zone = ZONE_BOT;
+        listening = true;
+        listenStartedMs = nowMs;
+        setBotMood();
+        audio.select();
     }
-    else if (y >= kPromptY && y < kPromptY + kPromptH)
+}
+
+void touchMove(int16_t x, int16_t y)
+{
+    if (!touching) return;
+    lastTouchX = x;
+    lastTouchY = y;
+    if (settings.isOpen())
     {
-        _zone = ZONE_PROMPT;
-        _chat.setListening();
-        _haptics.click();
+        settings.touchMove(x, y);
+        return;
     }
-    else if (_kb.contains(y))
+    if (!sameTarget(pressed, hitTarget(x, y)))
     {
-        _zone = ZONE_KEY;
-        _curKey = _kb.hitTest(x, y);
-        if (_curKey >= 0) applyKey(_curKey); // fire on press for snappy typing
+        if (listening)
+        {
+            listening = false;
+            setBotMood();
+        }
+        pressed = {};
     }
+}
+
+void touchEnd(int16_t x, int16_t y)
+{
+    if (!touching) return;
+    if (settings.isOpen())
+    {
+        settings.touchEnd(x, y);
+        touching = false;
+        screenTouchGesture = false;
+        return;
+    }
+    const Target released = hitTarget(x, y);
+    const bool valid = sameTarget(pressed, released);
+    const bool wasListening = listening;
+    listening = false;
+    if (valid) activate(pressed);
+    else if (wasListening) setBotMood();
+    touching = false;
+    screenTouchGesture = false;
+    pressed = {};
+}
+
+bool handleTouch()
+{
+    const auto detail = M5.Touch.getDetail(0);
+    if (detail.wasPressed()) { touchBegin(detail.x, detail.y); return screenTouchGesture; }
+    if (detail.isPressed()) { touchMove(detail.x, detail.y); return screenTouchGesture; }
+    if (detail.wasReleased())
+    {
+        const bool screenEvent = screenTouchGesture;
+        touchEnd(lastTouchX, lastTouchY);
+        return screenEvent;
+    }
+    return false;
+}
+
+void handleButtons(bool screenTouchEvent)
+{
+    if (screenTouchEvent || touching) return;
+    if (settings.isOpen())
+    {
+        if (M5.BtnB.wasClicked()) { settings.close(); audio.select(); }
+        return;
+    }
+    if (M5.BtnA.wasClicked())
+    {
+        model.select((model.selected() + AgentModel::kAgentCount - 1) % AgentModel::kAgentCount);
+        audio.select();
+    }
+    else if (M5.BtnB.wasClicked())
+    {
+        page = page == Page::Agents ? Page::Control : Page::Agents;
+        audio.select();
+    }
+    else if (M5.BtnC.wasClicked())
+    {
+        model.select((model.selected() + 1) % AgentModel::kAgentCount);
+        audio.select();
+    }
+}
+
+uint16_t foreground() { return settings.data().theme == 2 ? botux::rgb565(239, 239, 235) : kInk; }
+uint16_t surface() { return settings.data().theme == 2 ? botux::rgb565(57, 60, 66) : kKey; }
+
+void drawHeader()
+{
+    const botux::BotUx::Style style = Settings::themeStyle(settings.data().theme);
+    botSprite.pushSprite(&canvas, 0, 0);
+    canvas.setTextSize(1.0f);
+    canvas.setTextDatum(middle_left);
+    canvas.setTextColor(foreground());
+    canvas.drawString("CODEX MICRO", 43, 12);
+    canvas.fillRoundRect(43, 22, 30, 14, 5, botux::rgb565(166, 43, 39));
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(kWhite);
+    canvas.drawString("SIM", 58, 29);
+
+    char power[12];
+    if (battery >= 0) snprintf(power, sizeof(power), "%d%%%s", battery, charging ? "+" : "");
+    else snprintf(power, sizeof(power), "--%%");
+    canvas.setTextDatum(middle_right);
+    canvas.setTextColor(kMuted);
+    canvas.drawString(power, 267, 20);
+
+    const bool gearDown = pressed.type == TargetType::Settings;
+    canvas.fillRoundRect(272, 2, 46, 36, 8, gearDown ? style.accentColor : surface());
+    canvas.drawRoundRect(272, 2, 46, 36, 8, kLine);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(gearDown ? kWhite : foreground());
+    canvas.drawString("SET", 295, 20);
+}
+
+uint8_t statePulse(AgentModel::Status state, uint8_t index)
+{
+    if (settings.data().reducedMotion || state == AgentModel::Status::Idle || state == AgentModel::Status::Done)
+        return 255;
+    const uint16_t period = state == AgentModel::Status::Waiting ? 1500 : 1000;
+    const uint16_t phase = (nowMs + index * 79) % period;
+    const uint16_t half = period / 2;
+    const uint16_t tri = phase < half ? phase : period - phase;
+    return 145 + static_cast<uint8_t>((110UL * tri) / half);
+}
+
+void drawAgentCard(uint8_t index)
+{
+    const AgentModel::Agent& agent = model.agent(index);
+    const int16_t x = 4 + (index % 3) * 106;
+    const int16_t y = 42 + (index / 3) * 68;
+    const bool selected = index == model.selected();
+    const bool down = pressed.type == TargetType::Agent && pressed.index == index;
+    const uint16_t statusColor = kStatusColors[static_cast<uint8_t>(agent.status)];
+    canvas.fillRoundRect(x + 2, y + 3, 100, 64, 9, botux::rgb565(179, 177, 170));
+    const uint16_t pressedFill = settings.data().theme == 2 ? botux::rgb565(73, 79, 90)
+                                                          : botux::rgb565(222, 224, 224);
+    canvas.fillRoundRect(x, y, 100, 64, 9, down ? pressedFill : surface());
+    canvas.drawRoundRect(x, y, 100, 64, 9, selected ? foreground() : kLine);
+    if (selected) canvas.drawRoundRect(x + 2, y + 2, 96, 60, 7, kWhite);
+
+    const uint8_t pulse = statePulse(agent.status, index);
+    canvas.fillCircle(x + 13, y + 13, pulse > 215 ? 5 : 4, statusColor);
+    char id[3] = {'A', static_cast<char>('1' + index), '\0'};
+    canvas.setTextSize(1.0f);
+    canvas.setTextDatum(middle_left);
+    canvas.setTextColor(foreground());
+    canvas.drawString(id, x + 23, y + 13);
+    canvas.setTextDatum(middle_center);
+    canvas.drawString(agent.task, x + 50, y + 33);
+    canvas.setTextColor(foreground());
+    canvas.drawString(AgentModel::statusName(agent.status), x + 50, y + 51);
+}
+
+void drawTabs()
+{
+    const botux::BotUx::Style style = Settings::themeStyle(settings.data().theme);
+    const bool agentDown = pressed.type == TargetType::PageAgents;
+    const bool controlDown = pressed.type == TargetType::PageControl;
+    canvas.fillRoundRect(4, 201, 154, 37, 8, page == Page::Agents || agentDown ? style.accentColor : surface());
+    canvas.fillRoundRect(162, 201, 154, 37, 8, page == Page::Control || controlDown ? style.accentColor : surface());
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(page == Page::Agents || agentDown ? kWhite : foreground());
+    canvas.drawString("AGENTS  1/2", 81, 220);
+    canvas.setTextColor(page == Page::Control || controlDown ? kWhite : foreground());
+    canvas.drawString("CONTROL  2/2", 239, 220);
+}
+
+void drawAgentsPage()
+{
+    for (uint8_t i = 0; i < AgentModel::kAgentCount; ++i) drawAgentCard(i);
+    const AgentModel::Agent& active = model.selectedAgent();
+    char detail[40];
+    snprintf(detail, sizeof(detail), "A%u  %s  /  %s", static_cast<unsigned>(model.selected() + 1), active.task,
+             AgentModel::statusName(active.status));
+    canvas.setTextSize(1.0f);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(foreground());
+    canvas.drawString(detail, 160, 188);
+    drawTabs();
+}
+
+void drawKey(int16_t x, int16_t y, int16_t w, const char* label, bool active, bool down,
+             uint16_t accent, bool enabled = true)
+{
+    if (!enabled)
+    {
+        const uint16_t fill = settings.data().theme == 2 ? botux::rgb565(44, 47, 52)
+                                                       : botux::rgb565(223, 222, 216);
+        const uint16_t labelColor = settings.data().theme == 2 ? botux::rgb565(144, 148, 155)
+                                                             : botux::rgb565(111, 114, 119);
+        canvas.fillRoundRect(x, y, w, 40, 8, fill);
+        canvas.setTextSize(1.0f);
+        canvas.setTextDatum(middle_center);
+        canvas.setTextColor(labelColor);
+        canvas.drawString(label, x + w / 2, y + 20);
+        return;
+    }
+    canvas.fillRoundRect(x + 1, y + 2, w, 40, 8, botux::rgb565(181, 179, 172));
+    canvas.fillRoundRect(x, y, w, 40, 8, active || down ? accent : surface());
+    canvas.drawRoundRect(x, y, w, 40, 8, kLine);
+    canvas.setTextSize(1.0f);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(active || down ? kWhite : foreground());
+    canvas.drawString(label, x + w / 2, y + 20);
+}
+
+void drawControlPage()
+{
+    const botux::BotUx::Style style = Settings::themeStyle(settings.data().theme);
+    const bool waiting = model.selectedAgent().status == AgentModel::Status::Waiting;
+    const char* commands[] = {"ACCEPT", "REJECT", "HOLD MIC", "NEW"};
+    for (uint8_t i = 0; i < 4; ++i)
+    {
+        const bool down = pressed.type == TargetType::Command && pressed.index == i;
+        const bool active = (i < 2 && waiting) || (i == 2 && listening);
+        const uint16_t accent = i == 1 ? kStatusColors[5] : (i == 0 ? kStatusColors[4] : style.accentColor);
+        drawKey(i * 80 + 2, 54, 76, commands[i], active, down, accent, i >= 2 || waiting);
+    }
+
+    const char* workflows[] = {"^ REVIEW", "< DEBUG", "REFACTOR >", "v NEXT"};
+    for (uint8_t i = 0; i < 4; ++i)
+    {
+        const bool down = pressed.type == TargetType::Workflow && pressed.index == i;
+        drawKey(i * 80 + 2, 102, 76, workflows[i], false, down, style.accentColor);
+    }
+
+    const char* reasoning[] = {"LOW", "MEDIUM", "HIGH"};
+    const int16_t starts[] = {2, 109, 216};
+    for (uint8_t i = 0; i < 3; ++i)
+    {
+        const bool down = pressed.type == TargetType::Reasoning && pressed.index == i;
+        const bool active = static_cast<uint8_t>(model.reasoning()) == i;
+        drawKey(starts[i], 150, 102, reasoning[i], active, down, style.accentColor);
+    }
+
+    char detail[40];
+    if (listening)
+        snprintf(detail, sizeof(detail), "LISTENING  %lus",
+                 static_cast<unsigned long>((nowMs - listenStartedMs) / 1000));
     else
-    {
-        _zone = ZONE_OTHER;
-    }
+        snprintf(detail, sizeof(detail), "A%u %s  -  REASONING %s", static_cast<unsigned>(model.selected() + 1),
+                 AgentModel::statusName(model.selectedAgent().status), AgentModel::reasoningName(model.reasoning()));
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(listening ? style.accentColor : foreground());
+    canvas.drawString(detail, 160, 46);
+    drawTabs();
 }
 
-static void touchMove(int16_t x, int16_t y)
+void readPower()
 {
-    if (!_down) return;
-    _lastX = x; _lastY = y;
-
-    if (_zone == ZONE_SETTINGS)
-    {
-        _settings.touchMove(x, y);
-        return;
-    }
-    if (_zone == ZONE_BOT)
-    {
-        int16_t dx = x - _px;
-        int16_t dy = y - _py;
-        if (abs(dx) > 15 || abs(dy) > 15) _moved = true; // tap-cancel latch only
-        if (!_swiped)
-        {
-            if (abs(dx) >= abs(dy))
-            {
-                // theme-cycle feedback is emitted by syncSettings() once the value changes
-                if (dx > 40)       { _settings.cycleTheme(+1); _swiped = true; _moved = true; }
-                else if (dx < -40) { _settings.cycleTheme(-1); _swiped = true; _moved = true; }
-            }
-            else if (dy < -40)
-            {
-                _settings.open();
-                _zone = ZONE_SETTINGS;
-                _swiped = true;
-                _moved = true;
-                _haptics.confirm();
-            }
-        }
-    }
+    const int32_t level = M5.Power.getBatteryLevel();
+    battery = level >= 0 && level <= 100 ? static_cast<int8_t>(level) : -1;
+    charging = M5.Power.isCharging() == m5::Power_Class::is_charging;
 }
 
-static void touchEnd(int16_t x, int16_t y)
+void failSprite(const char* message)
 {
-    if (!_down) return;
-    int16_t ex = _lastX, ey = _lastY; // lift-off may report (0,0)
-    uint32_t dur = _now - _pMs;
-    (void)x; (void)y;
-
-    if (_zone == ZONE_SETTINGS)
-    {
-        _settings.touchEnd(ex, ey);
-    }
-    else if (_zone == ZONE_BOT)
-    {
-        if (!_moved && !_longFired && dur < 250)
-        {
-            _bot.poke();
-            _haptics.poke();
-        }
-    }
-    // ZONE_KEY: key already applied on press; highlight clears below.
-
-    _down = false;
-    _zone = ZONE_OTHER;
-    _curKey = -1;
+    M5.Display.fillScreen(TFT_BLACK);
+    M5.Display.setTextColor(TFT_RED);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.drawString(message, 160, 120);
+    while (true) delay(1000);
+}
 }
 
-static void handleTouch()
-{
-    auto d = M5.Touch.getDetail(0);
-    if (d.wasPressed())
-        touchBegin((int16_t)d.x, (int16_t)d.y);
-    else if (d.isPressed())
-        touchMove((int16_t)d.x, (int16_t)d.y);
-    else if (d.wasReleased())
-        touchEnd((int16_t)d.x, (int16_t)d.y);
-}
-
-// ---- settings sync ---------------------------------------------------------
-static void syncSettings()
-{
-    const Settings::Data& d = _settings.data();
-
-    if (_lastTheme != d.theme)
-    {
-        _lastTheme = d.theme;
-        _bot.setStyle(Settings::themeStyle(d.theme));
-        _haptics.click();
-    }
-    if (_lastHaptics != d.haptics)
-    {
-        _lastHaptics = d.haptics;
-        _haptics.setEnabled(d.haptics);
-        if (d.haptics) _haptics.confirm();
-    }
-    if (_lastBright != d.brightness)
-    {
-        _lastBright = d.brightness; // Settings already set the display
-        _haptics.click();
-    }
-    if (_lastLayout != d.kbdLayout)
-    {
-        _lastLayout = d.kbdLayout;
-        _kb.setChipsOnly(d.kbdLayout == 1);
-        _haptics.click();
-    }
-}
-
-// ---- drawing ---------------------------------------------------------------
-static void drawPrompt(const botux::BotUx::Style& st)
-{
-    _canvas.fillRoundRect(4, kPromptY + 2, kScreenW - 8, kPromptH - 4, 6, st.bodyColor);
-
-    const char* start = _prompt;
-    if (_promptLen > 28) start = _prompt + (_promptLen - 28);
-    char buf[kPromptLen + 4];
-    snprintf(buf, sizeof(buf), "> %s%s", start, ((_now / 500) & 1) ? "|" : "");
-
-    _canvas.setTextDatum(middle_left);
-    _canvas.setTextSize(1.0f);
-    _canvas.setTextColor(st.accentColor);
-    _canvas.drawString(buf, 12, kPromptY + kPromptH / 2);
-}
-
-static void drawMain()
-{
-    const botux::BotUx::Style& st = _bot.style();
-    _canvas.fillSprite(st.bgColor);
-
-    // status bar: clock · title · battery
-    _canvas.setTextDatum(middle_left);
-    _canvas.setTextSize(1.0f);
-    _canvas.setTextColor(st.accentColor);
-    _canvas.drawString(_clockBuf, 6, kStatusH / 2);
-    _canvas.setTextDatum(middle_center);
-    _canvas.setTextColor(st.bodyColor);
-    _canvas.drawString("codex", kScreenW / 2, kStatusH / 2);
-    _canvas.setTextDatum(middle_right);
-    _canvas.setTextColor(st.eyeColor);
-    _canvas.drawString(_statusBuf, kScreenW - 6, kStatusH / 2);
-    _canvas.drawLine(0, kStatusH - 1, kScreenW, kStatusH - 1, st.bodyColor);
-
-    // bot tile (already rendered into _botSprite)
-    _botSprite.pushSprite(&_canvas, kBotX, kBotY);
-
-    _chat.draw();
-    drawPrompt(st);
-    _kb.draw(_curKey);
-}
-
-// ---- setup / loop ----------------------------------------------------------
 void setup()
 {
-    M5.begin();
-    // Core2 default orientation is 320x240 landscape. M5GFX maps FT6336U touch
-    // coordinates into LCD space automatically, so no manual remapping is needed.
+    auto config = M5.config();
+    config.clear_display = true;
+    config.internal_spk = true;
+    M5.begin(config);
+    M5.Display.setRotation(1);
 
-    _canvas.setColorDepth(16);
-    _canvas.createSprite(kScreenW, kScreenH);
-    _botSprite.setColorDepth(16);
-    _botSprite.createSprite(kBotW, kBotH);
+    canvas.setColorDepth(16);
+    if (!canvas.createSprite(kScreenW, kScreenH)) failSprite("DISPLAY BUFFER FAILED");
+    botSprite.setColorDepth(16);
+    if (!botSprite.createSprite(kBotSize, kBotSize)) failSprite("BOT BUFFER FAILED");
 
-    _bot.begin(&_botSprite);
-    _bot.seedBlink((uint32_t)micros()); // single instance — no decorrelation needed
-    _bot.setBattery(100);
-    _bot.setSignal(-1); // no radio — hide signal bars
-
-    _settings.begin();
-    _settings.apply(&_bot); // theme + brightness
-
-    _kb.begin(&_canvas, &_bot.style(), kKbY);
-    _kb.setChipsOnly(_settings.data().kbdLayout == 1);
-
-    _chat.begin(&_canvas, &_bot, &_bot.style(), _clockBuf, _statusBuf);
-
-    _haptics.begin();
-    _haptics.setEnabled(_settings.data().haptics);
-
-    _epochMs = millis();
-    _timeBaseMs = compileTimeMs();
-    _promptLen = 0;
-    _prompt[0] = 0;
-
-    _lastTheme = _settings.data().theme;
-    _lastBright = _settings.data().brightness;
-    _lastHaptics = _settings.data().haptics;
-    _lastLayout = _settings.data().kbdLayout;
+    settings.begin();
+    bot.begin(&botSprite);
+    bot.seedBlink(static_cast<uint32_t>(micros()));
+    bot.setBatteryVisible(false);
+    bot.setSignal(-1);
+    settings.apply(bot);
+    model.begin(millis());
+    model.setSpeed(settings.data().speed);
+    audio.setEnabled(settings.data().audio != 0);
+    bottomLeds.begin();
+    bottomLeds.setBrightness(settings.data().ledBrightness);
+    appliedSettings = settings.data();
+    readPower();
+    setBotMood();
 }
 
 void loop()
 {
-    _now = millis();
+    nowMs = millis();
     M5.update();
-    handleTouch();
-
-    // long press (nap) while holding the bot still
-    if (_down && _zone == ZONE_BOT && !_moved && !_longFired && (_now - _pMs) >= 700)
+    const bool screenTouchEvent = handleTouch();
+    handleButtons(screenTouchEvent);
+    if (nowMs - lastFrameMs < kFrameMs)
     {
-        _longFired = true;
-        _bot.setMood(botux::BotUx::Mood::Sleepy);
-        _napUntil = _now + 3000;
-        _haptics.cancel();
+        delay(1);
+        return;
     }
-    if (_napUntil && _now >= _napUntil)
+    lastFrameMs = nowMs;
+    if (nowMs - lastPowerMs >= 5000)
     {
-        _napUntil = 0;
-        _chat.applyMood(); // restore conversation mood
+        lastPowerMs = nowMs;
+        readPower();
     }
-
-    // periodic device reads
-    if (_now - _lastPowerMs >= 5000)
-    {
-        _lastPowerMs = _now;
-        int8_t batt = (int8_t)M5.Power.getBatteryLevel();
-        if (batt < 0 || batt > 100) batt = 100;
-        bool charging = (M5.Power.isCharging() == m5::Power_Class::is_charging);
-        _bot.setBattery((uint8_t)batt);
-        snprintf(_statusBuf, sizeof(_statusBuf), "bat %d%%%s - no signal", batt, charging ? "+" : "");
-    }
-    updateClock();
-
     syncSettings();
-    _chat.update(_now);
-    _bot.update(_now);
-    _haptics.update(_now);
-
-    // render
-    _bot.draw(); // into _botSprite
-    if (_settings.isOpen())
-        _settings.draw(&_canvas, &_botSprite);
+    model.update(nowMs);
+    setBotMood();
+    const bool reduced = settings.data().reducedMotion != 0;
+    const uint8_t status = static_cast<uint8_t>(model.selectedAgent().status);
+    const bool poseChanged = status != lastBotStatus || listening != lastBotListening;
+    if (!reduced)
+    {
+        bot.update(nowMs);
+        reducedBotActive = false;
+    }
+    else if (!reducedBotActive)
+    {
+        reducedBotTimeMs = nowMs;
+        bot.update(reducedBotTimeMs);
+        reducedBotActive = true;
+    }
+    else if (poseChanged)
+    {
+        // Let the new pose settle in bounded synthetic steps, then freeze it.
+        if (nowMs - reducedBotTimeMs >= 500)
+            for (uint8_t i = 0; i < 6; ++i) bot.update(nowMs - 500 + i * 100);
+        else
+            bot.update(nowMs);
+        reducedBotTimeMs = nowMs;
+    }
     else
-        drawMain();
+    {
+        bot.update(reducedBotTimeMs);
+    }
+    lastBotStatus = status;
+    lastBotListening = listening;
+    bot.draw();
+    bottomLeds.update(model, nowMs, reduced);
 
-    _canvas.pushSprite(0, 0);
-    M5.Display.waitDisplay();
+    canvas.fillSprite(Settings::themeStyle(settings.data().theme).bgColor);
+    if (settings.isOpen()) settings.draw(canvas, botSprite);
+    else
+    {
+        drawHeader();
+        if (page == Page::Agents) drawAgentsPage();
+        else drawControlPage();
+    }
+    canvas.pushSprite(0, 0);
 }

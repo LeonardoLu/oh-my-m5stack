@@ -1,758 +1,631 @@
-// bot-ux-watch — M5Stack StopWatch (ESP32-S3, 466x466 round AMOLED touch).
-//
-// main.cpp owns the mode state machine (Face / Stopwatch / Settings), the touch
-// + button gesture routing, and fixed-buffer rendering. The shared bot-ux bot is
-// the Face hero; stopwatch and settings are utilitarian touch screens. Modules
-// are plain classes, one instance each; no heap in the loop.
+// bot-ux-watch — a round-safe M5Stack StopWatch companion face.
 
 #include <M5Unified.h>
 #include <BotUx.h>
 
-#include "WatchFace.h"
-#include "Stopwatch.h"
-#include "Settings.h"
+#include "CalendarMath.h"
+#include "InputSemantics.h"
 #include "Power.h"
+#include "Settings.h"
+#include "TimedState.h"
+#include "WatchFace.h"
 
 #include <stdio.h>
 #include <string.h>
 
-// ---- mode + gesture model -------------------------------------------------
-
-enum class Mode : uint8_t { Face, Stopwatch, Settings };
-enum class SetView : uint8_t { List, TimeHour, TimeMinute, Format, Theme, Style, Brightness };
-enum class MenuItem : uint8_t { TimeSet = 0, Format, Theme, Style, Brightness, Back, Count };
-
-// Buttons produce Tap/Double/Long; touch adds SwipeUp/SwipeDown.
-enum class Gesture : uint8_t { None, Tap, Double, Long, SwipeUp, SwipeDown };
+enum class Screen : uint8_t { Face, Settings, Editor };
+enum class Editor : uint8_t { None, Time, Date, Format, Appearance, Brightness };
+enum class MenuItem : uint8_t { Time, Date, Format, Appearance, Brightness, Done, Count };
+using watchinput::Gesture;
 
 namespace {
-constexpr uint32_t LONG_MS      = 600;
-constexpr uint32_t TAP_MS       = 250;
-constexpr uint32_t DOUBLE_MS    = 300;
-constexpr uint32_t TIME_CANCEL_MS = 1200; // time editor: > LONG_MS so auto-repeat can ramp
-constexpr uint8_t  LOW_BATT     = 15;
-constexpr int8_t   SIGNAL_BARS  = 4;   // placeholder: no NTP/WiFi in this build
+constexpr int16_t kW = 466;
+constexpr int16_t kH = 466;
+constexpr int16_t kBotSize = 206;
+constexpr int16_t kBotX = (kW - kBotSize) / 2;
+constexpr int16_t kBotY = 64;
+constexpr int16_t kPreviewSize = 124;
+constexpr int16_t kPreviewX = (kW - kPreviewSize) / 2;
+constexpr int16_t kPreviewY = 66;
+constexpr int16_t kMenuY = 94;
+constexpr int16_t kMenuStep = 54;
+constexpr uint32_t kActiveFrameMs = 33;
+constexpr uint32_t kDozeFrameMs = 250;
+constexpr uint8_t kLowBattery = 15;
 
-// ---- layout (466x466 round AMOLED) ----
-constexpr int16_t kW = 466, kH = 466;
-constexpr int16_t kBotW = 200, kBotH = 200;
-constexpr int16_t kBotX = 133, kBotY = 15;   // (466-200)/2, bot body ~ y 15..215
-constexpr int16_t kMenuTop = 120, kMenuStep = 52;  // settings list rows
-
-const char* const kMenuLabels[(int)MenuItem::Count] = {
-    "Time set", "Format", "Theme", "Style", "Brightness", "Back",
+const char* const kMenuLabels[(uint8_t)MenuItem::Count] = {
+    "TIME", "DATE", "FORMAT", "APPEARANCE", "BRIGHTNESS", "DONE"
 };
-} // namespace
-
-// ---- one instance each ----------------------------------------------------
+const char* const kMonths[12] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                                  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
+}
 
 M5Canvas canvas(&M5.Display);
 M5Canvas botSprite(&M5.Display);
+M5Canvas previewSprite(&M5.Display);
 WatchFace face;
-Stopwatch sw;
+botux::BotUx previewBot;
 Settings settings;
 Power power;
 
-Mode     _mode    = Mode::Face;
-SetView  _setView = SetView::List;
-MenuItem _menuSel = MenuItem::TimeSet;
+Screen _screen = Screen::Face;
+Editor _editor = Editor::None;
+MenuItem _menu = MenuItem::Time;
+Settings::Data _originalSettings;
 
-struct BtnState {
-    uint32_t downMs   = 0;
-    uint32_t upMs     = 0;
-    bool     longDone = false;
-    bool     pending  = false;
-    bool     swallow  = false;   // 2nd tap of a double: skip its own single tap
-};
-BtnState _btnA, _btnB;
+watchinput::ButtonGesture _buttonA;
+watchinput::ButtonGesture _buttonB;
+watchinput::TouchGesture _touch;
+int16_t _tapX = 0, _tapY = 0;
 
-// ---- touch state ----------------------------------------------------------
-uint32_t _tDownMs = 0;
-int16_t  _tx0 = 0, _ty0 = 0, _tx = 0, _ty = 0, _tapX = 0, _tapY = 0;
-bool     _tDown = false, _tMoved = false, _tLong = false, _tSwiped = false;
+uint8_t _battery = 100;
+bool _charging = false;
+bool _powerKnown = false;
+uint32_t _powerReadMs = 0;
+TimedState _happyAcknowledgment;
+bool _dozing = false;
+bool _renderReady = false;
+uint32_t _lastFrameMs = 0;
 
-uint8_t  _batt = 100;
-bool     _charging = false;
-uint32_t _battReadMs = 0;
+uint8_t _editHour = 0;
+uint8_t _editMinute = 0;
+int16_t _editYear = 2026;
+uint8_t _editMonth = 1;
+uint8_t _editDay = 1;
+uint8_t _editField = 0;
 
-uint8_t  _editHour = 0, _editMinute = 0;
-uint32_t _repeatDownMs = 0;
-uint32_t _repeatLastMs = 0;
-bool     _timeLongFired = false;
-
-Settings::Data _editData;
-uint32_t _sadUntil = 0;
-bool     _dozing = false;
-
-// ---- forward decls --------------------------------------------------------
-
-static void beep(uint16_t freq, uint16_t ms);
-static void soundClick();
-static void soundConfirm();
-static void soundCancel();
-static void soundPoke();
-static void soundHappy();
-static void soundSad();
-static void applyLiveSettings();
-static const char* eyeName(uint8_t e);
-static const char* bodyName(uint8_t b);
-static void drawBrightnessBar(M5Canvas* cv, int16_t x, int16_t y, uint8_t level);
-static void drawPicker(M5Canvas* cv, const botux::BotUx::Style& st, int16_t cx, int16_t y, const char* value);
-static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t now);
-static void drawMenuList(M5Canvas* cv, const botux::BotUx::Style& st);
-static const char* editorTitle();
-static const char* hintForView();
-static void drawEditor(uint32_t now);
-static void drawSettings(uint32_t now);
-static void drawHints();
-static botux::BotUx::Mood resolveMood(uint32_t now);
-static void enterSettings();
-static void exitSettings();
-static void commitTime();
-static void incTimeField();
-static void handleTimeEditor(uint32_t now);
-static void enterEditor(SetView v);
-static void liveApplyEdit();
-static void saveEdit();
-static void enterMenu();
-static void pokeBot();
-static void gotoStopwatch();
-static void startDoze();
-static void handleFaceButtons(Gesture ga, Gesture gb, uint32_t now);
-static void handleStopwatchButtons(Gesture ga, Gesture gb, uint32_t now);
-static void handleSettingsButtons(Gesture ga, Gesture gb, uint32_t now);
-static void handleButtons(Gesture ga, Gesture gb, uint32_t now);
-static void handleTouch(Gesture g, uint32_t now);
-static void refreshPower(uint32_t now);
-static void seedRtcIfNeeded();
-static void flushButtons();
-
-// ---- button gestures ------------------------------------------------------
-
-template <typename Btn>
-static Gesture pollButton(Btn& b, BtnState& s, uint32_t now) {
-    if (b.wasPressed()) {
-        s.downMs = now;
-        s.longDone = false;
-        if (s.pending && (now - s.upMs) <= DOUBLE_MS) {
-            s.pending = false;
-            s.swallow = true;
-            return Gesture::Double;
-        }
-    }
-    if (b.isPressed() && !s.longDone && (now - s.downMs) >= LONG_MS) {
-        s.longDone = true;
-        s.pending = false;
-        return Gesture::Long;
-    }
-    if (b.wasReleased()) {
-        if (s.longDone) return Gesture::None;
-        if (s.swallow) { s.swallow = false; return Gesture::None; }
-        uint32_t held = now - s.downMs;
-        if (held < TAP_MS) {
-            s.upMs = now;
-            s.pending = true;
-        }
-        return Gesture::None;
-    }
-    if (s.pending && (now - s.upMs) >= DOUBLE_MS) {
-        s.pending = false;
-        return Gesture::Tap;
-    }
-    return Gesture::None;
+static bool hit(int16_t x, int16_t y, int16_t left, int16_t top, int16_t width, int16_t height) {
+    return x >= left && x < left + width && y >= top && y < top + height;
 }
 
-static void flushButtons() {
-    _btnA.pending = false;
-    _btnA.swallow = false;
-    _btnB.pending = false;
-    _btnB.swallow = false;
-    if (M5.BtnA.isPressed()) _btnA.longDone = true;   // consume the held press
-    if (M5.BtnB.isPressed()) _btnB.longDone = true;
+static void playTone(uint16_t frequency, uint16_t duration) {
+    if (settings.data().sound) M5.Speaker.tone(frequency, duration);
 }
 
-// ---- touch gestures -------------------------------------------------------
+static void clickSound()   { playTone(960, 24); }
+static void confirmSound() { playTone(1260, 55); }
+static void pokeSound()    { playTone(1420, 36); }
 
-// Single-point touch → Tap (with _tapX/_tapY), SwipeUp, SwipeDown, or Long.
-static Gesture pollTouch(uint32_t now) {
-    auto t = M5.Touch.getDetail(0);
-    Gesture g = Gesture::None;
-
-    if (t.wasPressed()) {
-        _tDown = true; _tMoved = false; _tLong = false; _tSwiped = false;
-        _tx0 = _tx = (int16_t)t.x; _ty0 = _ty = (int16_t)t.y;
-        _tDownMs = now;
-    } else if (t.isPressed() && _tDown) {
-        _tx = (int16_t)t.x; _ty = (int16_t)t.y;
-        if (!_tMoved && (abs(_tx - _tx0) > 24 || abs(_ty - _ty0) > 24)) _tMoved = true;
-        if (!_tLong && !_tMoved && !_tSwiped && (now - _tDownMs) >= LONG_MS) {
-            _tLong = true;
-            g = Gesture::Long;
-        }
-        if (_tMoved && !_tSwiped) {
-            int16_t dx = _tx - _tx0, dy = _ty - _ty0;
-            if (dy < -50 && abs(dy) > abs(dx))      { _tSwiped = true; g = Gesture::SwipeUp; }
-            else if (dy > 50 && abs(dy) > abs(dx))  { _tSwiped = true; g = Gesture::SwipeDown; }
-        }
-    } else if (t.wasReleased() && _tDown) {
-        _tDown = false;
-        if (!_tLong && !_tMoved && !_tSwiped) {
-            _tapX = _tx; _tapY = _ty;
-            g = Gesture::Tap;
-        }
-    }
-    return g;
+static void consumeWakeInput() {
+    _buttonA.consume(M5.BtnA.isPressed());
+    _buttonB.consume(M5.BtnB.isPressed());
+    _touch.consume();
 }
 
-// ---- audio ----------------------------------------------------------------
-
-static void beep(uint16_t freq, uint16_t ms) { M5.Speaker.tone(freq, ms); }
-static void soundClick()   { beep(1000, 20); }
-static void soundConfirm() { beep(880, 60); }
-static void soundCancel()  { beep(440, 80); }
-static void soundPoke()    { beep(1200, 40); }
-static void soundHappy()   { beep(1320, 90); }
-static void soundSad()     { beep(330, 120); }
-
-// ---- settings helpers -----------------------------------------------------
-
-static const char* eyeName(uint8_t e) {
-    static const char* n[4] = { "Round", "Oval", "Square", "Googly" };
-    return (e < 4) ? n[e] : "?";
-}
-static const char* bodyName(uint8_t b) {
-    static const char* n[4] = { "None", "Round", "Rounded", "Hexagon" };
-    return (b < 4) ? n[b] : "?";
-}
-
-static void applyLiveSettings() {
-    settings.data() = _editData;
+static void applySettings() {
     settings.rebuildStyle();
     settings.apply(face.bot());
+    settings.apply(previewBot);
     face.setHour24(settings.data().hour24);
+    face.setShowSeconds(settings.data().showSeconds);
     power.applyLevel(settings.data().brightness);
-}
-
-// ---- settings drawing -----------------------------------------------------
-
-static void drawBrightnessBar(M5Canvas* cv, int16_t x, int16_t y, uint8_t level) {
-    for (uint8_t i = 1; i <= 5; i++) {
-        uint16_t c = (i <= level) ? settings.style().accentColor : botux::rgb565(0x30, 0x34, 0x3C);
-        cv->fillRoundRect(x + (i - 1) * 18, y - 6, 14, 12, 3, c);
-    }
-}
-
-static void drawPicker(M5Canvas* cv, const botux::BotUx::Style& st, int16_t cx, int16_t y, const char* value) {
-    cv->setTextDatum(middle_center);
-    cv->setTextSize(2.5f);
-    cv->setTextColor(st.accentColor);
-    cv->drawString(value, cx, y);
-    cv->setTextSize(2.0f);
-    cv->setTextColor(st.eyeColor);
-    cv->drawString("<", cx - 130, y);
-    cv->drawString(">", cx + 130, y);
-}
-
-static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t now) {
-    int16_t cx = cv->width() / 2;
-    bool blink = ((now / 500) % 2) == 0;
-
-    cv->setTextDatum(middle_center);
-    cv->setTextSize(4.0f);
-
-    char buf[4];
-    uint8_t hdisp = _editHour;                 // 24 h internally; render 1..12 in 12 h mode
-    if (!settings.data().hour24) {
-        hdisp = _editHour % 12;
-        if (hdisp == 0) hdisp = 12;
-    }
-    snprintf(buf, sizeof(buf), "%02u", (unsigned)hdisp);
-    bool showHour = (_setView != SetView::TimeHour) || blink;
-    cv->setTextColor(showHour ? st.accentColor : st.bgColor);
-    cv->drawString(buf, cx - 70, 200);
-
-    cv->setTextColor(st.eyeColor);
-    cv->drawString(":", cx, 200);
-
-    snprintf(buf, sizeof(buf), "%02u", (unsigned)_editMinute);
-    bool showMin = (_setView != SetView::TimeMinute) || blink;
-    cv->setTextColor(showMin ? st.accentColor : st.bgColor);
-    cv->drawString(buf, cx + 70, 200);
-}
-
-static void drawMenuList(M5Canvas* cv, const botux::BotUx::Style& st) {
-    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; i++) {
-        int16_t y = kMenuTop + i * kMenuStep;
-        bool sel = (i == (uint8_t)_menuSel);
-        if (sel) cv->fillRoundRect(40, y - 20, 386, 40, 10, st.bodyColor);
-
-        cv->setTextDatum(middle_left);
-        cv->setTextSize(1.5f);
-        cv->setTextColor(sel ? st.accentColor : st.eyeColor);
-        cv->drawString(kMenuLabels[i], 60, y);
-
-        cv->setTextDatum(middle_right);
-        cv->setTextColor(st.eyeColor);
-        switch ((MenuItem)i) {
-            case MenuItem::Format:
-                cv->drawString(settings.data().hour24 ? "24 h" : "12 h", 406, y);
-                break;
-            case MenuItem::Theme:
-                cv->drawString(Settings::themeName(settings.data().theme), 406, y);
-                break;
-            case MenuItem::Style:
-                cv->drawString(eyeName(settings.data().eyeStyle), 406, y);
-                break;
-            case MenuItem::Brightness:
-                drawBrightnessBar(cv, 300, y, settings.data().brightness);
-                break;
-            default: break;
-        }
-    }
-}
-
-static const char* editorTitle() {
-    switch (_setView) {
-        case SetView::TimeHour:
-        case SetView::TimeMinute: return "Set time";
-        case SetView::Format:     return "Format";
-        case SetView::Theme:      return "Theme";
-        case SetView::Style:      return "Style";
-        case SetView::Brightness: return "Brightness";
-        default:                  return "Settings";
-    }
-}
-
-static const char* hintForView() {
-    switch (_setView) {
-        case SetView::List:        return "tap select · swipe down back · [B] next";
-        case SetView::TimeHour:
-        case SetView::TimeMinute:  return "tap +1 · [B] next · swipe down save";
-        case SetView::Style:       return "tap eye · [B] body · swipe down save";
-        case SetView::Brightness:  return "tap up · [B] down · swipe down save";
-        default:                   return "tap change · swipe down save";
-    }
-}
-
-static void drawEditor(uint32_t now) {
-    M5Canvas* cv = &canvas;
-    const botux::BotUx::Style& st = settings.style();
-    int16_t cx = cv->width() / 2;
-
-    cv->setTextDatum(top_left);
-    cv->setTextSize(1.5f);
-    cv->setTextColor(st.eyeColor);
-    cv->drawString(editorTitle(), 60, 60);
-
-    switch (_setView) {
-        case SetView::TimeHour:
-        case SetView::TimeMinute:
-            drawTimeEditor(cv, st, now);
-            break;
-        case SetView::Format:
-            drawPicker(cv, st, cx, 200, settings.data().hour24 ? "24 h" : "12 h");
-            break;
-        case SetView::Theme:
-            drawPicker(cv, st, cx, 200, Settings::themeName(settings.data().theme));
-            break;
-        case SetView::Style:
-            cv->setTextDatum(middle_left);
-            cv->setTextSize(2.0f);
-            cv->setTextColor(st.accentColor);
-            cv->drawString("Eye", 90, 180);
-            cv->drawString("Body", 90, 230);
-            cv->setTextColor(st.eyeColor);
-            cv->drawString(eyeName(settings.data().eyeStyle), 200, 180);
-            cv->drawString(bodyName(settings.data().bodyStyle), 200, 230);
-            break;
-        case SetView::Brightness:
-            drawBrightnessBar(cv, cx - 40, 200, settings.data().brightness);
-            break;
-        default: break;
-    }
-}
-
-static void drawSettings(uint32_t now) {
-    M5Canvas* cv = &canvas;
-    const botux::BotUx::Style& st = settings.style();
-    cv->fillSprite(st.bgColor);
-
-    cv->setTextDatum(middle_center);
-    cv->setTextSize(2.0f);
-    cv->setTextColor(st.accentColor);
-    cv->drawString("Settings", cv->width() / 2, 40);
-
-    if (_setView == SetView::List) drawMenuList(cv, st);
-    else drawEditor(now);
-
-    cv->setTextDatum(bottom_center);
-    cv->setTextSize(1.0f);
-    cv->setTextColor(st.eyeColor);
-    cv->drawString(hintForView(), cv->width() / 2, 450);
-}
-
-static void drawHints() {
-    canvas.setTextDatum(bottom_center);
-    canvas.setTextSize(1.0f);
-    canvas.setTextColor(settings.style().eyeColor);
-    const char* hint = (_mode == Mode::Stopwatch)
-        ? "tap start/lap/reset · [B] stop/resume · swipe down back"
-        : "tap bot poke · swipe up settings · [B] stopwatch";
-    canvas.drawString(hint, canvas.width() / 2, 450);
-}
-
-// ---- mood ----------------------------------------------------------------
-
-static botux::BotUx::Mood resolveMood(uint32_t now) {
-    if (_dozing)                return botux::BotUx::Mood::Sleepy;
-    if (_batt <= LOW_BATT)      return botux::BotUx::Mood::Sleepy;
-    if (_charging)              return botux::BotUx::Mood::Happy;
-    if (now < _sadUntil)        return botux::BotUx::Mood::Sad;
-    switch (_mode) {
-        case Mode::Stopwatch:   return sw.running() ? botux::BotUx::Mood::Happy : botux::BotUx::Mood::Idle;
-        case Mode::Settings:    return botux::BotUx::Mood::Listening;
-        default:                return botux::BotUx::Mood::Idle;
-    }
-}
-
-// ---- mode transitions + actions ------------------------------------------
-
-static void enterSettings() { _mode = Mode::Settings; _setView = SetView::List; _menuSel = MenuItem::TimeSet; soundConfirm(); }
-static void exitSettings()  { _mode = Mode::Face; _setView = SetView::List; _menuSel = MenuItem::TimeSet; soundCancel(); }
-static void pokeBot()       { face.bot().poke(); soundPoke(); }
-static void gotoStopwatch() { _mode = Mode::Stopwatch; soundHappy(); }
-
-static void startDoze() {
-    _dozing = true;
-    power.setBrightness(76);   // ~30% — dim doze
-    soundCancel();
-}
-
-static void commitTime() {
-    auto dt = M5.Rtc.getDateTime();
-    dt.time.hours = (int8_t)_editHour;
-    dt.time.minutes = (int8_t)_editMinute;
-    dt.time.seconds = 0;
-    M5.Rtc.setDateTime(dt);
-}
-
-static void incTimeField() {
-    if (_setView == SetView::TimeHour) _editHour = (_editHour + 1) % 24;
-    else                               _editMinute = (_editMinute + 1) % 60;
-}
-
-static void handleTimeEditor(uint32_t now) {
-    // A: +1 immediately on press, auto-repeat while held, long cancels.
-    if (M5.BtnA.wasPressed()) {
-        _repeatDownMs = now;
-        _repeatLastMs = now;
-        _timeLongFired = false;
-        incTimeField();
-        soundClick();
-    }
-    if (M5.BtnA.isPressed()) {
-        uint32_t held = now - _repeatDownMs;
-        if (held >= TIME_CANCEL_MS) {
-            if (!_timeLongFired) {
-                _timeLongFired = true;
-                soundCancel();
-                flushButtons();
-                _setView = SetView::List;
-            }
-        } else if (held >= 300) {
-            uint32_t t = (held < 1000) ? held : 1000;
-            float hz = 8.0f + 12.0f * (float)t / 1000.0f;
-            uint32_t interval = (uint32_t)(1000.0f / hz);
-            if (now - _repeatLastMs >= interval) {
-                _repeatLastMs = now;
-                incTimeField();
-            }
-        }
-    }
-    // B: hour -> minute -> done
-    if (M5.BtnB.wasPressed()) {
-        soundClick();
-        if (_setView == SetView::TimeHour) _setView = SetView::TimeMinute;
-        else { commitTime(); flushButtons(); _setView = SetView::List; soundConfirm(); }
-    }
-}
-
-static void enterEditor(SetView v) {
-    _setView = v;
-    _editData = settings.data();
-    if (v == SetView::TimeHour) {
-        _editHour = face.hour();
-        _editMinute = face.minute();
-        _repeatDownMs = 0;
-        _repeatLastMs = 0;
-        _timeLongFired = false;
-        flushButtons();
-    }
-}
-
-static void liveApplyEdit() { applyLiveSettings(); }
-
-static void saveEdit() {
-    settings.save();
-    soundConfirm();
-    _setView = SetView::List;
-}
-
-static void enterMenu() {
-    switch (_menuSel) {
-        case MenuItem::TimeSet:     enterEditor(SetView::TimeHour); break;
-        case MenuItem::Format:      enterEditor(SetView::Format); break;
-        case MenuItem::Theme:       enterEditor(SetView::Theme); break;
-        case MenuItem::Style:       enterEditor(SetView::Style); break;
-        case MenuItem::Brightness:  enterEditor(SetView::Brightness); break;
-        case MenuItem::Back:        exitSettings(); break;
-        default: break;
-    }
-}
-
-// ---- button routing -------------------------------------------------------
-
-static void handleFaceButtons(Gesture ga, Gesture gb, uint32_t now) {
-    (void)now;
-    if (ga == Gesture::Tap) {
-        pokeBot();
-    } else if (ga == Gesture::Double) {
-        settings.data().hour24 = !settings.data().hour24;
-        settings.save();
-        face.setHour24(settings.data().hour24);
-        soundConfirm();
-    } else if (ga == Gesture::Long) {
-        enterSettings();
-    }
-    if (gb == Gesture::Tap) {
-        gotoStopwatch();
-    } else if (gb == Gesture::Long) {
-        startDoze();
-    }
-}
-
-static void handleStopwatchButtons(Gesture ga, Gesture gb, uint32_t now) {
-    if (ga == Gesture::Tap) {
-        Stopwatch::State before = sw.state();
-        sw.pressPrimary();
-        if (before == Stopwatch::State::Idle)        { soundClick(); }
-        else if (before == Stopwatch::State::Running){ pokeBot(); soundClick(); }
-        else                                         { _sadUntil = now + 700; soundSad(); }
-    } else if (ga == Gesture::Long) {
-        soundCancel();
-        _mode = Mode::Face;
-    }
-    if (gb == Gesture::Tap) {
-        Stopwatch::State before = sw.state();
-        sw.pressSecondary();
-        if (before == Stopwatch::State::Running) soundClick();
-        else if (before == Stopwatch::State::Stopped) soundHappy();
-    }
-}
-
-static void handleSettingsButtons(Gesture ga, Gesture gb, uint32_t now) {
-    (void)now;
-    if (_setView == SetView::List) {
-        if (ga == Gesture::Tap)        { soundClick(); enterMenu(); }
-        else if (ga == Gesture::Long)  { exitSettings(); }
-        if (gb == Gesture::Tap)        { soundClick(); _menuSel = (MenuItem)(((uint8_t)_menuSel + 1) % (uint8_t)MenuItem::Count); }
-        return;
-    }
-
-    switch (_setView) {
-        case SetView::Format:
-            if (ga == Gesture::Tap) { _editData.hour24 = !_editData.hour24; liveApplyEdit(); soundClick(); }
-            else if (ga == Gesture::Long) { saveEdit(); }
-            break;
-        case SetView::Theme:
-            if (ga == Gesture::Tap) { _editData.theme = (_editData.theme + 1) % Settings::THEME_COUNT; liveApplyEdit(); soundClick(); }
-            else if (ga == Gesture::Long) { saveEdit(); }
-            break;
-        case SetView::Style:
-            if (ga == Gesture::Tap) { _editData.eyeStyle = (_editData.eyeStyle + 1) % 4; liveApplyEdit(); soundClick(); }
-            else if (ga == Gesture::Long) { saveEdit(); }
-            if (gb == Gesture::Tap) { _editData.bodyStyle = (_editData.bodyStyle + 1) % 4; liveApplyEdit(); soundClick(); }
-            break;
-        case SetView::Brightness:
-            if (ga == Gesture::Tap) { _editData.brightness = (_editData.brightness % 5) + 1; liveApplyEdit(); soundClick(); }
-            else if (ga == Gesture::Long) { saveEdit(); }
-            if (gb == Gesture::Tap) { _editData.brightness = (_editData.brightness == 1) ? 5 : (_editData.brightness - 1); liveApplyEdit(); soundClick(); }
-            break;
-        default: break;
-    }
-}
-
-static void handleButtons(Gesture ga, Gesture gb, uint32_t now) {
-    switch (_mode) {
-        case Mode::Face:      handleFaceButtons(ga, gb, now); break;
-        case Mode::Stopwatch: handleStopwatchButtons(ga, gb, now); break;
-        case Mode::Settings:  handleSettingsButtons(ga, gb, now); break;
-    }
-}
-
-// ---- touch routing --------------------------------------------------------
-
-static void handleTouch(Gesture g, uint32_t now) {
-    switch (_mode) {
-        case Mode::Face:
-            if (g == Gesture::Tap) {
-                if (_tapY < 250) pokeBot(); else gotoStopwatch();
-            } else if (g == Gesture::SwipeUp) {
-                enterSettings();
-            } else if (g == Gesture::SwipeDown || g == Gesture::Long) {
-                startDoze();
-            }
-            break;
-
-        case Mode::Stopwatch:
-            if (g == Gesture::Tap) {
-                handleStopwatchButtons(Gesture::Tap, Gesture::None, now);
-            } else if (g == Gesture::SwipeDown || g == Gesture::Long) {
-                soundCancel();
-                _mode = Mode::Face;
-            }
-            break;
-
-        case Mode::Settings:
-            if (g == Gesture::Tap) {
-                if (_setView == SetView::List) {
-                    for (int i = 0; i < (int)MenuItem::Count; i++) {
-                        int16_t ry = kMenuTop + i * kMenuStep;
-                        if (_tapY >= ry - 20 && _tapY < ry + 20) {
-                            _menuSel = (MenuItem)i;
-                            soundClick();
-                            enterMenu();
-                            break;
-                        }
-                    }
-                } else {
-                    // editor: tap advances the value (same as button A)
-                    handleSettingsButtons(Gesture::Tap, Gesture::None, now);
-                }
-            } else if (g == Gesture::SwipeDown) {
-                if (_setView == SetView::List) exitSettings(); else saveEdit();
-            } else if (g == Gesture::Long) {
-                if (_setView == SetView::List) exitSettings(); else saveEdit();
-            }
-            break;
-    }
-}
-
-// ---- power + rtc ----------------------------------------------------------
-
-static void refreshPower(uint32_t now) {
-    if (now - _battReadMs >= 1000) {
-        _battReadMs = now;
-        _batt = power.batteryPct();
-        _charging = power.charging();
-    }
 }
 
 static void seedRtcIfNeeded() {
     auto dt = M5.Rtc.getDateTime();
-    if (dt.date.year >= 2020) return;   // already plausible
+    bool valid = dt.date.year >= 2020 && dt.date.year <= 2099
+        && dt.date.month >= 1 && dt.date.month <= 12
+        && dt.date.date >= 1 && dt.date.date <= 31
+        && dt.time.hours >= 0 && dt.time.hours <= 23
+        && dt.time.minutes >= 0 && dt.time.minutes <= 59;
+    if (valid) return;
 
-    int y = 2026, mo = 1, d = 1, h = 0, mi = 0, s = 0;
-    char mon[4];
-    sscanf(__DATE__, "%3s %d %d", mon, &d, &y);
+    int year = 2026, month = 1, day = 1, hour = 0, minute = 0, second = 0;
+    char mon[4] = {};
+    sscanf(__DATE__, "%3s %d %d", mon, &day, &year);
     const char* months = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    const char* p = strstr(months, mon);
-    if (p) mo = (int)((p - months) / 3 + 1);
-    sscanf(__TIME__, "%d:%d:%d", &h, &mi, &s);
+    const char* found = strstr(months, mon);
+    if (found) month = (int)((found - months) / 3 + 1);
+    sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second);
 
-    auto out = M5.Rtc.getDateTime();
-    out.date.year = (int16_t)y;
-    out.date.month = (int8_t)mo;
-    out.date.date = (int8_t)d;
-    out.time.hours = (int8_t)h;
-    out.time.minutes = (int8_t)mi;
-    out.time.seconds = (int8_t)s;
-    M5.Rtc.setDateTime(out);
+    dt.date.year = (int16_t)year;
+    dt.date.month = (int8_t)month;
+    dt.date.date = (int8_t)day;
+    dt.date.weekDay = (int8_t)watchcalendar::weekDay(year, month, day);
+    dt.time.hours = (int8_t)hour;
+    dt.time.minutes = (int8_t)minute;
+    dt.time.seconds = (int8_t)second;
+    M5.Rtc.setDateTime(dt);
 }
 
-// ---- setup / loop ---------------------------------------------------------
+static void refreshPower(uint32_t now) {
+    if (_powerKnown && now - _powerReadMs < 1000) return;
+    _powerReadMs = now;
+    bool wasCharging = _charging;
+    power.update();
+    _battery = power.batteryPct();
+    _charging = power.charging();
+    if (_powerKnown && _charging && !wasCharging) {
+        _happyAcknowledgment.start(now, 1400);
+        confirmSound();
+    }
+    _powerKnown = true;
+}
+
+static botux::BotUx::Mood faceMood(uint32_t now) {
+    if (_dozing) return botux::BotUx::Mood::Sleepy;
+    if (_happyAcknowledgment.active(now)) return botux::BotUx::Mood::Happy;
+    if (_battery <= kLowBattery) return botux::BotUx::Mood::Sleepy;
+    if (_screen != Screen::Face) return botux::BotUx::Mood::Listening;
+    return botux::BotUx::Mood::Idle;
+}
+
+static void enterSettings() {
+    _screen = Screen::Settings;
+    _editor = Editor::None;
+    _menu = MenuItem::Time;
+    confirmSound();
+}
+
+static void leaveSettings() {
+    _screen = Screen::Face;
+    _editor = Editor::None;
+    settings.save();
+    confirmSound();
+}
+
+static void enterEditor(Editor editor) {
+    _screen = Screen::Editor;
+    _editor = editor;
+    _originalSettings = settings.data();
+    _editField = 0;
+    auto dt = M5.Rtc.getDateTime();
+    _editHour = (uint8_t)dt.time.hours;
+    _editMinute = (uint8_t)dt.time.minutes;
+    _editYear = dt.date.year;
+    _editMonth = (uint8_t)dt.date.month;
+    _editDay = (uint8_t)dt.date.date;
+    clickSound();
+}
+
+static void cancelEditor() {
+    settings.data() = _originalSettings;
+    applySettings();
+    _screen = Screen::Settings;
+    _editor = Editor::None;
+    clickSound();
+}
+
+static void saveEditor() {
+    if (_editor == Editor::Time) {
+        auto dt = M5.Rtc.getDateTime();
+        dt.time.hours = (int8_t)_editHour;
+        dt.time.minutes = (int8_t)_editMinute;
+        dt.time.seconds = 0;
+        M5.Rtc.setDateTime(dt);
+    } else if (_editor == Editor::Date) {
+        auto dt = M5.Rtc.getDateTime();
+        dt.date.year = _editYear;
+        dt.date.month = (int8_t)_editMonth;
+        dt.date.date = (int8_t)_editDay;
+        dt.date.weekDay = (int8_t)watchcalendar::weekDay(_editYear, _editMonth, _editDay);
+        M5.Rtc.setDateTime(dt);
+    } else {
+        settings.save();
+    }
+    _screen = Screen::Settings;
+    _editor = Editor::None;
+    confirmSound();
+}
+
+static void toggleSeconds() {
+    settings.data().showSeconds = !settings.data().showSeconds;
+    face.setShowSeconds(settings.data().showSeconds);
+    settings.save();
+    clickSound();
+}
+
+static void pokeBot() {
+    face.bot().poke();
+    pokeSound();
+}
+
+static void startDoze() {
+    _dozing = true;
+    power.setBrightness(14);
+}
+
+static void changeEditorValue(int8_t delta) {
+    if (_editor == Editor::Time) {
+        if (_editField == 0) _editHour = (uint8_t)((_editHour + 24 + delta) % 24);
+        else _editMinute = (uint8_t)((_editMinute + 60 + delta) % 60);
+    } else if (_editor == Editor::Date) {
+        if (_editField == 0) {
+            _editMonth = (uint8_t)((_editMonth - 1 + 12 + delta) % 12 + 1);
+        } else if (_editField == 1) {
+            int maxDay = watchcalendar::daysInMonth(_editYear, _editMonth);
+            _editDay = (uint8_t)((_editDay - 1 + maxDay + delta) % maxDay + 1);
+        } else {
+            _editYear = (int16_t)((_editYear - 2020 + 80 + delta) % 80 + 2020);
+        }
+        uint8_t maxDay = watchcalendar::daysInMonth(_editYear, _editMonth);
+        if (_editDay > maxDay) _editDay = maxDay;
+    } else if (_editor == Editor::Format) {
+        settings.data().hour24 = !settings.data().hour24;
+        applySettings();
+    } else if (_editor == Editor::Appearance) {
+        if (_editField == 0) {
+            settings.data().theme = (uint8_t)((settings.data().theme + Settings::THEME_COUNT + delta) % Settings::THEME_COUNT);
+        } else if (_editField == 1) {
+            settings.data().appearance = (uint8_t)((settings.data().appearance + Settings::APPEARANCE_COUNT + delta) % Settings::APPEARANCE_COUNT);
+        } else {
+            bool enabling = !settings.data().sound;
+            if (!enabling) clickSound();
+            settings.data().sound = enabling;
+        }
+        applySettings();
+    } else if (_editor == Editor::Brightness) {
+        int level = settings.data().brightness + delta;
+        if (level < 1) level = 1;
+        if (level > 5) level = 5;
+        settings.data().brightness = (uint8_t)level;
+        applySettings();
+    }
+    if (!(_editor == Editor::Appearance && _editField == 2 && !settings.data().sound)) clickSound();
+}
+
+static void selectMenuItem() {
+    switch (_menu) {
+        case MenuItem::Time:       enterEditor(Editor::Time); break;
+        case MenuItem::Date:       enterEditor(Editor::Date); break;
+        case MenuItem::Format:     enterEditor(Editor::Format); break;
+        case MenuItem::Appearance: enterEditor(Editor::Appearance); break;
+        case MenuItem::Brightness: enterEditor(Editor::Brightness); break;
+        case MenuItem::Done:       leaveSettings(); break;
+        default: break;
+    }
+}
+
+static void handleFaceInput(Gesture gesture) {
+    if (gesture == Gesture::Tap) {
+        if (hit(_tapX, _tapY, 154, 378, 158, 70)) enterSettings();
+        else if (hit(_tapX, _tapY, 90, 282, 286, 98)) toggleSeconds();
+        else if (hit(_tapX, _tapY, kBotX, kBotY, kBotSize, kBotSize)) pokeBot();
+    } else if (gesture == Gesture::SwipeUp) {
+        enterSettings();
+    } else if (gesture == Gesture::SwipeDown) {
+        startDoze();
+    }
+}
+
+static void handleSettingsTouch() {
+    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; ++i) {
+        int16_t cy = kMenuY + i * kMenuStep;
+        if (hit(_tapX, _tapY, 58, cy - 23, 350, 46)) {
+            _menu = (MenuItem)i;
+            selectMenuItem();
+            return;
+        }
+    }
+}
+
+static void handleEditorTouch() {
+    if (hit(_tapX, _tapY, 84, 368, 138, 54)) { cancelEditor(); return; }
+    if (hit(_tapX, _tapY, 244, 368, 138, 54)) { saveEditor(); return; }
+
+    if (_editor == Editor::Time) {
+        const int16_t centers[2] = { 157, 309 };
+        for (uint8_t i = 0; i < 2; ++i) {
+            if (hit(_tapX, _tapY, centers[i] - 50, 115, 100, 54)) { _editField = i; changeEditorValue(-1); return; }
+            if (hit(_tapX, _tapY, centers[i] - 50, 255, 100, 54)) { _editField = i; changeEditorValue(1); return; }
+            if (hit(_tapX, _tapY, centers[i] - 55, 175, 110, 72)) { _editField = i; clickSound(); return; }
+        }
+    } else if (_editor == Editor::Date) {
+        const int16_t centers[3] = { 108, 233, 358 };
+        for (uint8_t i = 0; i < 3; ++i) {
+            if (hit(_tapX, _tapY, centers[i] - 43, 115, 86, 52)) { _editField = i; changeEditorValue(-1); return; }
+            if (hit(_tapX, _tapY, centers[i] - 43, 255, 86, 52)) { _editField = i; changeEditorValue(1); return; }
+            if (hit(_tapX, _tapY, centers[i] - 46, 175, 92, 72)) { _editField = i; clickSound(); return; }
+        }
+    } else if (_editor == Editor::Format) {
+        if (hit(_tapX, _tapY, 78, 154, 146, 84)) {
+            settings.data().hour24 = false; applySettings(); clickSound();
+        } else if (hit(_tapX, _tapY, 242, 154, 146, 84)) {
+            settings.data().hour24 = true; applySettings(); clickSound();
+        }
+    } else if (_editor == Editor::Appearance) {
+        const int16_t rows[3] = { 226, 282, 338 };
+        for (uint8_t i = 0; i < 3; ++i) {
+            if (hit(_tapX, _tapY, 58, rows[i] - 23, 350, 46)) {
+                _editField = i;
+                int8_t delta = (_tapX < 233) ? -1 : 1;
+                changeEditorValue(delta);
+                return;
+            }
+        }
+    } else if (_editor == Editor::Brightness) {
+        if (hit(_tapX, _tapY, 72, 160, 96, 76)) changeEditorValue(-1);
+        else if (hit(_tapX, _tapY, 298, 160, 96, 76)) changeEditorValue(1);
+    }
+}
+
+static void handleInputs(uint32_t now) {
+    auto touch = M5.Touch.getDetail(0);
+    bool wakePressed = M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || touch.wasPressed();
+    if (_dozing) {
+        if (wakePressed) {
+            _dozing = false;
+            consumeWakeInput();
+            power.applyLevel(settings.data().brightness);
+        }
+        return;
+    }
+
+    Gesture ga = _buttonA.poll(M5.BtnA.wasPressed(), M5.BtnA.isPressed(), M5.BtnA.wasReleased(), now);
+    Gesture gb = _buttonB.poll(M5.BtnB.wasPressed(), M5.BtnB.isPressed(), M5.BtnB.wasReleased(), now);
+    Gesture gt = _touch.poll(touch.wasPressed(), touch.isPressed(), touch.wasReleased(),
+                             (int16_t)touch.x, (int16_t)touch.y, now);
+    if (gt == Gesture::Tap) {
+        _tapX = _touch.tapX();
+        _tapY = _touch.tapY();
+    }
+
+    if (_screen == Screen::Face) {
+        if (ga == Gesture::Tap) pokeBot();
+        else if (ga == Gesture::Long) enterSettings();
+        if (gb == Gesture::Tap) toggleSeconds();
+        else if (gb == Gesture::Long) startDoze();
+        if (gt != Gesture::None) handleFaceInput(gt);
+        return;
+    }
+
+    if (_screen == Screen::Settings) {
+        if (ga == Gesture::Tap) selectMenuItem();
+        else if (ga == Gesture::Long) leaveSettings();
+        if (gb == Gesture::Tap) {
+            _menu = (MenuItem)(((uint8_t)_menu + 1) % (uint8_t)MenuItem::Count);
+            clickSound();
+        }
+        if (gt == Gesture::Tap) handleSettingsTouch();
+        else if (gt == Gesture::SwipeDown) leaveSettings();
+        return;
+    }
+
+    if (ga == Gesture::Tap) changeEditorValue(-1);
+    else if (ga == Gesture::Long) cancelEditor();
+    if (gb == Gesture::Tap) changeEditorValue(1);
+    else if (gb == Gesture::Long) saveEditor();
+    if (gt == Gesture::Tap) handleEditorTouch();
+    else if (gt == Gesture::SwipeDown) cancelEditor();
+}
+
+static void drawPill(int16_t x, int16_t y, int16_t w, int16_t h,
+                     const char* label, bool selected, bool accentFill = false) {
+    uint16_t fill = accentFill ? settings.style().accentColor : settings.panel();
+    canvas.fillRoundRect(x, y, w, h, h / 2, fill);
+    canvas.drawRoundRect(x, y, w, h, h / 2,
+                         selected ? settings.style().accentColor : settings.muted());
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(1.35f);
+    canvas.setTextColor(accentFill ? settings.style().bgColor : settings.ink());
+    canvas.drawString(label, x + w / 2, y + h / 2);
+}
+
+static void drawTitle(const char* title) {
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(1.55f);
+    canvas.setTextColor(settings.ink());
+    canvas.drawString(title, kW / 2, 48);
+}
+
+static void drawSettingsList() {
+    drawTitle("SETTINGS");
+    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; ++i) {
+        int16_t cy = kMenuY + i * kMenuStep;
+        bool selected = i == (uint8_t)_menu;
+        if (selected) canvas.fillRoundRect(78, cy - 22, 310, 44, 18, settings.panel());
+
+        canvas.setTextDatum(middle_left);
+        canvas.setTextSize(1.3f);
+        canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
+        canvas.drawString(kMenuLabels[i], 88, cy);
+
+        char value[24] = {};
+        switch ((MenuItem)i) {
+            case MenuItem::Time: snprintf(value, sizeof(value), "%02u:%02u", face.hour(), face.minute()); break;
+            case MenuItem::Date: {
+                uint8_t month = face.month();
+                const char* name = month >= 1 && month <= 12 ? kMonths[month - 1] : "---";
+                snprintf(value, sizeof(value), "%02u %s", face.day(), name);
+                break;
+            }
+            case MenuItem::Format: snprintf(value, sizeof(value), settings.data().hour24 ? "24 H" : "12 H"); break;
+            case MenuItem::Appearance: snprintf(value, sizeof(value), "%s", Settings::appearanceName(settings.data().appearance)); break;
+            case MenuItem::Brightness: snprintf(value, sizeof(value), "%u / 5", settings.data().brightness); break;
+            default: break;
+        }
+        if (value[0]) {
+            canvas.setTextDatum(middle_right);
+            canvas.setTextColor(settings.muted());
+            canvas.drawString(value, 378, cy);
+        }
+    }
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(0.9f);
+    canvas.setTextColor(settings.muted());
+    canvas.drawString("A SELECT     B MOVE", 233, 425);
+}
+
+static void drawFooter() {
+    drawPill(84, 370, 138, 50, "BACK", false);
+    drawPill(244, 370, 138, 50, "DONE", true, true);
+}
+
+static void drawStepper(int16_t cx, const char* label, const char* value, bool selected, int16_t width) {
+    drawPill(cx - width / 2, 116, width, 52, "-", selected);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(1.0f);
+    canvas.setTextColor(settings.muted());
+    canvas.drawString(label, cx, 190);
+    canvas.setTextSize(2.5f);
+    canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
+    canvas.drawString(value, cx, 220);
+    drawPill(cx - width / 2, 256, width, 52, "+", selected);
+}
+
+static void drawTimeEditor() {
+    drawTitle("SET TIME");
+    char hour[4], minute[4];
+    snprintf(hour, sizeof(hour), "%02u", (unsigned)_editHour);
+    snprintf(minute, sizeof(minute), "%02u", (unsigned)_editMinute);
+    drawStepper(157, "HOUR", hour, _editField == 0, 100);
+    drawStepper(309, "MINUTE", minute, _editField == 1, 100);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(2.0f);
+    canvas.setTextColor(settings.muted());
+    canvas.drawString(":", 233, 220);
+    drawFooter();
+}
+
+static void drawDateEditor() {
+    drawTitle("SET DATE");
+    char day[4], year[6];
+    snprintf(day, sizeof(day), "%02u", (unsigned)_editDay);
+    snprintf(year, sizeof(year), "%d", (int)_editYear);
+    drawStepper(108, "MONTH", kMonths[_editMonth - 1], _editField == 0, 86);
+    drawStepper(233, "DAY", day, _editField == 1, 86);
+    drawStepper(358, "YEAR", year, _editField == 2, 86);
+    drawFooter();
+}
+
+static void drawFormatEditor() {
+    drawTitle("TIME FORMAT");
+    drawPill(78, 154, 146, 84, "12 HOUR", !settings.data().hour24, !settings.data().hour24);
+    drawPill(242, 154, 146, 84, "24 HOUR", settings.data().hour24, settings.data().hour24);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(1.0f);
+    canvas.setTextColor(settings.muted());
+    canvas.drawString("Tap the clock face to show seconds", 233, 286);
+    drawFooter();
+}
+
+static void drawArrowRow(int16_t cy, const char* label, const char* value, bool selected) {
+    if (selected) canvas.fillRoundRect(58, cy - 22, 350, 44, 17, settings.panel());
+    canvas.setTextDatum(middle_left);
+    canvas.setTextSize(1.1f);
+    canvas.setTextColor(settings.muted());
+    canvas.drawString(label, 76, cy);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(settings.ink());
+    canvas.drawString(value, 270, cy);
+    canvas.setTextColor(settings.style().accentColor);
+    canvas.drawString("<", 205, cy);
+    canvas.drawString(">", 388, cy);
+}
+
+static void drawAppearanceEditor() {
+    drawTitle("APPEARANCE");
+    previewBot.draw();
+    previewSprite.pushSprite(&canvas, kPreviewX, kPreviewY);
+    drawArrowRow(226, "THEME", Settings::themeName(settings.data().theme), _editField == 0);
+    drawArrowRow(282, "SHAPE", Settings::appearanceName(settings.data().appearance), _editField == 1);
+    drawArrowRow(338, "SOUND", settings.data().sound ? "ON" : "OFF", _editField == 2);
+    drawFooter();
+}
+
+static void drawBrightnessEditor() {
+    drawTitle("BRIGHTNESS");
+    drawPill(72, 160, 96, 76, "-", false);
+    drawPill(298, 160, 96, 76, "+", false);
+    for (uint8_t i = 0; i < 5; ++i) {
+        uint16_t color = i < settings.data().brightness
+            ? settings.style().accentColor : settings.panel();
+        canvas.fillRoundRect(185 + i * 22, 187, 16, 22, 6, color);
+    }
+    char value[8];
+    snprintf(value, sizeof(value), "%u / 5", settings.data().brightness);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextSize(1.4f);
+    canvas.setTextColor(settings.ink());
+    canvas.drawString(value, 233, 278);
+    drawFooter();
+}
+
+static void drawEditor() {
+    switch (_editor) {
+        case Editor::Time:       drawTimeEditor(); break;
+        case Editor::Date:       drawDateEditor(); break;
+        case Editor::Format:     drawFormatEditor(); break;
+        case Editor::Appearance: drawAppearanceEditor(); break;
+        case Editor::Brightness: drawBrightnessEditor(); break;
+        default: break;
+    }
+}
+
+static void render(uint32_t now) {
+    canvas.fillSprite(settings.style().bgColor);
+    face.setBattery(_battery);
+    face.setCharging(_charging);
+    face.setHour24(settings.data().hour24);
+    face.setShowSeconds(settings.data().showSeconds);
+    face.bot().setMood(faceMood(now));
+    face.update(now);
+    face.bot().update(now);
+
+    if (_editor == Editor::Appearance) {
+        previewBot.setMood(botux::BotUx::Mood::Listening);
+        previewBot.update(now);
+    }
+
+    if (_screen == Screen::Face) {
+        face.bot().draw();
+        botSprite.pushSprite(&canvas, kBotX, kBotY);
+        face.draw(settings.ink(), settings.muted(), settings.style().accentColor,
+                  settings.panel(), settings.warning());
+    } else if (_screen == Screen::Settings) {
+        drawSettingsList();
+    } else {
+        drawEditor();
+    }
+
+    canvas.pushSprite(0, 0);
+    M5.Display.waitDisplay();
+}
 
 void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
+    Serial.begin(115200);
 
-    power.begin();
     settings.begin();
-
-    canvas.setColorDepth(16);
-    canvas.createSprite(kW, kH);
-    botSprite.setColorDepth(16);
-    botSprite.createSprite(kBotW, kBotH);
-
-    face.begin(&canvas, &botSprite);
-    sw.begin();
-
-    settings.rebuildStyle();
-    settings.apply(face.bot());
-    face.setHour24(settings.data().hour24);
-    power.applyLevel(settings.data().brightness);
-
+    power.begin();
     seedRtcIfNeeded();
 
-    _batt = power.batteryPct();
-    _charging = power.charging();
-    _battReadMs = millis();
+    canvas.setColorDepth(16);
+    botSprite.setColorDepth(16);
+    previewSprite.setColorDepth(16);
+    bool canvasOk = canvas.createSprite(kW, kH) != nullptr;
+    bool botOk = botSprite.createSprite(kBotSize, kBotSize) != nullptr;
+    bool previewOk = previewSprite.createSprite(kPreviewSize, kPreviewSize) != nullptr;
+    _renderReady = canvasOk && botOk && previewOk;
+    if (!_renderReady) {
+        Serial.printf("sprite allocation failed: canvas=%d bot=%d preview=%d\n", canvasOk, botOk, previewOk);
+        M5.Display.fillScreen(TFT_BLACK);
+        M5.Display.setTextDatum(middle_center);
+        M5.Display.setTextColor(TFT_WHITE);
+        M5.Display.drawString("DISPLAY MEMORY ERROR", kW / 2, kH / 2);
+        return;
+    }
+
+    face.begin(&canvas, &botSprite);
+    previewBot.begin(&previewSprite);
+    applySettings();
+    refreshPower(millis());
 }
 
 void loop() {
     M5.update();
     uint32_t now = millis();
+    if (!_renderReady) { delay(20); return; }
 
     refreshPower(now);
+    handleInputs(now);
 
-    if (_dozing) {
-        // wake on any button or touch
-        if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.Touch.getDetail(0).wasPressed()) {
-            _dozing = false;
-            flushButtons();
-            power.applyLevel(settings.data().brightness);
-            soundConfirm();
-        }
-    } else {
-        bool timeEdit = (_setView == SetView::TimeHour || _setView == SetView::TimeMinute);
-        if (_mode == Mode::Settings && timeEdit) {
-            handleTimeEditor(now);
-        } else {
-            Gesture ga = pollButton(M5.BtnA, _btnA, now);
-            Gesture gb = pollButton(M5.BtnB, _btnB, now);
-            handleButtons(ga, gb, now);
-        }
-        Gesture gt = pollTouch(now);
-        if (gt != Gesture::None) handleTouch(gt, now);
+    uint32_t interval = _dozing ? kDozeFrameMs : kActiveFrameMs;
+    if (now - _lastFrameMs < interval) {
+        delay(1);
+        return;
     }
-
-    face.setBattery(_batt);
-    face.setCharging(_charging);
-    face.setSignal(SIGNAL_BARS);
-    face.bot().setMood(resolveMood(now));
-    face.update(now);
-    sw.update(now);
-
-    face.bot().update(now);
-
-    if (_mode == Mode::Settings) {
-        drawSettings(now);
-    } else {
-        canvas.fillSprite(settings.style().bgColor);
-        face.bot().draw();                       // into botSprite
-        botSprite.pushSprite(&canvas, kBotX, kBotY);
-        if (_mode == Mode::Stopwatch) {
-            canvas.setTextDatum(middle_center);
-            canvas.setTextSize(1.5f);
-            canvas.setTextColor(settings.style().eyeColor);
-            canvas.drawString("STOPWATCH", kW / 2, 40);
-            sw.draw(&canvas, settings.style().accentColor, settings.style().eyeColor);
-        } else {
-            face.draw();                          // clock + status (over bot sprite corners)
-        }
-        drawHints();
-    }
-
-    canvas.pushSprite(0, 0);
-    M5.Display.waitDisplay();
+    _lastFrameMs = now;
+    render(now);
 }

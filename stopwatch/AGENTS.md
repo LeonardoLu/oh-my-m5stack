@@ -1,6 +1,7 @@
-# stopwatch — watch app (M5Stack StopWatch)
+# stopwatch — companion watch (M5Stack StopWatch)
 
-A watch + stopwatch that hosts the shared `bot-ux` bot as its face and readout.
+A round watch face that hosts the shared `bot-ux` character. There is no elapsed-time
+stopwatch mode in this app.
 
 ## Hardware
 
@@ -9,7 +10,8 @@ A watch + stopwatch that hosts the shared `bot-ux` bot as its face and readout.
   `board_build.arduino.memory_type = qio_opi` + 16 MB partitions.
 - Inputs: capacitive **touch** (CST820B) + 2 programmable buttons (BtnA/BtnB). Touch is
   the primary input; buttons are shortcuts.
-- Power: **M5PM1** PMU (`M5.Power.getBatteryLevel()` / `isCharging()`).
+- Power: **M5PM1** through M5Unified. Battery is derived from filtered VBAT; charging
+  requires VIN plus the active-low M5PM1 GPIO2 charge state.
 - Audio: ES8311 codec + 1 W speaker via `M5.Speaker.tone()`.
 - RTC: RX8130CE via `M5.Rtc`.
 
@@ -18,56 +20,64 @@ A watch + stopwatch that hosts the shared `bot-ux` bot as its face and readout.
 ```
 stopwatch/bot-ux-watch/
   platformio.ini
-  include/WatchFace.h      # owns botux::BotUx + clock/battery overlay
-  include/Stopwatch.h      # stopwatch state machine + laps
+  include/CalendarMath.h   # deterministic date helpers
+  include/WatchFace.h      # owns botux::BotUx + RTC/power face
   include/Settings.h       # NVS-backed preferences
-  include/Power.h          # battery, brightness
-  src/main.cpp             # mode state machine + frame loop
+  include/Power.h          # M5PM1 readings + brightness
+  src/main.cpp             # face/settings/editors + input/frame loop
   src/WatchFace.cpp
-  src/Stopwatch.cpp
   src/Settings.cpp
   src/Power.cpp
+  test/test_calendar_math.cpp
 ```
 
 ## Integration with bot-ux
 
-The bot renders into a dedicated 200×200 sprite (`botSprite`) that main.cpp pushes onto
-the full 466×466 canvas at the top; the watch draws its own large hero clock below it.
+The hero bot renders into a dedicated 206×206 sprite. A fixed 124×124 sprite provides
+the live appearance preview. Both bot sprites and the full-screen sprite are allocated
+once in `setup()` and checked before use.
 
 ```cpp
 M5Canvas canvas(&M5.Display);       // full 466×466
-M5Canvas botSprite(&M5.Display);    // 200×200 bot
-botSprite.createSprite(200, 200);
+M5Canvas botSprite(&M5.Display);    // 206×206 bot
+botSprite.createSprite(206, 206);
 bot.begin(&botSprite);              // reads size from the sprite
 // each frame:
 M5.update();
 bot.update(millis());
 bot.draw();                          // into botSprite
-botSprite.pushSprite(&canvas, 133, 15);
+botSprite.pushSprite(&canvas, 130, 64);
 ```
 
-The watch draws its **own** large clock; it does not use the bot's `setTime()`/
-`setLabel()` overlays. It does use `setBattery()`, `setSignal()`, `setMood()`, `poke()`.
+The watch draws its own RTC clock, date and battery status. Bot overlays are hidden;
+there is no Wi-Fi/signal placeholder. UI text uses a dedicated light ink because the
+official bot treatment uses dark pill eyes.
 
 ## Input semantics
 
-- Touch: tap / swipe-up / swipe-down / long-press (`pollTouch` in main.cpp). Face: tap
-  bot = poke, tap clock = stopwatch, swipe up = settings, swipe down = doze.
-- Buttons: TAP (<250 ms) = primary; DOUBLE TAP (2 taps <300 ms) = secondary;
-  LONG (≥600 ms) = back/confirm.
+- Face: tap bot / A pokes; tap time / B toggles seconds; tap SET, swipe up or long A
+  opens settings; swipe down or long B enters dim doze.
+- Settings: touch rows and explicit minus/plus, Back and Done controls are primary.
+  A selects/decrements and B moves/increments as shortcuts; long A backs out and long
+  B saves an editor.
+- Any touch or A/B press wakes from doze and is consumed, so it cannot trigger the
+  control underneath.
 
-## Behavior (full spec in `tmp/ux-design.md` PART B)
+## Behavior
 
-- Face: tap bot / A = poke; Double A = 12/24 h toggle; swipe up / Long A = Settings;
-  tap clock / B = Stopwatch; swipe down / Long B = doze.
-- Stopwatch: tap / A = start/lap/reset, B = stop/resume; MM:SS.cc, last 3 laps.
-- Settings: tap rows (linear list + value editors: Time set, Format, Theme, Style,
-  Brightness, Back); swipe down = save/back.
-- Low battery (≤15 %) → bot forced Sleepy + battery icon blinks; charging → ⚡ + soft Happy.
+- Face: real RTC time/date, measured battery percentage, charging bolt, bot hero and
+  visible SET affordance. Low battery uses a red percentage and sleepy pose without
+  flashing. A charging transition produces a brief happy acknowledgment.
+- Settings: six round-safe rows: Time, Date, Format, Appearance, Brightness and Done.
+  Appearance includes theme, organic shape and sound, with live bot preview.
+- NVS persists 12/24-hour format, seconds visibility, theme, appearance, brightness
+  and sound. RTC hardware persists edited time/date.
+- Rendering is time based and capped at 30 fps active / 4 fps dozing. Input and power
+  polling continue between frames.
 
 ## Rules
 
 - Match existing code style; keep comments purposeful. No per-frame heap allocation.
-- Keep the state machine in `main.cpp`; modules are plain classes, no globals beyond one instance each.
+- Keep the state machine in `main.cpp`; modules are plain classes.
 - Persist settings with `Preferences` (NVS). Do not over-engineer edge cases.
-- See `tmp/architecture.md` §3a/§5 and `tmp/ux-design.md` PART B for the full design.
+- `specs/start-up.md` supersedes older stopwatch-specific notes.

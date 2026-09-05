@@ -1,5 +1,9 @@
 # Start-up validation — 2026-09-06
 
+> Historical baseline record. The September 6 connected-controller iteration
+> supersedes the local-simulation scope below. See [current requirements](interaction-iteration.md)
+> and [current validation](interaction-validation.md).
+
 Completed the implementation and source-based acceptance of `start-up.md`.
 The seven requested specialist roles (researcher, UX professor, ESP32 professor,
 two device developers, and two independent device QA roles) used GPT-5.6 Sol

@@ -1,5 +1,9 @@
 # Start-up revision
 
+> Historical baseline record. The September 6 connected-controller iteration
+> supersedes the local-simulation scope below. See [current requirements](interaction-iteration.md)
+> and [current validation](interaction-validation.md).
+
 This document records the implementation decisions for `start-up.md`. The task
 specification remains the source of truth.
 

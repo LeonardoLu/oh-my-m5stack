@@ -36,8 +36,9 @@ tmp/                         scratch / research notes (gitignored)
 ## Working rules
 
 - Match existing code style; keep comments purposeful.
-- `specs/start-up.md` takes precedence over older app notes. Core2 simulates a
-  coding controller locally; do not present simulated work as a real host action.
+- The user's current goal and `specs/interaction-iteration.md` supersede older
+  app notes. Core2 now targets a real Codex Micro-compatible Bluetooth HID link;
+  distinguish pairing, app handshake, host feedback, and local animation previews.
 - Keep durable implementation and validation notes in `specs/`; `tmp/` is scratch,
   never the sole source of an implementation contract.
 - Do not over-engineer edge cases (see `specs/start-up.md`).

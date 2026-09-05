@@ -3,8 +3,8 @@
 M5Stack companion firmware. One shared **bot-ux** animation component ("grok bot"),
 integrated into two device apps:
 
-- `stopwatch/bot-ux-watch` — watch/stopwatch on M5Stack StopWatch (ESP32-S3)
-- `core2/bot-ux-codex-core2` — codex-style on-screen keyboard on M5Stack Core2
+- `stopwatch/bot-ux-watch` — clock companion on M5Stack StopWatch (ESP32-S3); no stopwatch feature
+- `core2/bot-ux-codex-core2` — Codex Micro-inspired touch command deck on M5Stack Core2
 
 ## Layout
 
@@ -36,6 +36,11 @@ tmp/                         scratch / research notes (gitignored)
 ## Working rules
 
 - Match existing code style; keep comments purposeful.
+- `specs/start-up.md` takes precedence over older app notes. Core2 simulates a
+  coding controller locally; do not present simulated work as a real host action.
+- Keep durable implementation and validation notes in `specs/`; `tmp/` is scratch,
+  never the sole source of an implementation contract.
 - Do not over-engineer edge cases (see `specs/start-up.md`).
 - Commit meaningful units; work on `main` or a topic branch, never leave `tmp/` tracked.
-- Prefer static review over hardware/device acceptance (no device in this environment).
+- Prefer builds, automated checks, and static review over acceptance requiring a
+  person. Connected serial ports alone do not establish hardware acceptance.

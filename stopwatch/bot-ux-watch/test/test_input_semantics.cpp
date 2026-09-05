@@ -52,6 +52,18 @@ static void testSwipeDoesNotRepeatBecomeLongOrTap() {
     assert(touch.poll(false, false, true, 203, 130, 920) == Gesture::None);
 }
 
+static void testHorizontalSwipesAndOrigin() {
+    TouchGesture touch;
+    assert(touch.poll(true, true, false, 360, 18, 100) == Gesture::None);
+    assert(touch.startX() == 360 && touch.startY() == 18);
+    assert(touch.poll(false, true, false, 292, 22, 180) == Gesture::SwipeLeft);
+    assert(touch.poll(false, false, true, 292, 22, 200) == Gesture::None);
+
+    assert(touch.poll(true, true, false, 100, 220, 300) == Gesture::None);
+    assert(touch.poll(false, true, false, 170, 214, 380) == Gesture::SwipeRight);
+    assert(touch.poll(false, false, true, 170, 214, 400) == Gesture::None);
+}
+
 static void testConsumedTouchWake() {
     TouchGesture touch;
     assert(touch.poll(true, true, false, 50, 50, 100) == Gesture::None);
@@ -68,6 +80,7 @@ int main() {
     testTouchTap();
     testTouchLongDoesNotRepeatOrTap();
     testSwipeDoesNotRepeatBecomeLongOrTap();
+    testHorizontalSwipesAndOrigin();
     testConsumedTouchWake();
     return 0;
 }

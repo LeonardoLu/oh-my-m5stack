@@ -23,6 +23,13 @@ const ThemeColors kThemes[Settings::THEME_COUNT] = {
 
 const char* kThemeNames[Settings::THEME_COUNT] = { "Night", "Dusk", "Mono" };
 const char* kAppearanceNames[Settings::APPEARANCE_COUNT] = { "Orb", "Bean", "Pebble" };
+const char* kExpressionNames[Settings::EXPRESSION_COUNT] = {
+    "Auto", "Neutral", "Curious", "Focused", "Joy",
+    "Skeptical", "Bashful", "Wink", "Dizzy", "Alarmed"
+};
+const char* kAnimationNames[Settings::ANIMATION_COUNT] = {
+    "Auto", "Calm", "Curious", "Orbit", "Bounce", "Glitch", "Wave", "Sparkle"
+};
 const char* kNamespace = "watch";
 } // namespace
 
@@ -34,11 +41,16 @@ void Settings::begin() {
     _data.sound       = prefs.getBool("sound", _data.sound);
     _data.theme       = prefs.getUChar("theme", _data.theme);
     _data.appearance  = prefs.getUChar("look", _data.appearance);
+    _data.expression  = prefs.getUChar("expr", _data.expression);
+    _data.animation   = prefs.getUChar("anim", _data.animation);
     _data.brightness  = prefs.getUChar("bright", _data.brightness);
+    _data.motion      = prefs.getBool("motion", _data.motion);
     prefs.end();
 
     if (_data.theme >= THEME_COUNT) _data.theme = THEME_NIGHT;
     if (_data.appearance >= APPEARANCE_COUNT) _data.appearance = 0;
+    if (_data.expression >= EXPRESSION_COUNT) _data.expression = 0;
+    if (_data.animation >= ANIMATION_COUNT) _data.animation = 2;
     if (_data.brightness < 1 || _data.brightness > 5) _data.brightness = 3;
 
     rebuildStyle();
@@ -52,7 +64,10 @@ void Settings::save() {
     prefs.putBool("sound", _data.sound);
     prefs.putUChar("theme", _data.theme);
     prefs.putUChar("look", _data.appearance);
+    prefs.putUChar("expr", _data.expression);
+    prefs.putUChar("anim", _data.animation);
     prefs.putUChar("bright", _data.brightness);
+    prefs.putBool("motion", _data.motion);
     prefs.end();
 }
 
@@ -82,6 +97,14 @@ const char* Settings::themeName(uint8_t idx) {
 
 const char* Settings::appearanceName(uint8_t idx) {
     return (idx < APPEARANCE_COUNT) ? kAppearanceNames[idx] : "?";
+}
+
+const char* Settings::expressionName(uint8_t idx) {
+    return (idx < EXPRESSION_COUNT) ? kExpressionNames[idx] : "?";
+}
+
+const char* Settings::animationName(uint8_t idx) {
+    return (idx < ANIMATION_COUNT) ? kAnimationNames[idx] : "?";
 }
 
 uint16_t Settings::ink() const     { return kThemes[_data.theme].ink; }

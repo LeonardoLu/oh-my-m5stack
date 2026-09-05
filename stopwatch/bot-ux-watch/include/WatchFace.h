@@ -7,16 +7,23 @@
 
 class WatchFace {
 public:
-    void begin(M5Canvas* cv, M5Canvas* botSprite);
+    void begin(M5Canvas* botSprite);
 
-    void setHour24(bool v)   { _hour24 = v; }
-    void setShowSeconds(bool v) { _showSeconds = v; }
+    void setHour24(bool v) {
+        if (_hour24 != v) _drawInvalid = true;
+        _hour24 = v;
+    }
+    void setShowSeconds(bool v) {
+        if (_showSeconds != v) _drawInvalid = true;
+        _showSeconds = v;
+    }
     void setBattery(uint8_t pct);
     void setCharging(bool v) { _charging = v; }
 
     void update(uint32_t nowMs);
-    void draw(uint16_t ink, uint16_t muted, uint16_t accent,
-              uint16_t panel, uint16_t warning);
+    void invalidate() { _drawInvalid = true; }
+    void draw(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
+              uint16_t accent, uint16_t panel, uint16_t warning, bool statusOpen);
 
     botux::BotUx& bot() { return _bot; }
 
@@ -28,13 +35,13 @@ public:
     uint8_t day() const { return _day; }
 
 private:
-    void _drawDate(uint16_t muted);
-    void _drawBattery(uint16_t ink, uint16_t accent, uint16_t warning);
-    void _drawClock(uint16_t ink, uint16_t muted, uint16_t accent);
-    void _drawSetPill(uint16_t ink, uint16_t accent, uint16_t panel);
-    static void _drawBolt(M5Canvas* cv, int16_t x, int16_t y, uint16_t c);
+    void _drawTop(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
+                  uint16_t accent, uint16_t panel, uint16_t warning, bool statusOpen);
+    void _drawClock(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
+                    uint16_t accent);
+    void _drawSetPill(lgfx::LovyanGFX* target, uint16_t ink, uint16_t accent, uint16_t panel);
+    static void _drawBolt(lgfx::LovyanGFX* target, int16_t x, int16_t y, uint16_t c);
 
-    M5Canvas* _cv = nullptr;
     botux::BotUx _bot;
 
     uint32_t _now = 0;
@@ -45,4 +52,8 @@ private:
     bool     _showSeconds = false;
     uint8_t  _battery = 100;
     bool     _charging = false;
+    uint32_t _lastRtcReadMs = 0;
+    uint8_t _drawHour = 0xFF, _drawMinute = 0xFF, _drawSecond = 0xFF;
+    uint8_t _drawDay = 0xFF, _drawMonth = 0xFF, _drawBattery = 0xFF;
+    bool _drawCharging = false, _drawStatusOpen = false, _drawInvalid = true;
 };

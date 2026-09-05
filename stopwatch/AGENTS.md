@@ -33,20 +33,20 @@ stopwatch/bot-ux-watch/
 
 ## Integration with bot-ux
 
-The hero bot renders into a dedicated 206×206 sprite. A fixed 124×124 sprite provides
-the live appearance preview. Both bot sprites and the full-screen sprite are allocated
+The hero bot renders into a dedicated 310×310 sprite. A fixed 178×178 sprite provides
+the live settings preview. Both bot sprites and the full-screen sprite are allocated
 once in `setup()` and checked before use.
 
 ```cpp
 M5Canvas canvas(&M5.Display);       // full 466×466
-M5Canvas botSprite(&M5.Display);    // 206×206 bot
-botSprite.createSprite(206, 206);
+M5Canvas botSprite(&M5.Display);    // 310×310 bot
+botSprite.createSprite(310, 310);
 bot.begin(&botSprite);              // reads size from the sprite
 // each frame:
 M5.update();
 bot.update(millis());
 bot.draw();                          // into botSprite
-botSprite.pushSprite(&canvas, 130, 64);
+botSprite.pushSprite(&M5.Display, 78, 66);
 ```
 
 The watch draws its own RTC clock, date and battery status. Bot overlays are hidden;
@@ -55,8 +55,9 @@ official bot treatment uses dark pill eyes.
 
 ## Input semantics
 
-- Face: tap bot / A pokes; tap time / B toggles seconds; tap SET, swipe up or long A
-  opens settings; swipe down or long B enters dim doze.
+- Face: tap bot / A pokes; horizontal swipe / B cycles expressions; tap time toggles
+  seconds; tap SET, swipe up or long A opens settings. A top-edge swipe down reveals
+  battery status; another downward swipe or long B enters dim doze.
 - Settings: touch rows and explicit minus/plus, Back and Done controls are primary.
   A selects/decrements and B moves/increments as shortcuts; long A backs out and long
   B saves an editor.
@@ -67,13 +68,17 @@ official bot treatment uses dark pill eyes.
 
 - Face: real RTC time/date, measured battery percentage, charging bolt, bot hero and
   visible SET affordance. Low battery uses a red percentage and sleepy pose without
-  flashing. A charging transition produces a brief happy acknowledgment.
-- Settings: six round-safe rows: Time, Date, Format, Appearance, Brightness and Done.
-  Appearance includes theme, organic shape and sound, with live bot preview.
-- NVS persists 12/24-hour format, seconds visibility, theme, appearance, brightness
-  and sound. RTC hardware persists edited time/date.
-- Rendering is time based and capped at 30 fps active / 4 fps dozing. Input and power
-  polling continue between frames.
+  flashing. A charging transition produces a brief happy acknowledgment and opens the
+  battery pill.
+- Settings: eight round-safe rows add dedicated Expression and Motion editors to Time,
+  Date, Format, Appearance, Brightness and Done. Preview pages animate live.
+- NVS persists 12/24-hour format, seconds visibility, theme, appearance, expression,
+  animation, reduced motion, brightness and sound. RTC hardware persists time/date.
+- The BMI270 feeds normalized wrist tilt and shake into BotUx. Strong shake pokes the
+  bot; reduced motion disables IMU response and keeps only gentle choreography.
+- Rendering targets 16 ms active / 33 ms preview / 250 ms dozing. The face pushes only
+  the bot region; disjoint clock/status regions redraw when their values change. Serial
+  `PERF` summaries report real frame timing for hardware validation.
 
 ## Rules
 

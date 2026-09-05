@@ -4,7 +4,7 @@
 
 namespace watchinput {
 
-enum class Gesture : uint8_t { None, Tap, Long, SwipeUp, SwipeDown };
+enum class Gesture : uint8_t { None, Tap, Long, SwipeUp, SwipeDown, SwipeLeft, SwipeRight };
 
 class ButtonGesture {
 public:
@@ -52,6 +52,11 @@ public:
                 _swipeSent = true;
                 return dy < 0 ? Gesture::SwipeUp : Gesture::SwipeDown;
             }
+            if (_moved && !_longSent && !_swipeSent
+                && magnitude(dx) > 52 && magnitude(dx) > magnitude(dy)) {
+                _swipeSent = true;
+                return dx < 0 ? Gesture::SwipeLeft : Gesture::SwipeRight;
+            }
             if (!_moved && !_longSent && nowMs - _downMs >= kLongMs) {
                 _longSent = true;
                 return Gesture::Long;
@@ -77,6 +82,8 @@ public:
 
     int16_t tapX() const { return _tapX; }
     int16_t tapY() const { return _tapY; }
+    int16_t startX() const { return _x0; }
+    int16_t startY() const { return _y0; }
 
 private:
     static constexpr uint32_t kLongMs = 650;

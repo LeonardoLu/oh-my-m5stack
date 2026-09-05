@@ -8,8 +8,7 @@ const char* const kMonths[12] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                                   "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
 }
 
-void WatchFace::begin(M5Canvas* cv, M5Canvas* botSprite) {
-    _cv = cv;
+void WatchFace::begin(M5Canvas* botSprite) {
     _bot.begin(botSprite);
 }
 
@@ -20,6 +19,8 @@ void WatchFace::setBattery(uint8_t pct) {
 
 void WatchFace::update(uint32_t nowMs) {
     _now = nowMs;
+    if (_lastRtcReadMs && nowMs - _lastRtcReadMs < 200) return;
+    _lastRtcReadMs = nowMs;
     auto dt = M5.Rtc.getDateTime();
     _hh = (uint8_t)dt.time.hours;
     _mm = (uint8_t)dt.time.minutes;
@@ -36,38 +37,66 @@ void WatchFace::update(uint32_t nowMs) {
     _bot.setSignal(-1);
 }
 
-void WatchFace::draw(uint16_t ink, uint16_t muted, uint16_t accent,
-                     uint16_t panel, uint16_t warning) {
-    _drawDate(muted);
-    _drawBattery(ink, accent, warning);
-    _drawClock(ink, muted, accent);
-    _drawSetPill(ink, accent, panel);
+void WatchFace::draw(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
+                     uint16_t accent, uint16_t panel, uint16_t warning, bool statusOpen) {
+    bool topDirty = _drawInvalid || _drawDay != _day || _drawMonth != _month
+        || _drawBattery != _battery || _drawCharging != _charging
+        || _drawStatusOpen != statusOpen;
+    bool clockDirty = _drawInvalid || _drawHour != _hh || _drawMinute != _mm
+        || (_showSeconds && _drawSecond != _ss);
+    if (topDirty) _drawTop(target, bg, ink, muted, accent, panel, warning, statusOpen);
+    if (clockDirty) _drawClock(target, bg, ink, muted, accent);
+    if (_drawInvalid) _drawSetPill(target, ink, accent, panel);
+
+    _drawHour = _hh;
+    _drawMinute = _mm;
+    _drawSecond = _ss;
+    _drawDay = _day;
+    _drawMonth = _month;
+    _drawBattery = _battery;
+    _drawCharging = _charging;
+    _drawStatusOpen = statusOpen;
+    _drawInvalid = false;
 }
 
-void WatchFace::_drawDate(uint16_t muted) {
+void WatchFace::_drawTop(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
+                         uint16_t accent, uint16_t panel, uint16_t warning, bool statusOpen) {
+    target->fillRect(104, 5, 258, 62, bg);
+    if (statusOpen) {
+        target->fillRoundRect(132, 7, 202, 54, 27, panel);
+        target->drawRoundRect(132, 7, 202, 54, 27, _charging ? accent : muted);
+        target->setFont(&fonts::FreeSansBold12pt7b);
+        target->setTextSize(1.0f);
+        target->setTextDatum(middle_center);
+        target->setTextColor((_battery <= 15) ? warning : ink);
+        char status[24];
+        snprintf(status, sizeof(status), _charging ? "CHARGING  %u%%" : "BATTERY  %u%%",
+                 (unsigned)_battery);
+        target->drawString(status, 233, 34);
+        if (_charging) _drawBolt(target, 150, 27, accent);
+        return;
+    }
+
     char buf[16];
     const char* wd = (_weekDay < 7) ? kWeekdays[_weekDay] : "---";
     const char* mo = (_month >= 1 && _month <= 12) ? kMonths[_month - 1] : "---";
-    snprintf(buf, sizeof(buf), "%s %02u %s", wd, (unsigned)_day, mo);
-    _cv->setTextDatum(middle_left);
-    _cv->setTextSize(1.35f);
-    _cv->setTextColor(muted);
-    _cv->drawString(buf, 112, 50);
-}
+    snprintf(buf, sizeof(buf), "%s %02u", wd, (unsigned)_day);
+    target->setFont(&fonts::FreeSansBold9pt7b);
+    target->setTextSize(1.0f);
+    target->setTextDatum(middle_left);
+    target->setTextColor(muted);
+    target->drawString(buf, 126, 35);
 
-void WatchFace::_drawBattery(uint16_t ink, uint16_t accent, uint16_t warning) {
     bool low = (_battery <= 15);
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%u%%", (unsigned)_battery);
-
-    _cv->setTextDatum(middle_right);
-    _cv->setTextSize(1.35f);
-    _cv->setTextColor(low ? warning : ink);
-    _cv->drawString(buf, 358, 50);
-    if (_charging) _drawBolt(_cv, 304, 43, accent);
+    snprintf(buf, sizeof(buf), "%s  %u%%", mo, (unsigned)_battery);
+    target->setTextDatum(middle_right);
+    target->setTextColor(low ? warning : ink);
+    target->drawString(buf, 340, 35);
+    if (_charging) _drawBolt(target, 277, 28, accent);
 }
 
-void WatchFace::_drawClock(uint16_t ink, uint16_t muted, uint16_t accent) {
+void WatchFace::_drawClock(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink,
+                           uint16_t muted, uint16_t accent) {
     uint8_t h = _hh;
     char buf[8];
     if (_hour24) {
@@ -78,10 +107,12 @@ void WatchFace::_drawClock(uint16_t ink, uint16_t muted, uint16_t accent) {
         snprintf(buf, sizeof(buf), "%u:%02u", (unsigned)h12, (unsigned)_mm);
     }
 
-    _cv->setTextDatum(middle_center);
-    _cv->setTextSize(5.0f);
-    _cv->setTextColor(ink);
-    _cv->drawString(buf, _cv->width() / 2, 322);
+    target->fillRect(112, 378, 242, 49, bg);
+    target->setFont(&fonts::FreeSansBold18pt7b);
+    target->setTextDatum(middle_center);
+    target->setTextSize(1.0f);
+    target->setTextColor(ink);
+    target->drawString(buf, 233, 395);
 
     char detail[16];
     if (_showSeconds && !_hour24)
@@ -92,22 +123,23 @@ void WatchFace::_drawClock(uint16_t ink, uint16_t muted, uint16_t accent) {
         snprintf(detail, sizeof(detail), "%s", (h >= 12) ? "PM" : "AM");
     else
         detail[0] = '\0';
-    _cv->setTextSize(1.25f);
-    _cv->setTextColor(_showSeconds ? accent : muted);
-    if (detail[0]) _cv->drawString(detail, _cv->width() / 2, 368);
+    target->setFont(&fonts::FreeSansBold9pt7b);
+    target->setTextColor(_showSeconds ? accent : muted);
+    if (detail[0]) target->drawString(detail, 233, 421);
 }
 
-void WatchFace::_drawSetPill(uint16_t ink, uint16_t accent, uint16_t panel) {
-    _cv->fillRoundRect(173, 393, 120, 44, 22, panel);
-    _cv->drawRoundRect(173, 393, 120, 44, 22, accent);
-    _cv->setTextDatum(middle_center);
-    _cv->setTextSize(1.45f);
-    _cv->setTextColor(ink);
-    _cv->drawString("SET", 233, 415);
+void WatchFace::_drawSetPill(lgfx::LovyanGFX* target, uint16_t ink, uint16_t accent, uint16_t panel) {
+    target->fillRoundRect(187, 433, 92, 28, 14, panel);
+    target->drawRoundRect(187, 433, 92, 28, 14, accent);
+    target->setFont(&fonts::FreeSansBold9pt7b);
+    target->setTextDatum(middle_center);
+    target->setTextSize(1.0f);
+    target->setTextColor(ink);
+    target->drawString("SET", 233, 448);
 }
 
-void WatchFace::_drawBolt(M5Canvas* cv, int16_t x, int16_t y, uint16_t c) {
+void WatchFace::_drawBolt(lgfx::LovyanGFX* target, int16_t x, int16_t y, uint16_t c) {
     // 8x12 zig-zag lightning bolt (charging indicator)
-    cv->fillTriangle(x + 5, y + 0, x + 1, y + 5, x + 5, y + 5, c);
-    cv->fillTriangle(x + 5, y + 5, x + 8, y + 5, x + 3, y + 12, c);
+    target->fillTriangle(x + 5, y + 0, x + 1, y + 5, x + 5, y + 5, c);
+    target->fillTriangle(x + 5, y + 5, x + 8, y + 5, x + 3, y + 12, c);
 }

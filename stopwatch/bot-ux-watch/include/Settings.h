@@ -12,6 +12,8 @@ public:
     static const uint8_t THEME_MONO   = 2;
     static const uint8_t THEME_COUNT  = 3;
     static const uint8_t APPEARANCE_COUNT = 3;
+    static const uint8_t EXPRESSION_COUNT = 10;
+    static const uint8_t ANIMATION_COUNT = 8;
 
     struct Data {
         bool    hour24      = true;
@@ -19,7 +21,10 @@ public:
         bool    sound       = true;
         uint8_t theme       = THEME_NIGHT;
         uint8_t appearance  = 0;
+        uint8_t expression  = 0;
+        uint8_t animation   = 2;
         uint8_t brightness  = 3;     // 1..5
+        bool    motion       = true;
     };
 
     void begin();        // load from NVS (defaults on first boot)
@@ -33,6 +38,8 @@ public:
 
     static const char* themeName(uint8_t idx);
     static const char* appearanceName(uint8_t idx);
+    static const char* expressionName(uint8_t idx);
+    static const char* animationName(uint8_t idx);
 
     // UI text never borrows the bot eye color: official-style eyes are dark.
     uint16_t ink() const;

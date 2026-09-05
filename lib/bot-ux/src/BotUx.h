@@ -1,14 +1,14 @@
-// BotUx — a small, controllable "grok bot" animation component.
+// BotUx — a small, controllable Grok-inspired orb animation component.
 //
-// The component renders a character (face + body + optional status ring) into a
+// The component renders a fluid orb with two expressive eye marks into a
 // caller-provided M5Canvas sprite. It never owns the display: the host creates
 // the sprite, calls begin(), drives update()/draw() each frame, and pushes the
 // sprite to its display when it pleases. This keeps the component embeddable
-// into both a watch (StickC Plus2) and a touch tablet (Core2) with zero display
+// into both the M5Stack StopWatch and Core2 with zero display
 // coupling.
 //
-// Animation is time-based (millis), framerate-agnostic, and driven by a small
-// state machine per feature (blink, pupil drift, mouth, breathing, reactions).
+// Animation is time-based (millis), framerate-agnostic, and driven by small
+// state machines for blinking, gaze, body motion, speech, and reactions.
 #pragma once
 
 #include <M5GFX.h> // M5Canvas (== LGFX_Sprite); lighter than pulling all of M5Unified
@@ -26,41 +26,45 @@ constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 class BotUx {
 public:
     enum class Mood : uint8_t {
-        Idle = 0,   // neutral, breathing, periodic blinks
-        Listening,  // engaged, eyes widen, subtle nod
-        Thinking,   // eyes up, brows knit, "..." indicator
-        Speaking,   // mouth animates (driven by setTalking)
-        Happy,      // ^ ^ eyes + big smile
-        Sad,        // drooped lids + frown
+        Idle = 0,   // curious gaze, breathing, periodic blinks
+        Listening,  // engaged, eyes widen, subtle forward nod
+        Thinking,   // orb becomes a three-dot thinking loop
+        Speaking,   // body pulse follows setTalking()
+        Happy,      // crescent eyes and a buoyant lift
+        Sad,        // lowered gaze and settled body
         Sleepy,     // half/closed eyes, slow breath
-        Surprised,  // wide eyes + O mouth (transient)
+        Surprised,  // wide eye marks + quick vertical stretch (transient)
+        Working,    // active pulse; eyes move toward the centre
+        Waiting,    // compact, horizontal waiting marks
+        Blocked,    // exclamation-mark silhouette
+        Done,       // settled orb with a low-left glance
     };
 
     enum class EyeStyle : uint8_t {
-        Round = 0, // classic circle eye
-        Oval,      // taller ellipse
-        Square,    // rounded square
-        Googly,    // white ball + free-floating pupil
+        Round = 0, // short rounded eye marks
+        Oval,      // long Grok-like pill marks
+        Square,    // broad rounded marks
+        Googly,    // round marks with free-floating pupils
     };
 
     enum class BodyStyle : uint8_t {
-        None = 0,        // face elements only (no body silhouette)
-        Round,           // circle body behind the face
-        RoundedSquare,   // app-like tile body
-        Hexagon,         // six-sided body
+        None = 0,        // eye marks only (no orb silhouette)
+        Round,           // classic fluid orb
+        RoundedSquare,   // soft, broad blob
+        Hexagon,         // lightly faceted orb
     };
 
     // Everything that makes one bot "this bot".
     struct Style {
         uint16_t bgColor      = rgb565(0x0A, 0x0E, 0x14); // deep space blue
-        uint16_t bodyColor    = rgb565(0x2A, 0x2E, 0x38); // slate
-        uint16_t accentColor  = rgb565(0x2E, 0xD9, 0xC8); // teal glow
-        uint16_t eyeColor     = rgb565(0xFF, 0xFF, 0xFF);
-        uint16_t pupilColor   = rgb565(0x0A, 0x12, 0x22);
-        uint16_t mouthColor   = rgb565(0xFF, 0xFF, 0xFF);
+        uint16_t bodyColor    = rgb565(0xF4, 0xF6, 0xF8); // orb surface
+        uint16_t accentColor  = rgb565(0x66, 0xAE, 0xFF); // status / secondary UI
+        uint16_t eyeColor     = rgb565(0x1A, 0x61, 0xAE); // eye marks
+        uint16_t pupilColor   = rgb565(0x08, 0x2B, 0x55); // googly pupils
+        uint16_t mouthColor   = rgb565(0x1A, 0x61, 0xAE);
         uint16_t blushColor   = rgb565(0xFF, 0x8A, 0xA0);
 
-        EyeStyle eyeStyle   = EyeStyle::Round;
+        EyeStyle eyeStyle   = EyeStyle::Oval;
         BodyStyle bodyStyle = BodyStyle::Round;
 
         float    eyeSize    = 1.0f;   // 0.5..2.0, scales eye radius
@@ -94,7 +98,7 @@ public:
     // then return to this mood.
     void setMood(Mood m);
 
-    // Drive the mouth when Speaking, or add a talk overlay otherwise.
+    // Drive the body pulse while Speaking.
     void setTalking(bool on);
 
     // 0..100 battery. <=10% forces a sleepy droop regardless of mood.
@@ -102,7 +106,7 @@ public:
     void setBattery(uint8_t pct);
     void setBatteryVisible(bool vis); // show/hide the icon independently
 
-    // Signal strength: -1 hides, 0..4 shows bars near the antenna.
+    // Signal strength: -1 hides, 0..4 shows compact top-left bars.
     void setSignal(int8_t bars);
 
     // Optional clock text drawn under the face (e.g. "09:41"). h is 1..12; pm
@@ -114,7 +118,7 @@ public:
     void setLabel(const char* text);
 
     // ---- interaction ------------------------------------------------------
-    // Surprise for ~600ms then settle into Happy for ~1200ms, then prior mood.
+    // Surprise for ~240ms, settle through Happy, then return to the prior mood.
     void poke();
 
     // ---- frame loop -------------------------------------------------------
@@ -124,13 +128,13 @@ public:
 
     const Metrics& metrics() const { return _m; }
 
-    // Nudge RNG state (e.g. from ADC) so two bots don't blink in lockstep.
-    void seedBlink(uint32_t s) { _blinkSeed = s; }
+    // Nudge blink and gaze timing (e.g. from ADC) so bots do not move in lockstep.
+    void seedBlink(uint32_t s);
 
 private:
     // animation state
     void _updateBlink(uint32_t now);
-    void _updatePupil(uint32_t now);
+    void _updateGaze(uint32_t now);
     void _updateTalk(uint32_t now);
     void _resolveMood(uint32_t now); // set _effMood + _open from mood/reaction/battery
 
@@ -139,10 +143,9 @@ private:
 
     void _drawBody();
     void _drawEyes();
-    void _drawMouth();
-    void _drawBrows();
-    void _drawAntenna();
     void _drawOverlays(); // battery/signal/label/time
+    void _fillCapsule(int16_t cx, int16_t cy, int16_t halfDx, int16_t halfDy,
+                      int16_t radius, uint16_t color);
 
     M5Canvas* _cv = nullptr;
     int16_t _w = 0, _h = 0;
@@ -166,10 +169,25 @@ private:
     Mood   _effMood = Mood::Idle;
     float  _openBase = 1.0f; // eased base openness (mood/sleep), before blink
     float  _open = 1.0f;     // eye openness 0..1 (blink + sleep + mood)
-    float  _pupilDX = 0.0f;  // -1..1, fraction of eyeRadius
+    float  _pupilDX = 0.0f;  // eased gaze, -1..1
     float  _pupilDY = 0.0f;
-    float  _talkAmp = 0.0f;  // 0..1 mouth amplitude
+    float  _talkAmp = 0.0f;  // 0..1 speech/body pulse amplitude
     float  _breath = 0.0f;   // -1..1 body breathing
+    float  _bodyDX = 0.0f;   // animated pose in pixels
+    float  _bodyDY = 0.0f;
+    float  _bodySX = 1.0f;
+    float  _bodySY = 1.0f;
+    float  _bodyLean = 0.0f; // -1..1; offsets the two eyes vertically
+    float  _eyeAsym = 0.0f;  // -1..1; closes one eye for thought
+    float  _eyePairX = 0.26f; // pair centre, fractions of body radius
+    float  _eyePairY = -0.38f;
+    float  _eyeAngle = 0.34f; // horizontal / vertical major-axis ratio
+
+    // Idle gaze changes target at irregular intervals, then eases into place.
+    float    _wanderX = 0.0f;
+    float    _wanderY = 0.0f;
+    uint32_t _nextGaze = 0;
+    uint32_t _gazeSeed = 0x9E3779B9u;
 
     // blink
     uint32_t _blinkSeed = 0x1234;

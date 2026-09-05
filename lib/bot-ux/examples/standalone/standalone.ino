@@ -9,7 +9,9 @@ static const botux::BotUx::Mood kMoods[] = {
     botux::BotUx::Mood::Idle,     botux::BotUx::Mood::Listening,
     botux::BotUx::Mood::Thinking, botux::BotUx::Mood::Speaking,
     botux::BotUx::Mood::Happy,    botux::BotUx::Mood::Sad,
-    botux::BotUx::Mood::Sleepy,
+    botux::BotUx::Mood::Sleepy,   botux::BotUx::Mood::Surprised,
+    botux::BotUx::Mood::Working,  botux::BotUx::Mood::Waiting,
+    botux::BotUx::Mood::Blocked,  botux::BotUx::Mood::Done,
 };
 static int moodIdx = 0;
 
@@ -22,9 +24,7 @@ void setup() {
 
     bot.begin(&canvas);
     bot.setBattery(87);
-    bot.setSignal(3);
-    bot.setTime(9, 41, 0, false);
-    bot.setLabel("bot-ux demo");
+    bot.setBatteryVisible(false);
 }
 
 void loop() {

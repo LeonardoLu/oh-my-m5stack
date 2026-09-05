@@ -12,15 +12,14 @@ implementation is `src/BotUx.cpp`.
 - Keep drawing to M5GFX primitives (`fillCircle`, `fillEllipse`, `fillArc`,
   `fillRoundRect`, `fillTriangle`, `drawLine`, `drawString`, …).
 - Arc angle convention (LovyanGFX, verified): **0° = right (3 o'clock), clockwise,
-  90° = down, 180° = left, 270° = up**. Top arc (∩) = `180..360`; bottom arc (∪)
-  = `0..180`. The three `fillArc` call sites (happy eyes, smile, frown) all use
-  this — fix them together if the convention ever changes.
+  90° = down, 180° = left, 270° = up**. Happy crescent eyes use the top
+  arc (`180..360`).
 - `Style` colors are RGB565 (`botux::rgb565`). Passing `uint16_t` to M5GFX's
   `uint32_t` color params is fine.
 
 ## When to touch this
 
-- New mood/expression → add a case in `_resolveMood`, `_drawEyes`, `_drawMouth`,
-  `_drawBrows` and (if needed) the `Mood` enum.
+- New mood/expression → add a case in `_resolveMood`, then handle silhouette
+  replacement in `_drawBody` or eye treatment in `_drawEyes` if needed.
 - New theme → add a preset in the device apps, not here (this stays generic).
 - API change → update the header, keep it additive so device apps don't break.

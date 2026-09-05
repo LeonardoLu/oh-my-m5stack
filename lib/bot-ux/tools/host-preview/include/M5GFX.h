@@ -1,0 +1,98 @@
+#pragma once
+
+#include <stdint.h>
+#include <math.h>
+#include <sstream>
+#include <string>
+
+enum textdatum_t { top_left, top_right, middle_left, middle_center, middle_right };
+
+class M5Canvas {
+public:
+    M5Canvas(int16_t w, int16_t h) : _w(w), _h(h) {}
+
+    int32_t width() const { return _w; }
+    int32_t height() const { return _h; }
+    void clear() { _out.str(""); _out.clear(); }
+    std::string svgBody() const { return _out.str(); }
+
+    void fillSprite(uint32_t c) { rect(0, 0, _w, _h, 0, c, true); }
+    void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t c) {
+        _out << "<circle cx='" << x << "' cy='" << y << "' r='" << r
+             << "' fill='" << color(c) << "'/>\n";
+    }
+    void fillEllipse(int32_t x, int32_t y, int32_t rx, int32_t ry, uint32_t c) {
+        _out << "<ellipse cx='" << x << "' cy='" << y << "' rx='" << rx
+             << "' ry='" << ry << "' fill='" << color(c) << "'/>\n";
+    }
+    void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t c) {
+        rect(x, y, w, h, 0, c, true);
+    }
+    void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t c) {
+        rect(x, y, w, h, r, c, true);
+    }
+    void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t c) {
+        rect(x, y, w, h, r, c, false);
+    }
+    void fillTriangle(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
+                      int32_t x3, int32_t y3, uint32_t c) {
+        _out << "<polygon points='" << x1 << "," << y1 << " " << x2 << "," << y2
+             << " " << x3 << "," << y3 << "' fill='" << color(c) << "'/>\n";
+    }
+    void fillArc(int32_t x, int32_t y, int32_t inner, int32_t outer,
+                 float start, float end, uint32_t c) {
+        float a0 = start * 3.14159265358979f / 180.0f;
+        float a1 = end * 3.14159265358979f / 180.0f;
+        float ox0 = x + cosf(a0) * outer, oy0 = y + sinf(a0) * outer;
+        float ox1 = x + cosf(a1) * outer, oy1 = y + sinf(a1) * outer;
+        float ix1 = x + cosf(a1) * inner, iy1 = y + sinf(a1) * inner;
+        float ix0 = x + cosf(a0) * inner, iy0 = y + sinf(a0) * inner;
+        int large = ((end - start) > 180.0f) ? 1 : 0;
+        _out << "<path d='M " << ox0 << " " << oy0 << " A " << outer << " " << outer
+             << " 0 " << large << " 1 " << ox1 << " " << oy1 << " L " << ix1 << " " << iy1
+             << " A " << inner << " " << inner << " 0 " << large << " 0 " << ix0 << " " << iy0
+             << " Z' fill='" << color(c) << "'/>\n";
+    }
+
+    void setTextDatum(textdatum_t d) { _datum = d; }
+    void setTextColor(uint32_t c) { _textColor = c; }
+    void setTextSize(float s) { _textSize = s; }
+    void drawString(const char* text, int32_t x, int32_t y) {
+        const char* anchor = (_datum == top_right || _datum == middle_right) ? "end"
+                           : (_datum == top_left || _datum == middle_left) ? "start" : "middle";
+        _out << "<text x='" << x << "' y='" << y << "' text-anchor='" << anchor
+             << "' dominant-baseline='middle' font-family='sans-serif' font-size='"
+             << 8.0f * _textSize << "' fill='" << color(_textColor) << "'>";
+        for (const char* p = text; p && *p; ++p) {
+            if (*p == '&') _out << "&amp;";
+            else if (*p == '<') _out << "&lt;";
+            else _out << *p;
+        }
+        _out << "</text>\n";
+    }
+
+private:
+    static std::string color(uint32_t c) {
+        uint8_t r = (uint8_t)(((c >> 11) & 31u) * 255u / 31u);
+        uint8_t g = (uint8_t)(((c >> 5) & 63u) * 255u / 63u);
+        uint8_t b = (uint8_t)((c & 31u) * 255u / 31u);
+        const char* hex = "0123456789ABCDEF";
+        std::string s = "#000000";
+        s[1] = hex[r >> 4]; s[2] = hex[r & 15];
+        s[3] = hex[g >> 4]; s[4] = hex[g & 15];
+        s[5] = hex[b >> 4]; s[6] = hex[b & 15];
+        return s;
+    }
+    void rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r,
+              uint32_t c, bool fill) {
+        _out << "<rect x='" << x << "' y='" << y << "' width='" << w << "' height='" << h
+             << "' rx='" << r << "' " << (fill ? "fill='" : "fill='none' stroke='")
+             << color(c) << "'/>\n";
+    }
+
+    int16_t _w, _h;
+    textdatum_t _datum = top_left;
+    uint32_t _textColor = 0;
+    float _textSize = 1.0f;
+    std::ostringstream _out;
+};

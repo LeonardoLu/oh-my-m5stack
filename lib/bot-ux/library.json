@@ -1,7 +1,7 @@
 {
   "name": "bot-ux",
-  "version": "0.1.0",
-  "description": "A small, controllable 'grok bot' animation component (face, moods, reactions) rendered into an M5Canvas sprite for M5Stack devices.",
+  "version": "0.2.0",
+  "description": "A minimal Grok-inspired orb, mood, and task-state animation component rendered into an M5Canvas sprite for M5Stack devices.",
   "keywords": ["m5stack", "animation", "bot", "face", "ui", "grok"],
   "repository": {
     "type": "git",

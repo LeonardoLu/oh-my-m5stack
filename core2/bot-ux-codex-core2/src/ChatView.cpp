@@ -14,7 +14,7 @@ const int16_t kW = 248;
 const int16_t kH = 72;
 } // namespace
 
-void ChatView::begin(M5Canvas* cv, botux::BotUx* bot, const botux::Style* style,
+void ChatView::begin(M5Canvas* cv, botux::BotUx* bot, const botux::BotUx::Style* style,
                      const char* clockBuf, const char* statusBuf)
 {
     _cv = cv;

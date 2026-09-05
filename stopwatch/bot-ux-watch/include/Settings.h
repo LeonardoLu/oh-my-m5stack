@@ -2,7 +2,7 @@
 //
 // Owns the persisted user choices (12/24 h, theme, eye/body style, brightness)
 // and the theme color tables (tmp/ux-design.md §A.7). `style()` is a cached
-// botux::Style rebuilt from the current choices so callers can bot.setStyle()
+// botux::BotUx::Style rebuilt from the current choices so callers can bot.setStyle()
 // live; save() persists to NVS via Preferences.
 #pragma once
 
@@ -31,12 +31,12 @@ public:
     Data& data() { return _data; }
 
     void rebuildStyle(); // recompute _style from _data
-    const botux::Style& style() const { return _style; }
+    const botux::BotUx::Style& style() const { return _style; }
     void apply(botux::BotUx& bot) const { bot.setStyle(_style); }
 
     static const char* themeName(uint8_t idx);
 
 private:
     Data _data;
-    botux::Style _style;
+    botux::BotUx::Style _style;
 };

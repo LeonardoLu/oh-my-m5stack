@@ -57,7 +57,7 @@ void Settings::save() {
 
 void Settings::rebuildStyle() {
     const ThemeColors& c = kThemes[_data.theme];
-    botux::Style s;                 // Grok Teal defaults
+    botux::BotUx::Style s;                 // Grok Teal defaults
     s.bgColor     = c.bg;
     s.bodyColor   = c.body;
     s.accentColor = c.accent;

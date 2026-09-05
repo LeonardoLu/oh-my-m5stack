@@ -8,7 +8,7 @@
 #include <M5GFX.h> // M5Canvas (== LGFX_Sprite)
 #include <stdint.h>
 
-namespace botux { struct Style; } // fwd — colors come from the active theme
+#include "BotUx.h" // botux::BotUx::Style — colors come from the active theme
 
 class CodexKeyboard {
 public:
@@ -25,7 +25,7 @@ public:
 
     static const int16_t kMaxKeys = 38;
 
-    void begin(M5Canvas* cv, const botux::Style* style, int16_t topY);
+    void begin(M5Canvas* cv, const botux::BotUx::Style* style, int16_t topY);
 
     // Touch → key id (index into this keyboard), or -1.
     int16_t hitTest(int16_t x, int16_t y);
@@ -55,7 +55,7 @@ private:
     };
 
     M5Canvas* _cv = nullptr;
-    const botux::Style* _style = nullptr;
+    const botux::BotUx::Style* _style = nullptr;
     int16_t _topY = 0;
     bool _shift = false;
     bool _layer = false;     // true = symbol/number layer

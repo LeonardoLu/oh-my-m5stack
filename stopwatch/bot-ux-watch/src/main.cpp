@@ -88,9 +88,9 @@ static void applyLiveSettings();
 static const char* eyeName(uint8_t e);
 static const char* bodyName(uint8_t b);
 static void drawBrightnessBar(M5Canvas* cv, int16_t x, int16_t y, uint8_t level);
-static void drawPicker(M5Canvas* cv, const botux::Style& st, int16_t cx, int16_t y, const char* value);
-static void drawTimeEditor(M5Canvas* cv, const botux::Style& st, uint32_t now);
-static void drawMenuList(M5Canvas* cv, const botux::Style& st);
+static void drawPicker(M5Canvas* cv, const botux::BotUx::Style& st, int16_t cx, int16_t y, const char* value);
+static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t now);
+static void drawMenuList(M5Canvas* cv, const botux::BotUx::Style& st);
 static const char* editorTitle();
 static const char* hintForView();
 static void drawEditor(uint32_t now);
@@ -200,7 +200,7 @@ static void drawBrightnessBar(M5Canvas* cv, int16_t x, int16_t y, uint8_t level)
     }
 }
 
-static void drawPicker(M5Canvas* cv, const botux::Style& st, int16_t cx, int16_t y, const char* value) {
+static void drawPicker(M5Canvas* cv, const botux::BotUx::Style& st, int16_t cx, int16_t y, const char* value) {
     cv->setTextDatum(middle_center);
     cv->setTextSize(2.0f);
     cv->setTextColor(st.accentColor);
@@ -210,7 +210,7 @@ static void drawPicker(M5Canvas* cv, const botux::Style& st, int16_t cx, int16_t
     cv->drawString(">", cx + 55, y);
 }
 
-static void drawTimeEditor(M5Canvas* cv, const botux::Style& st, uint32_t now) {
+static void drawTimeEditor(M5Canvas* cv, const botux::BotUx::Style& st, uint32_t now) {
     int16_t cx = cv->width() / 2;
     bool blink = ((now / 500) % 2) == 0;
 
@@ -237,7 +237,7 @@ static void drawTimeEditor(M5Canvas* cv, const botux::Style& st, uint32_t now) {
     cv->drawString(buf, cx + 34, 90);
 }
 
-static void drawMenuList(M5Canvas* cv, const botux::Style& st) {
+static void drawMenuList(M5Canvas* cv, const botux::BotUx::Style& st) {
     for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; i++) {
         int16_t y = 40 + i * 24;
         bool sel = (i == (uint8_t)_menuSel);
@@ -291,7 +291,7 @@ static const char* hintForView() {
 
 static void drawEditor(uint32_t now) {
     M5Canvas* cv = &canvas;
-    const botux::Style& st = settings.style();
+    const botux::BotUx::Style& st = settings.style();
     int16_t cx = cv->width() / 2;
 
     cv->setTextDatum(top_left);
@@ -328,7 +328,7 @@ static void drawEditor(uint32_t now) {
 
 static void drawSettings(uint32_t now) {
     M5Canvas* cv = &canvas;
-    const botux::Style& st = settings.style();
+    const botux::BotUx::Style& st = settings.style();
     cv->fillSprite(st.bgColor);
 
     cv->setTextDatum(top_left);

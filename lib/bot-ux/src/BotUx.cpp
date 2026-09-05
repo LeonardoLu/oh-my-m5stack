@@ -8,7 +8,7 @@
 namespace botux {
 
 namespace {
-constexpr float PI = 3.14159265358979f;
+constexpr float kPi = 3.14159265358979f;
 // blink phase durations (ms)
 constexpr uint32_t BLINK_CLOSE_MS = 80;
 constexpr uint32_t BLINK_HOLD_MS  = 60; // extra hold while fully closed
@@ -86,7 +86,7 @@ void BotUx::poke() {
 }
 
 float BotUx::_pulse(uint32_t ms, float period, float phase) const {
-    return 0.5f + 0.5f * sinf(2.0f * PI * ms / period + phase);
+    return 0.5f + 0.5f * sinf(2.0f * kPi * ms / period + phase);
 }
 
 void BotUx::update(uint32_t nowMs) {
@@ -97,7 +97,7 @@ void BotUx::update(uint32_t nowMs) {
     _updateTalk(_now);
     _resolveMood(_now);
     // ~2.6s breathing cycle
-    _breath = sinf(2.0f * PI * (_now - _animStart) / 3800.0f);
+    _breath = sinf(2.0f * kPi * (_now - _animStart) / 3800.0f);
     _lastNow = _now;
 }
 
@@ -124,8 +124,8 @@ void BotUx::_updateBlink(uint32_t now) {
 void BotUx::_updatePupil(uint32_t now) {
     uint32_t t = now - _animStart;
     // Two incommensurate sines give smooth, non-repetitive-looking drift.
-    _pupilDX = 0.55f * sinf(2.0f * PI * t / 3400.0f) + 0.35f * sinf(2.0f * PI * t / 1700.0f + 1.7f);
-    _pupilDY = 0.45f * sinf(2.0f * PI * t / 2900.0f + 0.6f) + 0.30f * sinf(2.0f * PI * t / 4100.0f + 3.1f);
+    _pupilDX = 0.55f * sinf(2.0f * kPi * t / 3400.0f) + 0.35f * sinf(2.0f * kPi * t / 1700.0f + 1.7f);
+    _pupilDY = 0.45f * sinf(2.0f * kPi * t / 2900.0f + 0.6f) + 0.30f * sinf(2.0f * kPi * t / 4100.0f + 3.1f);
 }
 
 void BotUx::_updateTalk(uint32_t now) {
@@ -207,7 +207,7 @@ void BotUx::_drawBody() {
         case BodyStyle::Hexagon: {
             int32_t px[6], py[6];
             for (int i = 0; i < 6; i++) {
-                float a = PI / 6.0f + i * PI / 3.0f; // flat-top hexagon
+                float a = kPi / 6.0f + i * kPi / 3.0f; // flat-top hexagon
                 px[i] = cx + (int32_t)(r * cosf(a));
                 py[i] = cy + (int32_t)(r * sinf(a));
             }

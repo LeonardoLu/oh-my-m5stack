@@ -7,12 +7,12 @@ controllable "grok bot" face — integrated into two device apps.
 |---|---|---|---|
 | **watch** | `stopwatch/bot-ux-watch/` | M5StickC Plus2 | Watch face + stopwatch + settings, with the bot as the face and state readout |
 | **codex** | `core2/bot-ux-codex-core2/` | M5Stack Core2 | Touch "codex" prompt app with a custom on-screen keyboard + chat + settings |
-| **bot-ux** | `bot-ux/` | (shared) | The bot animation component — moods, blink, drift, breathing, reactions, personalization |
+| **bot-ux** | `lib/bot-ux/` | (shared) | The bot animation component — moods, blink, drift, breathing, reactions, personalization |
 
 ## Layout
 
 ```
-bot-ux/                      shared bot component (PlatformIO library)
+lib/bot-ux/                      shared bot component (PlatformIO library)
 stopwatch/bot-ux-watch/      watch app (PlatformIO project)
 core2/bot-ux-codex-core2/    core2 app (PlatformIO project)
 specs/                       task specs
@@ -22,7 +22,7 @@ tmp/                         scratch / research notes (gitignored)
 ## Build
 
 Each app is a PlatformIO project. The shared `bot-ux` library is discovered via
-`lib_extra_dirs = ../..`:
+`lib_extra_dirs = ../../lib`:
 
 ```bash
 cd stopwatch/bot-ux-watch   # or core2/bot-ux-codex-core2
@@ -37,7 +37,7 @@ Dependencies: `m5stack/M5Unified`, `m5stack/M5GFX`; platform `espressif32@6.13.0
 `bot-ux` renders into a caller-provided `M5Canvas` sprite — it never touches the
 display. Moods (`Idle/Listening/Thinking/Speaking/Happy/Sad/Sleepy/Surprised`), a
 seedable blink/drift system, a `poke()` surprise→happy reaction, and a `Style` for
-personalization (colors, eye/body shape, size). See `bot-ux/README.md`.
+personalization (colors, eye/body shape, size). See `lib/bot-ux/README.md`.
 
 ## Design docs
 

@@ -9,7 +9,7 @@ integrated into two device apps:
 ## Layout
 
 ```
-bot-ux/                      shared bot animation component (PlatformIO library)
+lib/bot-ux/                      shared bot animation component (PlatformIO library)
   src/BotUx.{h,cpp}          the component: face, moods, animation
   examples/standalone/       minimal demo
 stopwatch/bot-ux-watch/      watch app (PlatformIO project)
@@ -22,9 +22,9 @@ tmp/                         scratch / research notes (gitignored)
 
 - PlatformIO + Arduino framework, `espressif32@6.13.0` platform.
 - Libraries: `m5stack/M5Unified`, `m5stack/M5GFX`.
-- `bot-ux` is a PlatformIO library; device apps discover it via `lib_extra_dirs = ../..`.
+- `bot-ux` is a PlatformIO library; device apps discover it via `lib_extra_dirs = ../../lib`.
 
-## BotUx contract (source of truth: `bot-ux/src/BotUx.h`)
+## BotUx contract (source of truth: `lib/bot-ux/src/BotUx.h`)
 
 - `begin(M5Canvas*)` — bind a sprite, never owns the display.
 - `setStyle(Style)` — personalization (colors, eye/body style, sizes).

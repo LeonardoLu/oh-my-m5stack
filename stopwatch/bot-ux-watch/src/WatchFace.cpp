@@ -26,7 +26,7 @@ void WatchFace::update(uint32_t nowMs) {
 }
 
 void WatchFace::draw() {
-    const botux::Style& st = _bot.style();
+    const botux::BotUx::Style& st = _bot.style();
     _drawSignal(st.accentColor, botux::rgb565(0x30, 0x34, 0x3C));
     _drawBattery(st.accentColor, botux::rgb565(0xFF, 0x4D, 0x4D));
     _drawClock(st.accentColor, st.eyeColor);

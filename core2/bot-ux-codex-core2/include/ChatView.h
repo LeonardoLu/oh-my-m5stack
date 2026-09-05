@@ -9,13 +9,13 @@
 #include <M5GFX.h> // M5Canvas (== LGFX_Sprite)
 #include <stdint.h>
 
-namespace botux { class BotUx; struct Style; } // fwd
+#include "BotUx.h" // botux::BotUx + nested Style
 
 class ChatView {
 public:
     // clock/status are persistent buffers owned by main (never freed); read live
     // when a canned reply is generated.
-    void begin(M5Canvas* cv, botux::BotUx* bot, const botux::Style* style,
+    void begin(M5Canvas* cv, botux::BotUx* bot, const botux::BotUx::Style* style,
                const char* clockBuf, const char* statusBuf);
 
     void setListening();            // prompt focused / a key was pressed
@@ -38,7 +38,7 @@ private:
 
     M5Canvas* _cv = nullptr;
     botux::BotUx* _bot = nullptr;
-    const botux::Style* _style = nullptr;
+    const botux::BotUx::Style* _style = nullptr;
     const char* _clock = nullptr;   // "HH:MM" persistent
     const char* _status = nullptr;  // "bat 87% - no signal" persistent
 

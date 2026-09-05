@@ -305,7 +305,7 @@ static void syncSettings()
 }
 
 // ---- drawing ---------------------------------------------------------------
-static void drawPrompt(const botux::Style& st)
+static void drawPrompt(const botux::BotUx::Style& st)
 {
     _canvas.fillRoundRect(4, kPromptY + 2, kScreenW - 8, kPromptH - 4, 6, st.bodyColor);
 
@@ -322,7 +322,7 @@ static void drawPrompt(const botux::Style& st)
 
 static void drawMain()
 {
-    const botux::Style& st = _bot.style();
+    const botux::BotUx::Style& st = _bot.style();
     _canvas.fillSprite(st.bgColor);
 
     // status bar: clock · title · battery

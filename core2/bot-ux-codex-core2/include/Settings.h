@@ -8,7 +8,7 @@
 #include <M5GFX.h> // M5Canvas
 #include <stdint.h>
 
-#include "BotUx.h" // botux::Style / BotUx (returned by value)
+#include "BotUx.h" // botux::BotUx::Style / BotUx (returned by value)
 
 class Settings {
 public:
@@ -22,7 +22,7 @@ public:
     enum { kThemeCount = 3 };
 
     static const char* themeName(int i);
-    static botux::Style themeStyle(int i);
+    static botux::BotUx::Style themeStyle(int i);
 
     void begin();                    // load prefs from NVS
     void apply(botux::BotUx* bot);   // push theme + brightness to device

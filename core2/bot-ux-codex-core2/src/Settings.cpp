@@ -19,7 +19,7 @@ const uint8_t kBright[5] = {32, 88, 144, 200, 255}; // level 1..5 → 0..255
 // dim "off" segment color (unlit slider / empty bars)
 uint16_t dim(uint8_t r, uint8_t g, uint8_t b) { return botux::rgb565(r, g, b); }
 
-void drawRow(M5Canvas* cv, const botux::Style& st, int16_t y, const char* label, const char* value)
+void drawRow(M5Canvas* cv, const botux::BotUx::Style& st, int16_t y, const char* label, const char* value)
 {
     cv->fillRoundRect(8, y, kW - 16, kRowH, 6, st.bodyColor);
     cv->setTextDatum(middle_left);
@@ -41,9 +41,9 @@ const char* Settings::themeName(int i)
     return names[n];
 }
 
-botux::Style Settings::themeStyle(int i)
+botux::BotUx::Style Settings::themeStyle(int i)
 {
-    botux::Style s;
+    botux::BotUx::Style s;
     int n = i % kThemeCount;
     if (n < 0) n += kThemeCount;
 
@@ -247,7 +247,7 @@ void Settings::_handleRow(int16_t row)
 
 void Settings::draw(M5Canvas* cv, M5Canvas* botSprite)
 {
-    botux::Style st = themeStyle(_data.theme);
+    botux::BotUx::Style st = themeStyle(_data.theme);
     cv->fillSprite(st.bgColor);
 
     // title bar

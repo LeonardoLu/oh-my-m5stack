@@ -75,7 +75,7 @@ char upper(char c)
 
 } // namespace
 
-void CodexKeyboard::begin(M5Canvas* cv, const botux::Style* style, int16_t topY)
+void CodexKeyboard::begin(M5Canvas* cv, const botux::BotUx::Style* style, int16_t topY)
 {
     _cv = cv;
     _style = style;

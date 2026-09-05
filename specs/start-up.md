@@ -46,6 +46,9 @@
 - m5stack stopwatch QA：m5stack stopwatch 的测试人员。
 - m5stack core2 QA：m5stack core2 的测试人员。
 
+> developer 和 QA 结对执行；developer 完成后，让 QA 验证；QA 验证反馈问题后，developer 修复。
+> professor review developer 的方案和代码。
+
 ## 执行建议
 
 - 添加 .gitignore ，将临时文件放入 tmp 内，其他临时目录、产物目录、依赖目录记录到 .gitignore 中。

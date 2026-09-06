@@ -2206,8 +2206,8 @@ static void pushFaceWithButtonFeedback(uint32_t now) {
     // steps reuse it; only the bot and the infrequently-changing HUD are
     // refreshed, and liquid is always blended in the separate scratch buffer.
     bool fullFrame = _faceNeedsClear;
-    bool refreshHud = !_buttonFeedbackFaceBaseValid || fullFrame
-        || !_buttonFeedbackHudMs || now - _buttonFeedbackHudMs >= 200;
+    bool submitHud = _buttonFeedbackHudMs && now - _buttonFeedbackHudMs >= 200;
+    bool refreshHud = !_buttonFeedbackFaceBaseValid || fullFrame || submitHud;
     if (!_buttonFeedbackFaceBaseValid || fullFrame) {
         canvas.fillSprite(settings.style().bgColor);
         _buttonFeedbackFaceBaseValid = true;
@@ -2228,7 +2228,7 @@ static void pushFaceWithButtonFeedback(uint32_t now) {
             canvas, watchbuttons::Bounds{0, 0, kW, kH}, held);
         _faceNeedsClear = false;
     } else {
-        if (refreshHud) {
+        if (submitHud) {
             pixels += pushCanvasRegionWithButtonFeedback(
                 canvas, watchbuttons::Bounds{0, 0, kW, 90}, held);
             pixels += pushCanvasRegionWithButtonFeedback(
@@ -2345,6 +2345,7 @@ static void render(uint32_t now) {
         face.draw(&M5.Display, settings.style().bgColor, settings.ink(), settings.muted(),
                   settings.style().accentColor, settings.panel(), settings.warning(),
                   statusPanelProgress(now));
+        _buttonFeedbackHudMs = now;
         _buttonFeedbackFaceBaseValid = false;
         M5.Display.waitDisplay();
         uint32_t t3 = micros();

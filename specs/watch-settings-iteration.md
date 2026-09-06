@@ -77,12 +77,60 @@ CST820 interrupt edges.
 
 The corresponding native framebuffer is `tmp/done-debug/settings.png`. Its visible blue
 Done pill occupies exactly `x=154..311, y=376..421`; the half-open rounded hit target is
-`x=154..312, y=376..422`. StopWatch panel and touch rotation are both zero, M5GFX scales
-raw touch `0..233` to panel `0..467`, and the 466 px application canvas is pushed at
-`(0,0)`. The two-pixel panel/canvas difference cannot explain the rejected samples,
-which are 9–37 px below the visible pill. This trial rules out missed acquisition,
-release timeout, drag promotion, and draw/hit disagreement for those failures. It does
-not yet establish whether the physical target-to-coordinate mapping is offset or the
-finger contact centroid landed below the intended visual point. A second trace asking
-for one press centered precisely on the rendered Done text is pending before changing
-geometry or calibration.
+`x=154..312, y=376..422`. The 466 px application canvas is pushed at `(0,0)`, so rendering
+and hit testing agree. The rejected samples are 9–37 px below the visible pill.
+
+A second trial asked for presses centered on the rendered Done text `(233,399)`. Ten
+successive contacts were rejected at y=423..444, 24–45 px below that center; the eleventh
+was accepted at `(206,413)`. After reopening Settings, three more were rejected at
+`(256,427)`, `(256,451)`, and `(254,440)`, followed by an accepted contact at `(235,400)`.
+Every contact was fully acquired and ended without drag or timeout. These trials rule
+out missed acquisition, release timeout, drag promotion, and draw/hit disagreement as
+the cause of the observed failures, but a single control could not distinguish mapping
+error from contact placement.
+
+The command-gated five-point probe then displayed crosshair targets at center, top,
+left, right, and the Done center. It consumed ordinary navigation and recorded raw and
+converted coordinates from the same CST820 read. Stable `(target, raw, converted)`
+results were `(233,233; 249,251; 255,257)`, `(233,100; 240,104; 246,106)`,
+`(100,233; 95,253; 97,259)`, `(366,233; 380,248; 389,254)`, and
+`(233,399; 228,427; 233,437)`. The error grows toward the lower edge and is present in
+the conversion rather than in the UI target.
+
+The static StopWatch board configuration declares touch maxima 233 and a 468 px panel;
+that describes an intended transform, not the transform running on this firmware. The
+linked dependency is `.pio/libdeps/m5stack-stopwatch/M5GFX@src-6e4f1aa2c3141670f2da75faf884f9ac/`.
+Its StopWatch path installs the CST touch object while `Panel_AMOLED_Framebuffer` still
+has its default 240 px configuration, computing an approximately `239/233` affine
+scale. It later copies the 468 px panel configuration without recomputing that touch
+transform. The measured mappings, such as raw `(249,251)` becoming `(255,257)` and raw
+`(228,427)` becoming `(233,437)`, match the stale 240 px transform. Sensor raw values
+already use the physical display's pixel domain. Changing only the 233 range while
+leaving framebuffer initialization unchanged would incorrectly double coordinates;
+the range and framebuffer calibration order must be corrected together.
+
+An isolated per-device independent X/Y linear-profile prototype was used to check the
+measurement math, but it is not the production remedy. The first five-point
+least-squares candidate for this physical unit is
+`x=0.92819782*raw+11.71763980`, `y=0.92641282*raw+1.88247027`. Production work first
+corrects and verifies the linked library's deterministic framebuffer/touch setup and
+the CST820 coordinate contract; the measured fit remains diagnostic evidence rather
+than a result-specific default.
+
+The production remedy is a repository-tracked patch against pinned M5GFX commit
+`d91077b`. A post-dependency script accepts only that commit and the expected SHA-256
+set, applies the patch once, verifies the patched hashes, and rejects drift. It gives
+StopWatch a distinct CST820 path matching the factory firmware: 100 kHz I2C, A7/A9
+identification, one seven-byte read from register zero, direct 12-bit coordinates, and
+no CST816-specific FA/ED writes or wait heuristic. The StopWatch touch range is set to
+`0..467` to express pixel identity against M5GFX's current 468 px framebuffer; this is
+not a claim that 467 is the measured sensor maximum. The framebuffer copies its final
+configuration before installing the touch device and computing the affine transform.
+
+A cold dependency install and full rebuild applied the patch before M5GFX compilation.
+The resulting ELF contains `Touch_CST820`. Its runtime `cal map` report showed separate
+axes and pixel identity: `(0,0)->(0,0)`, `(0,467)->(0,467)`, `(467,0)->(467,0)`, and the
+previous lower probe `(228,427)->(228,427)`. M5GFX's floating affine calculation truncates
+some Y results down by one pixel (`(233,233)->(233,232)`, `(467,467)->(467,466)`), which
+is the bounded numeric effect of the identity transform rather than measured fitting.
+Physical Done acceptance after this library fix remains pending.

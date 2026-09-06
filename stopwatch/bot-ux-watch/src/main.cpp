@@ -465,6 +465,23 @@ static void dumpTouchCalibration() {
     Serial.flush();
 }
 
+static void dumpTouchMapping() {
+    const int16_t rawPoints[][2]={{0,0},{0,467},{467,0},{233,233},{228,427},{467,467}};
+    auto touchConfig=M5.Display.touch()->config();
+    auto panelConfig=M5.Display.panel()->config();
+    Serial.printf("CALMAP panel=%ux%u touch_x=%u..%u touch_y=%u..%u\n",
+                  panelConfig.panel_width,panelConfig.panel_height,
+                  touchConfig.x_min,touchConfig.x_max,touchConfig.y_min,touchConfig.y_max);
+    for(const auto& values:rawPoints) {
+        lgfx::touch_point_t raw;
+        raw.x=values[0]; raw.y=values[1];
+        auto logical=raw;
+        M5.Display.convertRawXY(&logical,1);
+        Serial.printf("CALMAP raw=%d,%d logical=%d,%d\n",raw.x,raw.y,logical.x,logical.y);
+    }
+    Serial.flush();
+}
+
 static void consumeWakeInput() {
     _buttonA.consume(M5.BtnA.isPressed());
     _buttonB.consume(M5.BtnB.isPressed());
@@ -1796,6 +1813,7 @@ static void handleSerialCommands() {
         else if(!strcmp(line,"cal on")) { _diagnosticContact=false; startTouchCalibration(); Serial.println("CAL armed 1/5"); Serial.flush(); }
         else if(!strcmp(line,"cal off")) { stopTouchCalibration(); Serial.println("CAL disarmed"); Serial.flush(); }
         else if(!strcmp(line,"cal dump")) dumpTouchCalibration();
+        else if(!strcmp(line,"cal map")) dumpTouchMapping();
         else if(!strcmp(line,"trace on")) { setTouchTraceEnabled(true); Serial.println("TRACE armed"); Serial.flush(); }
         else if(!strcmp(line,"trace off")) { stopTouchTrace(); Serial.println("TRACE disarmed"); Serial.flush(); }
         else if(!strcmp(line,"trace clear")) { bool enabled=_touchTraceEnabled; setTouchTraceEnabled(enabled); Serial.println("TRACE cleared"); Serial.flush(); }

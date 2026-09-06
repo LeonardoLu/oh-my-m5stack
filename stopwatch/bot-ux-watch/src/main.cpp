@@ -1633,7 +1633,18 @@ static void drawPersonalizeList(bool chrome = true) {
 
 static void drawFooter() {
     auto bounds=watchcontrols::doneBounds();
-    drawPill(bounds.x,bounds.y,bounds.w,bounds.h,"DONE",false,true);
+    uint16_t fill=settings.style().accentColor;
+    if(pressedOver(bounds.x,bounds.y,bounds.w,bounds.h))
+        fill=ux::blend565(fill,settings.ink(),48);
+    for(int16_t y=bounds.y;y<bounds.y+bounds.h;++y) {
+        auto span=watchcontrols::doneRowSpan(y);
+        if(span.w>0) canvas.drawFastHLine(span.x,span.y,span.w,fill);
+    }
+    canvas.setTextDatum(middle_center);
+    canvas.setFont(&fonts::FreeSansBold9pt7b);
+    canvas.setTextSize(1.0f);
+    canvas.setTextColor(settings.style().bgColor);
+    watchText(canvas,"DONE",watchcontrols::doneLabelX(),watchcontrols::doneLabelY());
 }
 
 static void drawStepper(int16_t cx, const char* label, const char* value, bool selected, int16_t width) {

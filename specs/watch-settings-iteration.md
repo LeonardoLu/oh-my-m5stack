@@ -3,10 +3,10 @@
 2026-09-06. This iteration refines the StopWatch UI without changing the shared
 BotUx input contract.
 
-- Every non-face screen uses one centered `Done` pill. Its drawn rounded rectangle,
-  pressed surface and touch target use the same bounds and corner radius. The final
-  visible control is a 158 by 96 px capsule at `(154,351)`, centered at `(233,399)`
-  with radius 48. In an
+- Every non-face screen uses one visible `Done` region across the round display's lower
+  segment. Its normal fill, pressed surface and touch target use the same scanline spans
+  from y=351 through the last canvas row at y=465, clipped by the display circle centered
+  at `(233,233)` with radius 233. The label remains at `(233,399)`. In an
   editor it saves and returns to the parent; in Bot Personality it returns to
   the screen that opened it; in Settings it saves and returns to the face. Power Home and hardware
   Long A retain the cancellation paths.
@@ -271,9 +271,9 @@ occlusion, or controller-centroid mechanism. It ended at identity with no profil
 candidate, NVS write, or reboot.
 
 The production response keeps the corrected CST820 identity mapping and does not add a
-fixed or fitted coordinate offset. The visible Done capsule grows from 46 to 96 px high
-while retaining center `(233,399)`. At 466 px across the 1.75 inch (44.45 mm) display,
-that changes its nominal height from about 4.4 mm to 9.2 mm. This follows the
+fixed or fitted coordinate offset. The intermediate visible Done capsule grew from 46
+to 96 px high while retaining center `(233,399)`. At 466 px across the 1.75 inch
+(44.45 mm) display, that changed its nominal height from about 4.4 mm to 9.2 mm. This follows the
 [Windows touch guidance](https://learn.microsoft.com/en-us/windows/win32/uxguide/inter-touch)
 as a sizing reference rather than a device-mandated standard, and keeps the visible
 rounded surface identical to its hit geometry. Main lists
@@ -316,3 +316,15 @@ Face with `manual=0` and the persisted Chinese preference. Its startup profile w
 so no profile was saved. The enlarged visible target materially improved acceptance but
 the captured lower-edge contacts leave intermittent natural acceptance as a remaining
 risk rather than a completed five-for-five physical acceptance result.
+
+The user clarified that one rejected lower-edge press was casual but still felt like it
+should activate Done. The final geometry therefore replaces the intermediate capsule
+with the visible lower segment of the same mathematical display circle: bounding box
+`(0,351,466,115)`, inclusive canvas rows 351–465, circle center `(233,233)` and radius
+233. `doneRowSpan(y)` supplies each half-open visible scanline and `doneContains(x,y)`
+uses the identical integer circle equation, so the normal fill, whole-region pressed
+feedback and hit target share every boundary pixel without hidden slop. The top is a
+straight scanline; the physical round edge supplies the remaining boundary. Label and
+content geometry stay unchanged. This change includes the earlier rejected points near
+`(236,448)` and `(241,458)` in the visible control, but their prior trace is only design
+input. Acceptance must be established by new natural use of this final geometry.

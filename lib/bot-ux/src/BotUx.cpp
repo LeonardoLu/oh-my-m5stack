@@ -487,6 +487,15 @@ void BotUx::_resolveMood(uint32_t now) {
             break;
     }
 
+    // A chosen direction is relative to the body, not the expression's default
+    // pair placement. Ease that placement to center so Left cannot be cancelled
+    // by Curious's rightward bias (or Down by the usual elevated eye position).
+    // Local eye shape, spacing, lean and rotation remain expression-driven.
+    if (_gazeDirection != GazeDirection::Auto) {
+        targetPairX = 0.0f;
+        targetPairY = 0.0f;
+    }
+
     if (_battery <= 10 && targetOpen > 0.24f) {
         targetOpen = 0.24f;
         lift += 0.03f;

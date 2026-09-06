@@ -239,7 +239,11 @@ values fall back to Auto. Direction is retained by presets and resetToIdle.
 
 Auto follows the mood/expression's gaze and adds a little wandering even to
 stable explicit faces. A chosen direction replaces that gaze with a clear
-left/right/up/down target and subtle drift around it. Center stays centered.
+left/right/up/down target and subtle drift around it. Explicit directions also
+ease the expression's global eye-pair placement to the body center, so Curious's
+rightward bias cannot cancel Left and an elevated face cannot cancel Down.
+Center stays centered; eye shape, spacing, lean and rotation are retained.
+Auto keeps the expression's original placement.
 Temporary `gazeAt()` takes precedence in Idle and returns to the selected
 direction when it expires. All autonomous gaze drift scales with motion amount
 and reduced motion; explicit user direction/tap commands still work at zero.
@@ -274,9 +278,19 @@ Added validation beyond the existing tests:
 - Thinking coverage has more than 12 actual RGB565 colors across its three dots,
   rather than checking for an SVG circle instruction.
 - On a four-second Calm sequence, aggregate RGB565 temporal difference is
-  394,939 full motion versus 107,745 reduced (27.3%). This measures pixel-channel
+  394,808 full motion versus 107,653 reduced (27.3%). This measures pixel-channel
   movement rather than merely counting different frame hashes.
 
 `tools/host-preview/render.sh` passes with C++11 `-Wall -Wextra -Werror`.
 Device integration owns native frame timing, screenshots and battery/persistence
 acceptance; these host tests do not claim physical-device acceptance.
+
+A native Listening/Curious Left preview exposed the previous cancellation between
+expression placement and gaze offset. The direction regression now renders
+**1,600 cases**: all ten moods that show eyes × ten expressions × four eye styles
+× Left/Right/Up/Down, first settling Auto then selecting the direction. The raster
+eye-group bounding-box center must lie on the correct side of the raster body
+center by at least 12% radius horizontally or 9% vertically. Using the bounding
+box keeps Wink's different ink masses from being mistaken for pair movement.
+All cases and the existing host suite pass; transitions retain the original
+scalar easing rather than jumping when a direction is selected.

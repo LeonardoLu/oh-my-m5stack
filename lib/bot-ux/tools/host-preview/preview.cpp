@@ -685,6 +685,56 @@ static void checkGazeDirectionsAndMotionZero() {
     }
 }
 
+static void checkDirectionsDominateEveryFace() {
+    using Bot = botux::BotUx;
+    M5Canvas canvas(96, 96); canvas.setRecording(false);
+    for (uint8_t mood = 0; mood < Bot::moodCount(); ++mood) {
+        if (mood == (uint8_t)Bot::Mood::Thinking || mood == (uint8_t)Bot::Mood::Blocked) continue;
+        for (uint8_t expr = 0; expr < Bot::expressionCount(); ++expr)
+            for (uint8_t eyeStyle = 0; eyeStyle < 4; ++eyeStyle)
+                for (auto direction : {Bot::GazeDirection::Left, Bot::GazeDirection::Right,
+                                       Bot::GazeDirection::Up, Bot::GazeDirection::Down}) {
+                    gNow = 1000; Bot bot; bot.begin(&canvas);
+                    auto style = bot.style(); style.eyeStyle = (Bot::EyeStyle)eyeStyle;
+                    style.blinkMinMs = style.blinkMaxMs = 600000;
+                    style.bodyColor = botux::rgb565(255,255,255); style.eyeColor = style.pupilColor = 0;
+                    bot.setStyle(style); bot.seedBlink(1234);
+                    bot.setMood((Bot::Mood)mood); bot.setExpression((Bot::Expression)expr);
+                    bot.setAnimation(Bot::Animation::Calm); bot.setMotionAmount(0.55f);
+                    // Begin on the expression's natural placement, then choose a direction.
+                    for (int i = 0; i < 30; ++i) { gNow += 33; bot.update(gNow); }
+                    bot.setGazeDirection(direction);
+                    for (int i = 0; i < 45; ++i) { gNow += 33; bot.update(gNow); }
+                    canvas.clear(); bot.draw(); assert(!canvas.outOfBounds());
+                    float bodyX = 0, bodyY = 0;
+                    int eyeMinX = 96, eyeMaxX = 0, eyeMinY = 96, eyeMaxY = 0;
+                    unsigned bodyPixels = 0, eyePixels = 0;
+                    for (int y = 0; y < 96; ++y) for (int x = 0; x < 96; ++x) {
+                        uint16_t c = canvas.readPixel(x,y);
+                        if (c != style.bgColor) { bodyX += x; bodyY += y; ++bodyPixels; }
+                        if (c == 0) {
+                            eyeMinX = std::min(eyeMinX, x); eyeMaxX = std::max(eyeMaxX, x);
+                            eyeMinY = std::min(eyeMinY, y); eyeMaxY = std::max(eyeMaxY, y); ++eyePixels;
+                        }
+                    }
+                    assert(bodyPixels && eyePixels);
+                    // Use geometry extent, not ink mass: Wink's open eye has much
+                    // more ink than its closed eye without moving the eye pair.
+                    float dx = (eyeMinX + eyeMaxX) * 0.5f - bodyX / bodyPixels;
+                    float dy = (eyeMinY + eyeMaxY) * 0.5f - bodyY / bodyPixels;
+                    float r = bot.metrics().bodyR;
+                    bool horizontal = direction == Bot::GazeDirection::Left || direction == Bot::GazeDirection::Right;
+                    float signedOffset = direction == Bot::GazeDirection::Left ? -dx
+                        : direction == Bot::GazeDirection::Right ? dx
+                        : direction == Bot::GazeDirection::Up ? -dy : dy;
+                    if (signedOffset < r * (horizontal ? 0.12f : 0.09f))
+                        std::cerr << "direction failure " << (int)mood << "/" << (int)expr << "/" << (int)eyeStyle
+                                  << " direction " << (int)direction << " offset " << signedOffset << "\n";
+                    assert(signedOffset >= r * (horizontal ? 0.12f : 0.09f));
+                }
+    }
+}
+
 static void checkReducedMotionAmplitude() {
     using Bot = botux::BotUx;
     unsigned changes[2] = {};
@@ -749,6 +799,7 @@ int main(int argc, char** argv) {
     checkConnectedEyeMorphs();
     checkPersistentAnimationWindows();
     checkGazeDirectionsAndMotionZero();
+    checkDirectionsDominateEveryFace();
     checkReducedMotionAmplitude();
     benchmarkEyes();
     checkCoverageAndFacePlacement();

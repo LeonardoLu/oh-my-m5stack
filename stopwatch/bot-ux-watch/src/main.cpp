@@ -2042,8 +2042,8 @@ template <typename Gfx>
 static void drawButtonArc(Gfx& target, watchbuttons::Button button) {
     const auto spec = watchbuttons::arc(button);
     constexpr float kRadians = 3.14159265358979323846f / 180.0f;
-    constexpr int16_t kRadius = 224;
-    constexpr int16_t kThickness = 7;
+    int16_t radius = button == watchbuttons::Power ? 230 : 224;
+    int16_t thickness = button == watchbuttons::Power ? 2 : 7;
     int16_t center = (spec.startDegrees + spec.endDegrees) / 2;
     int16_t targetHalf = (spec.endDegrees - spec.startDegrees) / 2;
     uint8_t step = _diagnosticButtons ? watchbuttons::Feedback::ExpandSteps
@@ -2051,12 +2051,13 @@ static void drawButtonArc(Gfx& target, watchbuttons::Button button) {
     int16_t half = targetHalf * step / watchbuttons::Feedback::ExpandSteps;
     auto cap = [&](int16_t degrees) {
         float angle = degrees * kRadians;
-        int16_t x = 233 + (int16_t)lroundf(cosf(angle) * kRadius);
-        int16_t y = 233 + (int16_t)lroundf(sinf(angle) * kRadius);
-        target.fillCircle(x, y, kThickness, spec.color);
+        int16_t x = 233 + (int16_t)lroundf(cosf(angle) * radius);
+        int16_t y = 233 + (int16_t)lroundf(sinf(angle) * radius);
+        target.fillCircle(x, y, thickness, spec.color);
     };
     if (half > 0) {
-        target.fillArc(233, 233, 231, 217, center - half, center + half, spec.color);
+        target.fillArc(233, 233, radius + thickness, radius - thickness,
+                       center - half, center + half, spec.color);
         cap(center - half);
         cap(center + half);
     } else {

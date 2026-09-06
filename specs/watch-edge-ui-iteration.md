@@ -1,8 +1,8 @@
 # StopWatch round-edge controls
 
-Status: source implementation and focused host validation complete; final firmware
-build, device capture and finger-on-glass acceptance belong to the Watch integration
-owner.
+Status: source implementation, host validation, final firmware upload and device
+framebuffer review complete. Physical button and finger-on-glass behavior remain
+separate manual evidence.
 
 ## Completion footer
 
@@ -95,5 +95,29 @@ physical button signals and must be disabled after capture.
 expansion clocks, simultaneous buttons and invalid power samples. The clean
 dependency build applied the PMIC patch from its original hashes; an immediate
 second build reported both M5GFX and M5Unified patches already verified. The final
-source build used 48,888 bytes RAM and 1,023,573 bytes flash. Device upload, framebuffer
-captures and physical held-button acceptance are still pending.
+source build used 48,888 bytes RAM and 1,023,653 bytes flash.
+
+## Final integrated evidence
+
+The final Watch source was built and uploaded at commit `0bb52ed`. The
+1,023,936-byte firmware image has SHA-256
+`266e1c78862ad5bfb209bd8f91cc7cd7016a243ba4255dd6687ed84fbebcb15c`;
+upload verification matched the flashed image.
+
+Firmware framebuffer captures under `tmp/watch-edge-buttons/device/` show the
+smaller Done footer; green 72 percent, yellow 24 percent and red 8 percent battery
+teeth; individual A/B/power arcs; simultaneous A+B arcs; the power arc over Done;
+and the fully restored settings page after release. The three battery frames keep
+the fixed dark percentage and gauge readable on every container fill. Their exact
+files are `battery-green-72.png`, `battery-yellow-24.png`,
+`battery-red-8.png` and `settings-small-done.png`. Button render evidence uses
+`key-a-yellow.png`, `key-b-blue.png`, `key-power-red.png`,
+`settings-power-overlay.png` and `settings-after-release.png`.
+
+The live final state reported the physical PMIC status read available
+(`pwr_valid=1`) and no held button. The device returned to Face with manual preview
+off, Chinese UI, identity touch profile, diagnostic key rendering disabled and the
+serial port released. Battery values and key masks in these captures are diagnostic
+render overrides. They exercise production framebuffer geometry and redraw paths,
+but do not claim actual battery measurements, optical panel output, physical held
+button recognition or a finger tap on the smaller Done control.

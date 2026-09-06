@@ -562,24 +562,28 @@ static void checkCompanionSemantics() {
             }
 }
 
-static float eyeCentroidX(M5Canvas& canvas) {
-    float sum = 0, count = 0;
+static float eyeGroupCenterX(M5Canvas& canvas) {
+    int left = canvas.width(), right = -1;
     for (int y = 0; y < canvas.height(); ++y) for (int x = 0; x < canvas.width(); ++x)
-        if (canvas.readPixel(x, y) == botux::rgb565(32, 36, 41)) { sum += x; ++count; }
-    assert(count); return sum / count;
+        if (canvas.readPixel(x, y) == botux::rgb565(32, 36, 41)) {
+            left = std::min(left, x); right = std::max(right, x);
+        }
+    assert(right >= left); return (left + right) * 0.5f;
 }
 static void checkTemporaryGaze() {
     using Bot = botux::BotUx;
     M5Canvas canvas(200, 200); Bot bot; bot.begin(&canvas);
     auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 60000; bot.setStyle(style);
     bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
-    gNow += 1000; bot.gazeAt(-1, 0, 1800); bot.update(gNow); canvas.clear(); bot.draw();
-    float left = eyeCentroidX(canvas);
+    gNow += 1000; bot.update(gNow); canvas.clear(); bot.draw();
+    float baseline = eyeGroupCenterX(canvas);
+    bot.setExpression(Bot::Expression::Neutral, 0); bot.gazeAt(-1, 0, 1800); gNow += 16; bot.update(gNow); canvas.clear(); bot.draw();
+    float left = eyeGroupCenterX(canvas);
     bot.setExpression(Bot::Expression::Neutral, 0); bot.gazeAt(1, 0, 1800);
     gNow += 16; bot.update(gNow); canvas.clear(); bot.draw();
-    assert(eyeCentroidX(canvas) > left + 20);
+    assert(eyeGroupCenterX(canvas) > left + 20);
     gNow += 1900; bot.setExpression(Bot::Expression::Neutral, 0); bot.update(gNow); canvas.clear(); bot.draw();
-    assert(eyeCentroidX(canvas) < left + 36);
+    assert(std::fabs(eyeGroupCenterX(canvas) - baseline) <= 1.5f);
 }
 
 static void checkConnectedEyeMorphs() {
@@ -664,14 +668,14 @@ static void checkGazeDirectionsAndMotionZero() {
     auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style);
     bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
     bot.setGazeDirection(Bot::GazeDirection::Left); bot.update(gNow); canvas.clear(); bot.draw();
-    float left = eyeCentroidX(canvas);
+    float left = eyeGroupCenterX(canvas);
     bot.setGazeDirection(Bot::GazeDirection::Right); bot.setExpression(Bot::Expression::Neutral, 0);
     gNow += 1000; bot.update(gNow); canvas.clear(); bot.draw();
-    assert(eyeCentroidX(canvas) > left + 25);
+    assert(eyeGroupCenterX(canvas) > left + 25);
     bot.gazeAt(-1, 0); gNow += 200; bot.update(gNow); canvas.clear(); bot.draw();
-    assert(eyeCentroidX(canvas) < left + 5);
+    assert(eyeGroupCenterX(canvas) < left + 5);
     gNow += 2000; bot.update(gNow); canvas.clear(); bot.draw();
-    assert(eyeCentroidX(canvas) > left + 25);
+    assert(eyeGroupCenterX(canvas) > left + 25);
     assert(bot.gazeDirection() == Bot::GazeDirection::Right);
     for (uint8_t mood = 0; mood < Bot::moodCount(); ++mood) {
         bot.setMood((Bot::Mood)mood, 0); bot.setExpression(Bot::Expression::Dizzy, 0);
@@ -693,7 +697,9 @@ static void checkDirectionsDominateEveryFace() {
         for (uint8_t expr = 0; expr < Bot::expressionCount(); ++expr)
             for (uint8_t eyeStyle = 0; eyeStyle < 4; ++eyeStyle)
                 for (auto direction : {Bot::GazeDirection::Left, Bot::GazeDirection::Right,
-                                       Bot::GazeDirection::Up, Bot::GazeDirection::Down}) {
+                                       Bot::GazeDirection::Up, Bot::GazeDirection::Down,
+                                       Bot::GazeDirection::UpLeft, Bot::GazeDirection::UpRight,
+                                       Bot::GazeDirection::DownLeft, Bot::GazeDirection::DownRight}) {
                     gNow = 1000; Bot bot; bot.begin(&canvas);
                     auto style = bot.style(); style.eyeStyle = (Bot::EyeStyle)eyeStyle;
                     style.blinkMinMs = style.blinkMaxMs = 600000;
@@ -712,7 +718,11 @@ static void checkDirectionsDominateEveryFace() {
                     for (int y = 0; y < 96; ++y) for (int x = 0; x < 96; ++x) {
                         uint16_t c = canvas.readPixel(x,y);
                         if (c != style.bgColor) { bodyX += x; bodyY += y; ++bodyPixels; }
-                        if (c == 0) {
+                        // Thin closed eyes can have only partial-coverage pixels.
+                        // Limit detection to the orb interior to exclude its AA edge.
+                        float ox=x-bot.metrics().cx, oy=y-bot.metrics().cy;
+                        if (c != style.bgColor && ((c>>11)&31)<24 &&
+                            ox*ox+oy*oy < bot.metrics().bodyR*bot.metrics().bodyR*.64f) {
                             eyeMinX = std::min(eyeMinX, x); eyeMaxX = std::max(eyeMaxX, x);
                             eyeMinY = std::min(eyeMinY, y); eyeMaxY = std::max(eyeMaxY, y); ++eyePixels;
                         }
@@ -723,14 +733,12 @@ static void checkDirectionsDominateEveryFace() {
                     float dx = (eyeMinX + eyeMaxX) * 0.5f - bodyX / bodyPixels;
                     float dy = (eyeMinY + eyeMaxY) * 0.5f - bodyY / bodyPixels;
                     float r = bot.metrics().bodyR;
-                    bool horizontal = direction == Bot::GazeDirection::Left || direction == Bot::GazeDirection::Right;
-                    float signedOffset = direction == Bot::GazeDirection::Left ? -dx
-                        : direction == Bot::GazeDirection::Right ? dx
-                        : direction == Bot::GazeDirection::Up ? -dy : dy;
-                    if (signedOffset < r * (horizontal ? 0.12f : 0.09f))
-                        std::cerr << "direction failure " << (int)mood << "/" << (int)expr << "/" << (int)eyeStyle
-                                  << " direction " << (int)direction << " offset " << signedOffset << "\n";
-                    assert(signedOffset >= r * (horizontal ? 0.12f : 0.09f));
+                    int index = (int)direction;
+                    static const int8_t sx[] = {0,0,-1,1,0,0,-1,1,-1,1};
+                    static const int8_t sy[] = {0,0,0,0,-1,1,-1,-1,1,1};
+                    if (sx[index] && dx*sx[index]<r*.12f) std::cerr<<"direction "<<(int)mood<<"/"<<(int)expr<<"/"<<(int)eyeStyle<<" d="<<index<<" dx="<<dx<<"\n";
+                    if (sx[index]) assert(dx * sx[index] >= r * 0.12f);
+                    if (sy[index]) assert(dy * sy[index] >= r * 0.09f);
                 }
     }
 }
@@ -764,6 +772,107 @@ static void checkReducedMotionAmplitude() {
     std::cout << "Calm RGB565 temporal difference full/reduced: " << changes[0] << "/" << changes[1] << "\n";
 }
 
+struct EyeBox {
+    int x0 = 200, x1 = -1, y0 = 200, y1 = -1, pixels = 0;
+    void add(int x, int y) { x0 = std::min(x0,x); x1 = std::max(x1,x); y0 = std::min(y0,y); y1 = std::max(y1,y); ++pixels; }
+    float cx() const { return (x0+x1)*0.5f; }
+    float cy() const { return (y0+y1)*0.5f; }
+    int height() const { return y1-y0+1; }
+};
+struct DirectionRaster { std::vector<uint16_t> pixels; EyeBox eyes[2]; };
+static DirectionRaster directionRaster(botux::BotUx::GazeDirection direction, bool tap = false) {
+    using Bot = botux::BotUx;
+    gNow = 1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+    auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style); bot.seedBlink(1234);
+    bot.setMotionAmount(0); bot.setExpression(Bot::Expression::Neutral);
+    for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
+    if (tap) bot.gazeAt(-0.85f,0.85f,5000); else bot.setGazeDirection(direction);
+    for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
+    bot.draw(); DirectionRaster result; result.pixels.resize(40000); EyeBox group;
+    for (int y=0;y<200;++y) for(int x=0;x<200;++x) {
+        uint16_t c=canvas.readPixel(x,y); result.pixels[y*200+x]=c;
+        if(c==style.eyeColor) group.add(x,y);
+    }
+    for (int y=0;y<200;++y) for(int x=0;x<200;++x)
+        if(result.pixels[y*200+x]==style.eyeColor) result.eyes[x<group.cx()?0:1].add(x,y);
+    assert(result.eyes[0].pixels && result.eyes[1].pixels);
+    return result;
+}
+static void checkNineDirectionPerspective() {
+    using Bot=botux::BotUx; using G=Bot::GazeDirection;
+    assert(Bot::gazeDirectionCount()==10 && Bot::explicitGazeDirectionCount()==9);
+    std::set<int> directions;
+    for(uint8_t i=0;i<9;++i) directions.insert((int)Bot::explicitGazeDirection(i));
+    assert(directions.size()==9 && !directions.count(0));
+    auto front=directionRaster(G::Center), left=directionRaster(G::Left), right=directionRaster(G::Right);
+    auto up=directionRaster(G::Up), down=directionRaster(G::Down);
+    assert(left.eyes[1].height() >= left.eyes[0].height()*1.2f);
+    assert(right.eyes[0].height() >= right.eyes[1].height()*1.2f);
+    assert(std::abs(front.eyes[0].height()-front.eyes[1].height())<=1);
+    assert(std::fabs((front.eyes[0].cx()+front.eyes[1].cx())*.5f-100)<1);
+    assert(up.eyes[0].cy()<88 && down.eyes[0].cy()>112);
+    assert(up.eyes[0].height()>down.eyes[0].height());
+    unsigned mirrorMismatch=0, eyeUnion=0;
+    const uint16_t ink=botux::rgb565(32,36,41);
+    for(int y=0;y<200;++y) for(int x=1;x<200;++x) {
+        bool a=left.pixels[y*200+x]==ink, b=right.pixels[y*200+200-x]==ink;
+        if(a||b) ++eyeUnion; if(a!=b) ++mirrorMismatch;
+    }
+    assert(mirrorMismatch < eyeUnion*0.12f);
+    for(auto g : {G::UpLeft,G::UpRight,G::DownLeft,G::DownRight}) {
+        auto frame=directionRaster(g);
+        float x=(frame.eyes[0].cx()+frame.eyes[1].cx())*.5f;
+        float y=(frame.eyes[0].cy()+frame.eyes[1].cy())*.5f;
+        assert((g==G::UpLeft||g==G::DownLeft)?x<88:x>112);
+        assert((g==G::UpLeft||g==G::UpRight)?y<88:y>112);
+    }
+    auto diagonal=directionRaster(G::DownLeft), tapped=directionRaster(G::Auto,true);
+    assert(diagonal.pixels==tapped.pixels); // same continuous vector, exactly the same pose/raster
+}
+
+static void checkDirectionTransitionContinuity() {
+    using Bot=botux::BotUx; using G=Bot::GazeDirection;
+    gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+    auto style=bot.style(); style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(1234);
+    bot.setMotionAmount(0); bot.setExpression(Bot::Expression::Neutral);
+    float previous=100; bool first=true;
+    for(auto direction : {G::Center,G::Left,G::Right,G::UpLeft,G::DownRight,G::Center}) {
+        bot.setGazeDirection(direction);
+        for(int i=0;i<100;++i) {
+            gNow+=16; bot.update(gNow); canvas.clear(); bot.draw();
+            float center=eyeGroupCenterX(canvas);
+            if(!first) assert(std::fabs(center-previous)<=8.0f);
+            first=false; previous=center;
+        }
+    }
+    assert(std::fabs(previous-100)<=1.0f);
+}
+
+static void checkThinkingTravelAndContinuity() {
+    using Bot=botux::BotUx;
+    float ranges[3]={};
+    for(int mode=0;mode<3;++mode) {
+        gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+        bot.setMood(Bot::Mood::Thinking); bot.setAnimation(Bot::Animation::Calm);
+        bot.setReducedMotion(mode==1); bot.setMotionAmount(mode==2?0:1);
+        float lo=1000,hi=-1000,previous=0;
+        for(int frame=0;frame<250;++frame) {
+            gNow+=16; bot.update(gNow); canvas.clear(); bot.draw();
+            if(frame<100) continue;
+            int top=200,bottom=-1;
+            for(int y=0;y<200;++y) if(canvas.readPixel(100,y)!=bot.style().bgColor) {top=std::min(top,y);bottom=std::max(bottom,y);}
+            assert(bottom>=top); float center=(top+bottom)*.5f;
+            if(frame>100) assert(std::fabs(center-previous)<=3.5f);
+            previous=center; lo=std::min(lo,center);hi=std::max(hi,center);
+        }
+        ranges[mode]=hi-lo;
+    }
+    assert(ranges[0]>200*.39f*.45f);
+    assert(ranges[1]>0 && ranges[1]<ranges[0]*.35f);
+    assert(ranges[2]==0);
+    std::cout<<"Thinking center-dot peak travel full/reduced/zero: "<<ranges[0]<<"/"<<ranges[1]<<"/"<<ranges[2]<<" px\n";
+}
+
 static void benchmarkEyes() {
     using Bot = botux::BotUx;
     for (int size : {40, 72, 200}) for (auto expr : {Bot::Expression::Neutral, Bot::Expression::Joy}) {
@@ -778,18 +887,29 @@ static void benchmarkEyes() {
 }
 
 static bool writeGazeSheet(const char* path) {
-    using Bot = botux::BotUx;
+    using Bot = botux::BotUx; using G=Bot::GazeDirection;
+    const G directions[]={G::UpLeft,G::Up,G::UpRight,G::Left,G::Center,G::Right,G::DownLeft,G::Down,G::DownRight};
     std::ofstream out(path); if (!out) return false;
-    out << "<svg xmlns='http://www.w3.org/2000/svg' width='720' height='140'>";
-    for (uint8_t direction = 0; direction < Bot::gazeDirectionCount(); ++direction) {
-        gNow = 1000; M5Canvas canvas(120, 120); Bot bot; bot.begin(&canvas);
+    std::vector<uint16_t> mosaic(600*600);
+    out << "<svg xmlns='http://www.w3.org/2000/svg' width='600' height='660'>";
+    for (uint8_t index = 0; index < Bot::explicitGazeDirectionCount(); ++index) {
+        gNow = 1000; M5Canvas canvas(200, 200); Bot bot; bot.begin(&canvas);
         bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
-        bot.setGazeDirection((Bot::GazeDirection)direction); bot.update(gNow); bot.draw();
-        out << "<g transform='translate(" << direction * 120 << " 0)'>" << canvas.svgBody()
-            << "<text x='60' y='132' text-anchor='middle' font-family='sans-serif' font-size='12'>"
-            << Bot::gazeDirectionName((Bot::GazeDirection)direction) << "</text></g>";
+        bot.setGazeDirection(directions[index]); bot.update(gNow); bot.draw();
+        out << "<g transform='translate(" << (index%3) * 200 << " " << (index/3)*220 << ")'>" << canvas.svgBody()
+            << "<text x='100' y='214' text-anchor='middle' font-family='sans-serif' font-size='12'>"
+            << Bot::gazeDirectionName(directions[index]) << "</text></g>";
+        for(int y=0;y<200;++y) for(int x=0;x<200;++x)
+            mosaic[((index/3)*200+y)*600+(index%3)*200+x]=canvas.readPixel(x,y);
     }
-    out << "</svg>"; return true;
+    out << "</svg>";
+    std::ofstream ppm(std::string(path)+".ppm", std::ios::binary); if(!ppm) return false;
+    ppm<<"P6\n600 600\n255\n";
+    for(uint16_t pixel:mosaic) {
+        char rgb[3]={(char)(((pixel>>11)&31)*255/31),(char)(((pixel>>5)&63)*255/63),(char)((pixel&31)*255/31)};
+        ppm.write(rgb,3);
+    }
+    return true;
 }
 
 int main(int argc, char** argv) {
@@ -801,6 +921,9 @@ int main(int argc, char** argv) {
     checkGazeDirectionsAndMotionZero();
     checkDirectionsDominateEveryFace();
     checkReducedMotionAmplitude();
+    checkNineDirectionPerspective();
+    checkDirectionTransitionContinuity();
+    checkThinkingTravelAndContinuity();
     benchmarkEyes();
     checkCoverageAndFacePlacement();
     checkExplicitNeutralOverridesRestingMood();

@@ -83,10 +83,14 @@ public:
         Sparkle,
     };
 
-    enum class GazeDirection : uint8_t { Auto = 0, Center, Left, Right, Up, Down };
+    enum class GazeDirection : uint8_t { Auto = 0, Center, Left, Right, Up, Down, UpLeft, UpRight, DownLeft, DownRight };
     enum class Language : uint8_t { English = 0, Chinese };
     static constexpr size_t kNameMax = 16;
-    static constexpr uint8_t gazeDirectionCount() { return 6; }
+    static constexpr uint8_t gazeDirectionCount() { return 10; }
+    static constexpr uint8_t explicitGazeDirectionCount() { return 9; }
+    static GazeDirection explicitGazeDirection(uint8_t index) {
+        return static_cast<GazeDirection>(1 + index % explicitGazeDirectionCount());
+    }
     static const char* gazeDirectionName(GazeDirection value, Language language = Language::English);
     // Persistent direction with subtle drift. Auto follows mood/expression gaze.
     // Temporary gazeAt takes precedence, then returns here. No UI/persistence ownership.
@@ -249,6 +253,7 @@ private:
     bool _gazeHeld = false;
     uint32_t _gazeUntil = 0;
     float _gazeX = 0.0f, _gazeY = 0.0f;
+    float _directionPose = 0.0f; // eased perspective weight shared by direction and tap
     Mood _mood = Mood::Idle;
     Expression _expression = Expression::Auto;
     Animation _animation = Animation::Auto;

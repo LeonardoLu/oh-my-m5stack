@@ -230,11 +230,15 @@ firmware builds, flashing and actual device captures.
 
 ## Direction and sustained motion (September 2026)
 
-`GazeDirection { Auto=0, Center, Left, Right, Up, Down }` is additive; every older
+`GazeDirection { Auto=0, Center, Left, Right, Up, Down, UpLeft, UpRight,
+DownLeft, DownRight }` is additive; every older
 mood/expression/animation enum retains its value. `setGazeDirection()` stores the
 selection and `gazeDirection()` reads it. `gazeDirectionCount()` and
-`gazeDirectionName(value, language)` expose all six choices, including Chinese
-`自动 / 居中 / 向左 / 向右 / 向上 / 向下`. Device apps own persistence. Invalid
+`gazeDirectionName(value, language)` expose all ten stored choices, including compatibility Auto. Center is displayed
+as Front / 正前. Diagonal Chinese labels are 左上 / 右上 / 左下 / 右下.
+`explicitGazeDirectionCount()` returns **9** and `explicitGazeDirection(index)`
+iterates exactly those nine user-facing directions without Auto (Center, Left,
+Right, Up, Down, UpLeft, UpRight, DownLeft, DownRight). Device apps own persistence. Invalid
 values fall back to Auto. Direction is retained by presets and resetToIdle.
 
 Auto follows the mood/expression's gaze and adds a little wandering even to
@@ -278,7 +282,7 @@ Added validation beyond the existing tests:
 - Thinking coverage has more than 12 actual RGB565 colors across its three dots,
   rather than checking for an SVG circle instruction.
 - On a four-second Calm sequence, aggregate RGB565 temporal difference is
-  394,808 full motion versus 107,653 reduced (27.3%). This measures pixel-channel
+  392,549 full motion versus 108,210 reduced (27.6%). This measures pixel-channel
   movement rather than merely counting different frame hashes.
 
 `tools/host-preview/render.sh` passes with C++11 `-Wall -Wextra -Werror`.
@@ -287,10 +291,48 @@ acceptance; these host tests do not claim physical-device acceptance.
 
 A native Listening/Curious Left preview exposed the previous cancellation between
 expression placement and gaze offset. The direction regression now renders
-**1,600 cases**: all ten moods that show eyes × ten expressions × four eye styles
-× Left/Right/Up/Down, first settling Auto then selecting the direction. The raster
-eye-group bounding-box center must lie on the correct side of the raster body
+**3,200 cases**: all ten moods that show eyes × ten expressions × four eye styles
+× all eight cardinal/diagonal directions, first settling Auto then selecting the direction. The raster
+eye-coverage bounding-box center must lie on the correct side of the raster body
 center by at least 12% radius horizontally or 9% vertically. Using the bounding
 box keeps Wink's different ink masses from being mistaken for pair movement.
 All cases and the existing host suite pass; transitions retain the original
 scalar easing rather than jumping when a direction is selected.
+
+## Nine facing poses and Thinking travel
+
+Direction is a continuous facing pose, not only a translated eye pair. Horizontal
+turns compress eye spacing by up to 16%, scale the far/near eyes by up to 22%,
+and give their strokes a mirrored slant. Vertical turns move the pair up/down
+and slightly open/compress the eyes. Diagonals combine these with a small
+perspective offset between the eye baselines. Front restores an upright,
+balanced neutral pair. Expression-specific smile, wink and alarm geometry stays
+on the same curved AA rendering path. Auto keeps its original behavior.
+
+The directional pose weight and gaze vector ease together. A temporary `gazeAt`
+uses exactly the same perspective and body-relative placement as an explicit
+direction; expiration eases back to Auto or the selected direction. Explicit
+directions/taps remain usable at motion zero; autonomous drift remains disabled.
+No new buffers are allocated during rendering; the extra pose weight is a float.
+
+![Nine facing poses from actual RGB565 raster](docs/nine-directions-raster.png)
+
+The grid is Up-left / Up / Up-right, Left / Front / Right, Down-left / Down /
+Down-right. This PNG is converted directly from the host adapter's RGB565 pixel
+buffer, not approximated SVG eye primitives. `render.sh` emits both the labelled
+`gaze-directions.svg` and the raw `gaze-directions.svg.ppm` mosaic.
+
+New raster checks compare left/right mirrored ink masks (under 12% difference),
+verify the near/far eye height ratio exceeds 1.2, balanced Front eyes, vertical
+height and position, and both axes of all diagonal poses. A (-0.85,+0.85) tap
+produces exactly the same pixels as Down-left. A sequence through opposite and
+diagonal directions bounds each 16ms eye-group movement to 8px on a 200px sprite,
+then verifies return to Front within 1px. Thin closed eyes are detected from
+partial coverage too, because small AA strokes may have no fully opaque pixel.
+
+Thinking's dot travel coefficient increases from 0.13R to **0.28R**, with
+high motion amounts capped for this travel at 1.5 and reduced motion unchanged
+at a 20% multiplier. Actual center-dot peak travel at 200px is **47px full,
+9.5px reduced, 0px at motion zero**, measured over a late 2.4s window. Consecutive
+16ms centers move no more than 3.5px. Native ellipse AA and all existing geometry,
+960-combination sustained-motion, and preset-loop tests still pass.

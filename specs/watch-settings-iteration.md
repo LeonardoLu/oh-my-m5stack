@@ -236,3 +236,15 @@ it does not by itself distinguish position-dependent controller mapping from con
 centroid or target-occlusion effects, and it does not establish a non-affine hardware
 mapping. The run ended with `stored=0`, no candidate applied, identity active, and no
 NVS write or reboot.
+
+The next command-gated direction probe uses the same center target for six taps in the
+balanced physical-orientation order normal, turned, turned, normal, normal, turned.
+Before the first sample and every orientation change, it pauses acquisition behind an
+A/B hardware-button gate; after that click it confirms an untouched screen for three
+samples and at least 24 ms before drawing the symmetric cyan cross. Display rotation,
+the touch driver, and the active identity mapping remain unchanged while the person
+rotates the physical device 180 degrees in its plane. The six dedicated dump entries
+label `normal` or `turned` and retain raw, converted, range, count, and hold duration.
+The probe never fits, applies, or saves a profile. Balancing both orientations across
+early, middle, and late samples reduces time-order bias; three taps per orientation
+remain an initial direction check rather than a definitive attribution of the error.

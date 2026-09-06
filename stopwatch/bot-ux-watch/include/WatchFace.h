@@ -29,8 +29,7 @@ public:
 private:
     void _drawClock(bool top, uint16_t ink, uint16_t muted);
     void _drawDescription(bool top, uint16_t ink);
-    void _drawBatteryPanel(uint16_t ink, uint16_t muted, uint16_t panel,
-                           uint16_t warning, float progress);
+    void _drawBatteryPanel(uint16_t bg, float progress);
     botux::BotUx _bot;
     M5Canvas _hud;
     bool _ready = false;

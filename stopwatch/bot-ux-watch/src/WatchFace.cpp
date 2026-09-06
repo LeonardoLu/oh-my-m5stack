@@ -1,5 +1,6 @@
 #include "WatchFace.h"
 #include "CalendarMath.h"
+#include "WatchEdgeGeometry.h"
 #include <UxRender.h>
 #include <UxText.h>
 #include <stdio.h>
@@ -91,7 +92,7 @@ void WatchFace::draw(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_
             if (clock) _drawClock(top, ink, muted);
             else if (_showDescription) _drawDescription(top, muted);
         }
-        if (top && panelVisible) _drawBatteryPanel(ink, muted, panel, warning, statusProgress);
+        if (top && panelVisible) _drawBatteryPanel(bg, statusProgress);
         _hud.pushSprite(target, 0, top ? 0 : 376);
     }
     _drawHour = _hh; _drawMinute = _mm; _drawSecond = _ss;
@@ -132,28 +133,43 @@ void WatchFace::_drawDescription(bool top, uint16_t ink) {
     if (second[0]) centered(_hud, second, top ? 56 : 34, ink, font);
 }
 
-void WatchFace::_drawBatteryPanel(uint16_t ink, uint16_t muted, uint16_t panel,
-                                  uint16_t warning, float progress) {
-    progress = ux::clamp(progress, 0, 1);
-    float eased = 1 - (1 - progress) * (1 - progress) * (1 - progress);
-    float y = -64 + eased * 84;
-    const int x = 137, w = 192, h = 62;
-    uint16_t phase = (uint16_t)(_now % 1600);
-    uint8_t glow = (uint8_t)(178 + (phase < 800 ? phase : 1600 - phase) * 70 / 800);
-    uint16_t charge = botux::rgb565(0x42, glow, 0x78);
-    ux::roundRect(_hud, x, y, w, h, 24, panel);
-    ux::strokeRoundRect(_hud, x, y, w, h, 24, _charging ? charge : muted);
+void WatchFace::_drawBatteryPanel(uint16_t bg, float progress) {
+    int16_t offset=watchedge::batteryToothOffset(progress);
+    auto to565=[](uint32_t rgb) { return botux::rgb565((uint8_t)(rgb>>16),(uint8_t)(rgb>>8),(uint8_t)rgb); };
+    uint16_t level=to565(watchedge::batteryBandRgb(watchedge::batteryBand(_battery)));
+    const uint16_t dark=to565(watchedge::batteryInkRgb());
+    for(int16_t y=0;y<watchedge::hudHeight();++y) {
+        auto span=watchedge::batteryToothRowSpan(y,offset);
+        if(span.width<=0) continue;
+        _hud.fillRect(span.x,span.y,span.width,1,level);
+    }
+    uint8_t glow=watchedge::batteryChargeShade(_now);
+    uint16_t charge=botux::rgb565(glow,(uint8_t)(glow+6),(uint8_t)(glow+10));
     char pct[8]; snprintf(pct, sizeof(pct), "%u%%", (unsigned)_battery);
-    ux::drawText(_hud, pct, x + 22, (int)y + 19, _battery <= 15 ? warning : ink, ux::Latin24);
-    float bx = x + 108, by = y + 21;
-    ux::strokeRoundRect(_hud, bx, by, 44, 21, 5, ink, 1.5f);
-    ux::roundRect(_hud, bx + 45, by + 6, 4, 9, 2, ink);
-    float fill = _battery * 38.0f / 100;
-    if (fill > 0) ux::roundRect(_hud, bx + 3, by + 3, fill, 15, 3, _charging ? charge : ink);
+    ux::drawText(_hud,pct,watchedge::batteryPercentX(),offset+watchedge::batteryPercentY(),dark,ux::Latin24);
+    float bx=watchedge::batteryGaugeX(),by=offset+watchedge::batteryGaugeY();
+    ux::strokeRoundRect(_hud, bx, by, 44, 21, 5, dark, 1.5f);
+    ux::roundRect(_hud, bx + 45, by + 6, 4, 9, 2, dark);
+    float fill=watchedge::batteryGaugeFill(_battery);
+    if(fill>0) ux::roundRect(_hud,bx+3,by+3,fill,15,3,dark);
     if (_charging) {
-        // A green bolt beside the cell remains readable at every fill level.
+        // Charging breathes independently without replacing the measured level color.
         ux::line(_hud, bx + 63, by + 2, bx + 56, by + 11, 2.5f, charge);
         ux::line(_hud, bx + 56, by + 11, bx + 62, by + 10, 2.5f, charge);
         ux::line(_hud, bx + 62, by + 10, bx + 56, by + 19, 2.5f, charge);
+    }
+    // Glyph and AA primitives draw rectangular bounds. Restore the background
+    // outside the current animated tooth, then add one dark outline pixel.
+    for(int16_t y=0;y<watchedge::hudHeight();++y) {
+        auto span=watchedge::batteryToothRowSpan(y,offset);
+        if(span.width<=0) { _hud.fillRect(0,y,watchedge::displaySize(),1,bg); continue; }
+        if(span.x>0) _hud.fillRect(0,y,span.x,1,bg);
+        int16_t end=(int16_t)(span.x+span.width);
+        if(end<watchedge::displaySize())
+            _hud.fillRect(end,y,watchedge::displaySize()-end,1,bg);
+        _hud.drawPixel(span.x,y,dark);
+        if(span.width>1) _hud.drawPixel(end-1,y,dark);
+        if(y-offset==watchedge::batteryToothBottomY())
+            _hud.drawFastHLine(span.x,y,span.width,dark);
     }
 }

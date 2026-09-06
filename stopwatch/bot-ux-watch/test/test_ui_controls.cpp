@@ -13,9 +13,9 @@ int main() {
         assert(at(screen,Editor::None,off,doneLabelX(),doneLabelY()).id==Done);
     }
     auto done=doneBounds();
-    assert(done.x==0&&done.y==351&&done.w==466&&done.h==115);
+    assert(done.x==0&&done.y==406&&done.w==466&&done.h==60);
     assert(doneCircleCenterX()==233&&doneCircleCenterY()==233&&doneCircleRadius()==233);
-    assert(doneLabelX()==233&&doneLabelY()==399);
+    assert(doneLabelX()==233&&doneLabelY()==432);
     // Exhaustively prove that every visible scanline and hit uses the same
     // bottom segment of the mathematical 466 px display circle.
     for(int y=-1;y<=466;++y) {
@@ -32,8 +32,8 @@ int main() {
             assert((at(Screen::Settings,Editor::None,0,x,y).id==Done)==expected);
         }
     }
-    assert(doneRowSpan(350).w==0);
-    assert(doneRowSpan(351).x==33&&doneRowSpan(351).w==401);
+    assert(doneRowSpan(405).w==0);
+    assert(doneRowSpan(406).x==77&&doneRowSpan(406).w==313);
     assert(doneRowSpan(465).x==212&&doneRowSpan(465).w==43);
     assert(!doneContains(-1,doneLabelY())&&!doneContains(466,doneLabelY()));
     // Menu hit geometry follows arbitrary sub-row offsets, including partial rows.

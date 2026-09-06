@@ -1,6 +1,7 @@
 #pragma once
 #include <UxInput.h>
 #include <UxKeyboard.h>
+#include "WatchEdgeGeometry.h"
 
 enum class Screen : uint8_t { Face, Settings, Personalize, Editor };
 enum class Editor : uint8_t { None, Time, Date, Format, Expression, Appearance, Motion, Color, Display, Name, Preview, Layout, Language, Gaze };
@@ -13,12 +14,12 @@ struct Target { int id; ux::Rect bounds; int16_t radius; };
 struct ListLayout { int16_t x,y,w,h,step,rowHeight,radius; uint8_t visibleRows; };
 constexpr ListLayout mainList() { return {62,76,342,264,66,58,25,4}; }
 constexpr ListLayout previewList() { return {58,242,350,96,48,44,17,2}; }
-constexpr ux::Rect doneBounds() { return {0,351,466,115}; }
-constexpr int16_t doneCircleCenterX() { return 233; }
-constexpr int16_t doneCircleCenterY() { return 233; }
-constexpr int16_t doneLabelY() { return 399; }
+constexpr ux::Rect doneBounds() { return {0,406,466,60}; }
+constexpr int16_t doneCircleCenterX() { return watchedge::displayCenter(); }
+constexpr int16_t doneCircleCenterY() { return watchedge::displayCenter(); }
+constexpr int16_t doneLabelY() { return 432; }
 constexpr int16_t doneLabelX() { return doneCircleCenterX(); }
-constexpr int16_t doneCircleRadius() { return 233; }
+constexpr int16_t doneCircleRadius() { return watchedge::displayRadius(); }
 constexpr ux::Rect nameKeyboardBounds() { return {78,126,310,214}; }
 constexpr ux::Rect useThemeBounds() { return {163,207,140,32}; }
 constexpr ux::Rect colorPadBounds() { return {66,242,260,96}; }
@@ -32,9 +33,7 @@ constexpr ux::Rect displayRowBounds(uint8_t index) {
 
 inline bool doneContains(int x, int y) {
     const auto bounds=doneBounds();
-    if(!bounds.contains(x,y)) return false;
-    int32_t dx=x-doneCircleCenterX(),dy=y-doneCircleCenterY();
-    return dx*dx+dy*dy<=(int32_t)doneCircleRadius()*doneCircleRadius();
+    return bounds.contains(x,y)&&watchedge::displayContains(x,y);
 }
 
 // The visible footer is the same circular segment used for hit testing. Each
@@ -42,18 +41,8 @@ inline bool doneContains(int x, int y) {
 inline ux::Rect doneRowSpan(int16_t y) {
     const auto bounds=doneBounds();
     if(y<bounds.y||y>=bounds.y+bounds.h) return {0,y,0,0};
-    int32_t dy=y-doneCircleCenterY();
-    int32_t remaining=(int32_t)doneCircleRadius()*doneCircleRadius()-dy*dy;
-    int16_t low=0,high=doneCircleRadius();
-    while(low<high) {
-        int16_t mid=(int16_t)((low+high+1)/2);
-        if((int32_t)mid*mid<=remaining) low=mid;
-        else high=mid-1;
-    }
-    int16_t left=doneCircleCenterX()-low,right=doneCircleCenterX()+low;
-    if(left<bounds.x) left=bounds.x;
-    if(right>=bounds.x+bounds.w) right=bounds.x+bounds.w-1;
-    return {left,y,(int16_t)(right-left+1),1};
+    auto span=watchedge::displayRowSpan(y);
+    return {span.x,span.y,span.width,1};
 }
 
 inline bool roundedContains(ux::Rect r, int16_t radius, int x, int y) {

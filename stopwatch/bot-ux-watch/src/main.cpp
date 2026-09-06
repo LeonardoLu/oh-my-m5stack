@@ -7,6 +7,7 @@
 #include "CompanionPresets.h"
 #include "InputSemantics.h"
 #include "TouchContact.h"
+#include "TouchTraceBuffer.h"
 #include "Power.h"
 #include "Settings.h"
 #include "TimedState.h"
@@ -128,22 +129,26 @@ uint8_t _colorDrag = 0;
 bool _gestureActive = false;
 bool _buttonNavigation = false;
 
-enum class TouchTraceKind : uint8_t { Raw, Down, Scroll, End, Screen };
+enum class TouchTraceKind : uint8_t { Sample, Down, Scroll, End, Screen };
 enum class TouchEndReason : uint8_t { Accepted, NoTarget, Scrolled, TargetChanged, Timeout, Outside };
 struct TouchTraceEvent {
     uint32_t atMs;
-    int16_t x, y;
+    uint32_t acquisition, irq;
+    int16_t sensorX, sensorY, x, y;
     int16_t target, other;
     uint16_t elapsedMs, sampleGapMs, readUs;
     uint8_t kind, screen, flags;
 };
-constexpr uint16_t kTouchTraceCapacity = 160;
-TouchTraceEvent _touchTrace[kTouchTraceCapacity];
-uint16_t _touchTraceHead = 0, _touchTraceCount = 0;
-uint32_t _touchTraceDropped = 0, _traceLastHeldMs = 0, _traceLastDelayMs = 0, _traceAcquireCount = 0;
+constexpr uint16_t kTouchTraceDetailCapacity = 128;
+constexpr uint16_t kTouchTraceCriticalCapacity = 128;
+watchtrace::Ring<TouchTraceEvent,kTouchTraceDetailCapacity> _touchTraceDetail;
+watchtrace::Ring<TouchTraceEvent,kTouchTraceCriticalCapacity> _touchTraceCritical;
+uint32_t _traceLastHeldMs = 0, _traceAcquireCount = 0;
 uint16_t _traceMaxSampleGapMs = 0, _traceMaxReadUs = 0;
 volatile bool _touchTraceEnabled = false;
 bool _traceRawKnown = false, _traceRawContact = false;
+bool _traceSensorKnown = false;
+int16_t _traceSensorX = 0, _traceSensorY = 0;
 bool _touchIrqAttached = false;
 constexpr uint8_t kTouchIrqCapacity = 64;
 volatile uint32_t _touchIrqTimes[kTouchIrqCapacity];
@@ -208,17 +213,16 @@ static void pushTouchTrace(TouchTraceKind kind, uint32_t atMs, int16_t x, int16_
                            uint32_t elapsedMs = 0, uint32_t sampleGapMs = 0,
                            uint32_t readUs = 0, uint8_t flags = 0) {
     if (!_touchTraceEnabled) return;
-    uint16_t index = (_touchTraceHead + _touchTraceCount) % kTouchTraceCapacity;
-    if (_touchTraceCount == kTouchTraceCapacity) {
-        index = _touchTraceHead;
-        _touchTraceHead = (_touchTraceHead + 1) % kTouchTraceCapacity;
-        ++_touchTraceDropped;
+    if(_traceSensorKnown) flags|=0x80;
+    TouchTraceEvent event{atMs,_traceAcquireCount,_touchIrqTotal,
+                          _traceSensorX,_traceSensorY,x,y,target,other,
+                          traceClamp16(elapsedMs),traceClamp16(sampleGapMs),traceClamp16(readUs),
+                          (uint8_t)kind,(uint8_t)_screen,flags};
+    if(kind==TouchTraceKind::Down||kind==TouchTraceKind::End||kind==TouchTraceKind::Screen) {
+        _touchTraceCritical.push(event);
     } else {
-        ++_touchTraceCount;
+        _touchTraceDetail.push(event);
     }
-    _touchTrace[index] = {atMs, x, y, target, other, traceClamp16(elapsedMs),
-                          traceClamp16(sampleGapMs), traceClamp16(readUs),
-                          (uint8_t)kind, (uint8_t)_screen, flags};
 }
 
 static void setTouchTraceEnabled(bool enabled) {
@@ -227,13 +231,15 @@ static void setTouchTraceEnabled(bool enabled) {
         _touchIrqAttached=false;
     }
     _touchTraceEnabled = enabled;
-    _touchTraceHead = _touchTraceCount = 0;
-    _touchTraceDropped = 0;
-    _traceLastHeldMs = _traceLastDelayMs = 0;
+    _touchTraceDetail.clear();
+    _touchTraceCritical.clear();
+    _traceLastHeldMs = 0;
     _traceAcquireCount = 0;
     _traceMaxSampleGapMs = _traceMaxReadUs = 0;
     _traceRawKnown = false;
     _traceRawContact = false;
+    _traceSensorKnown = false;
+    _traceSensorX = _traceSensorY = 0;
     _touchIrqHead = _touchIrqCount = 0;
     _touchIrqTotal = _touchIrqDropped = 0;
     if(enabled) {
@@ -252,7 +258,7 @@ static void stopTouchTrace() {
 
 static const char* touchTraceKindName(TouchTraceKind kind) {
     switch (kind) {
-        case TouchTraceKind::Raw: return "raw";
+        case TouchTraceKind::Sample: return "sample";
         case TouchTraceKind::Down: return "down";
         case TouchTraceKind::Scroll: return "scroll";
         case TouchTraceKind::End: return "end";
@@ -276,33 +282,44 @@ static const char* touchEndReasonName(TouchEndReason reason) {
 static void dumpTouchTrace() {
     bool wasEnabled = _touchTraceEnabled;
     stopTouchTrace();
-    Serial.printf("TRACE begin count=%u dropped=%lu enabled=%u acquisitions=%lu max_gap=%u max_read_us=%u irq=%lu irq_kept=%u irq_dropped=%lu\n",
-                  _touchTraceCount, (unsigned long)_touchTraceDropped, wasEnabled,
+    Serial.printf("TRACE begin detail=%u detail_dropped=%lu critical=%u critical_dropped=%lu enabled=%u acquisitions=%lu max_gap=%u max_read_us=%u irq=%lu irq_kept=%u irq_dropped=%lu\n",
+                  (unsigned)_touchTraceDetail.count(),(unsigned long)_touchTraceDetail.dropped(),
+                  (unsigned)_touchTraceCritical.count(),(unsigned long)_touchTraceCritical.dropped(),wasEnabled,
                   (unsigned long)_traceAcquireCount, _traceMaxSampleGapMs, _traceMaxReadUs,
                   (unsigned long)_touchIrqTotal, _touchIrqCount, (unsigned long)_touchIrqDropped);
     for (uint8_t i = 0; i < _touchIrqCount; ++i) {
         Serial.printf("TRACEIRQ t_us=%lu\n",
                       (unsigned long)_touchIrqTimes[(_touchIrqHead + i) % kTouchIrqCapacity]);
     }
-    for (uint16_t i = 0; i < _touchTraceCount; ++i) {
-        const auto& e = _touchTrace[(_touchTraceHead + i) % kTouchTraceCapacity];
+    size_t detailIndex=0,criticalIndex=0;
+    while(detailIndex<_touchTraceDetail.count()||criticalIndex<_touchTraceCritical.count()) {
+        bool useDetail=criticalIndex==_touchTraceCritical.count()
+            ||(detailIndex<_touchTraceDetail.count()
+               &&_touchTraceDetail.at(detailIndex).atMs<=_touchTraceCritical.at(criticalIndex).atMs);
+        const auto& e=useDetail?_touchTraceDetail.at(detailIndex++):_touchTraceCritical.at(criticalIndex++);
         auto kind = (TouchTraceKind)e.kind;
-        if (kind == TouchTraceKind::Raw) {
-            Serial.printf("TRACE t=%lu kind=%s screen=%u contact=%u int_low=%u x=%d y=%d gap=%u read_us=%u\n",
+        bool sensorKnown=(e.flags&0x80)!=0;
+        if (kind == TouchTraceKind::Sample) {
+            Serial.printf("TRACE t=%lu kind=%s screen=%u contact=%u int_low=%u sensor=%s%d,%d logical=%d,%d gap=%u read_us=%u acquisition=%lu irq=%lu\n",
                           (unsigned long)e.atMs, touchTraceKindName(kind), e.screen,
-                          (e.flags & 1) != 0, (e.flags & 2) != 0, e.x, e.y,
-                          e.sampleGapMs, e.readUs);
+                          (e.flags & 1) != 0, (e.flags & 2) != 0,sensorKnown?"":"na:",
+                          e.sensorX,e.sensorY,e.x,e.y,e.sampleGapMs,e.readUs,
+                          (unsigned long)e.acquisition,(unsigned long)e.irq);
         } else if (kind == TouchTraceKind::End) {
-            Serial.printf("TRACE t=%lu kind=%s screen=%u x=%d y=%d captured=%d released=%d elapsed=%u reason=%s\n",
-                          (unsigned long)e.atMs, touchTraceKindName(kind), e.screen, e.x, e.y,
-                          e.target, e.other, e.elapsedMs, touchEndReasonName((TouchEndReason)e.flags));
+            Serial.printf("TRACE t=%lu kind=%s screen=%u sensor_last=%s%d,%d logical=%d,%d captured=%d released=%d elapsed=%u reason=%s acquisition=%lu irq=%lu\n",
+                          (unsigned long)e.atMs,touchTraceKindName(kind),e.screen,sensorKnown?"":"na:",
+                          e.sensorX,e.sensorY,e.x,e.y,e.target,e.other,e.elapsedMs,
+                          touchEndReasonName((TouchEndReason)(e.flags&0x7F)),
+                          (unsigned long)e.acquisition,(unsigned long)e.irq);
         } else if (kind == TouchTraceKind::Screen) {
-            Serial.printf("TRACE t=%lu kind=%s from=%d to=%d cause=%d\n", (unsigned long)e.atMs,
-                          touchTraceKindName(kind), e.target, e.other, e.flags);
+            Serial.printf("TRACE t=%lu kind=%s from=%d to=%d cause=%d acquisition=%lu irq=%lu\n",
+                          (unsigned long)e.atMs,touchTraceKindName(kind),e.target,e.other,e.flags&0x7F,
+                          (unsigned long)e.acquisition,(unsigned long)e.irq);
         } else {
-            Serial.printf("TRACE t=%lu kind=%s screen=%u x=%d y=%d target=%d elapsed=%u\n",
-                          (unsigned long)e.atMs, touchTraceKindName(kind), e.screen, e.x, e.y,
-                          e.target, e.elapsedMs);
+            Serial.printf("TRACE t=%lu kind=%s screen=%u sensor=%s%d,%d logical=%d,%d target=%d elapsed=%u acquisition=%lu irq=%lu\n",
+                          (unsigned long)e.atMs,touchTraceKindName(kind),e.screen,sensorKnown?"":"na:",
+                          e.sensorX,e.sensorY,e.x,e.y,e.target,e.elapsedMs,
+                          (unsigned long)e.acquisition,(unsigned long)e.irq);
         }
     }
     Serial.println("TRACE end");
@@ -1048,17 +1065,24 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
 
 static void handleInputs(uint32_t now) {
     bool contact=_contact.isPressed(), acquired=false; int32_t x=_contact.x,y=_contact.y;
-    if(_diagnosticContact) { contact=_diagnosticDown; x=_diagnosticX; y=_diagnosticY; }
+    if(_diagnosticContact) {
+        contact=_diagnosticDown; x=_diagnosticX; y=_diagnosticY;
+        _traceSensorKnown=false;
+    }
     else if(now-_contactReadMs>=8) {
         uint32_t previousReadMs=_contactReadMs;
         _contactReadMs=now;
         uint32_t readStartUs=micros();
         acquired=true;
-        if(_touchCalibration) {
+        if(_touchCalibration||_touchTraceEnabled) {
             lgfx::touch_point_t point;
             contact=M5.Display.getTouchRaw(&point,1)!=0;
             if(contact) {
                 _touchRawX=point.x; _touchRawY=point.y;
+                if(_touchTraceEnabled) {
+                    _traceSensorKnown=true;
+                    _traceSensorX=point.x; _traceSensorY=point.y;
+                }
                 M5.Display.convertRawXY(&point,1);
                 x=point.x; y=point.y;
             }
@@ -1069,18 +1093,17 @@ static void handleInputs(uint32_t now) {
             ++_traceAcquireCount;
             if(sampleGapMs>_traceMaxSampleGapMs) _traceMaxSampleGapMs=traceClamp16(sampleGapMs);
             if(readUs>_traceMaxReadUs) _traceMaxReadUs=traceClamp16(readUs);
-            bool changed=!_traceRawKnown||contact!=_traceRawContact;
             bool heldCheckpoint=contact&&(now-_traceLastHeldMs>=100);
             // M5GFX's StopWatch board setup maps CST820 INT to GPIO13. Low means
             // the controller signalled an event; it does not identify an I2C error.
             bool intLow=digitalRead(13)==LOW;
-            bool delayed=sampleGapMs>=24&&(contact||intLow||now-_traceLastDelayMs>=1000);
-            if(changed||heldCheckpoint||delayed) {
+            bool delayed=sampleGapMs>=24;
+            if(watchtrace::keepAcquisition(_traceRawKnown,contact,_traceRawContact,
+                                           heldCheckpoint,delayed)) {
                 uint8_t flags=(contact?1:0)|(intLow?2:0);
-                pushTouchTrace(TouchTraceKind::Raw,now,x,y,watchcontrols::None,
+                pushTouchTrace(TouchTraceKind::Sample,now,x,y,watchcontrols::None,
                                watchcontrols::None,0,sampleGapMs,readUs,flags);
                 if(contact) _traceLastHeldMs=now;
-                if(sampleGapMs>=24) _traceLastDelayMs=now;
             }
             _traceRawKnown=true;
             _traceRawContact=contact;

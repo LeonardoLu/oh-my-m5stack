@@ -17,7 +17,7 @@ All values below are means in microseconds. P95 is the nearest-rank percentile o
 | Settings, PWR appear | 12 | 24,025 | 378 | 0 | 8 | 3,368 | 3,402 | 4,913 | 48 | 12,117 | 11,973 | 12,469 |
 | Settings, PWR release | 12 | 24,025 | 375 | 0 | 7 | 3,359 | 0 | 4,940 | 47 | 8,728 | 8,592 | 9,016 |
 
-The warm one-key group intentionally excludes periodic HUD frames. A first key frame after the ordinary Face path invalidates the clean canvas and adds roughly 12.5 ms to clear it. Comparing the two three-key/HUD groups isolates that base-clear cost while preserving the same 249,541 submitted pixels.
+The warm one-key group intentionally excludes periodic HUD frames. A first key frame after the ordinary Face path invalidates the clean canvas; its direct `base_fill` counter measures 12.508 ms. The two three-key/HUD groups preserve the same 249,541 submitted pixels and differ by 13.247 ms in total, but that difference also includes small changes in HUD and other stages, so it is not a pure base-clear measurement.
 
 Machine-readable statistics, including component mean/median/p95/range and the measurement boundaries, are in `specs/watch-button-feedback-profile.json`. Raw logs remain in `tmp/watch-edge-buttons/stage-profile-*-raw.log` for local audit.
 

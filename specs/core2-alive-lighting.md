@@ -144,3 +144,10 @@ failure. This is runtime transport evidence, not acoustic measurement. Native
 320×240 General, Paper, Warm and Dark canvases under `tmp/core-iteration/` were
 inspected for separation, text readability and saturated accents; they are
 firmware framebuffer captures rather than panel photographs.
+
+The final integration build included the shared Asleep compositing fix and the
+CJK `熟睡` glyph coverage. It used 60,424 B RAM and 1,507,629 B flash. The
+authorized upload wrote 1,514,208 bytes, verified the image hash, and completed
+a hard reset. After reset the Core2 restored the app-ready BLE link at MTU 67;
+steady telemetry reported about 29.4 FPS, speaker master 128, volume gain 255,
+`busy=0`, `sound_fail=0`, and the Bottom2 strip ready on GPIO 25.

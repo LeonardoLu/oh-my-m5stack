@@ -930,20 +930,20 @@ void BotUx::_drawEyes() {
     float pairCx = bodyCx + _eyePairX * r + gazeX * r * (0.24f + 0.04f * _directionPose);
     float pairCy = bodyCy + _eyePairY * r + gazeY * r * (gazeY > 0.0f ? 0.16f : (0.20f + 0.04f * _directionPose));
     float facingX = gazeX * _directionPose, facingY = gazeY * _directionPose;
-    float dx = _m.eyeDX * (1.0f - 0.16f * fabsf(facingX));
+    float dx = _m.eyeDX * (1.0f - 0.08f * fabsf(facingX));
     float baseEr = (float)_m.eyeRadius;
-    float eyeAngle = _eyeAngle * (1.0f - _directionPose) + facingX * 0.30f;
+    float eyeAngle = _eyeAngle * (1.0f - _directionPose) + facingX * 0.40f;
 
     float twist = _eyeTwist + _animEyeTwist;
     float twistCos = cosf(twist), twistSin = sinf(twist);
     for (int s = -1; s <= 1; s += 2) {
-        // Yaw makes the far eye smaller and brings the pair closer together.
-        // Signed slant and diagonal lean mirror naturally across the face.
-        float depth = 1.0f - s * facingX * 0.22f;
+        // Idle has a slightly larger screen-right eye. Looking right preserves
+        // that near-eye ordering; looking left mirrors it without caricature.
+        float depth = 1.0f + s * facingX * 0.03f;
         float er = baseEr * depth;
         float asymWeight = _effExpression == Expression::Neutral ? 1.0f : 0.75f;
         float asym = 1.0f + s * _eyeAsym * (1.0f - _directionPose * asymWeight);
-        float eyeOpen = clampf(_open * asym * (1.0f - facingY * 0.10f), 0.05f, 1.35f);
+        float eyeOpen = clampf(_open * asym * (1.0f - facingY * 0.04f), 0.05f, 1.35f);
         float pairX = s * dx;
         float pairY = s * _bodyLean * baseEr + s * facingX * facingY * baseEr * 0.45f;
         float ex = pairCx + pairX * twistCos - pairY * twistSin;

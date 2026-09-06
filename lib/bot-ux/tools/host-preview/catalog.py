@@ -74,6 +74,7 @@ footer='''</section><footer><h2>如何组合使用</h2><p>心情定义持续状�
 gaze = Image.open(source / 'gaze-directions.svg.ppm')
 gaze_path = root / 'lib/bot-ux/docs/nine-directions-raster.png'
 gaze.save(gaze_path)
+Image.open(source / 'idle-up-right.ppm').save(root / 'lib/bot-ux/docs/idle-up-right-raster.png')
 gaze_data = base64.b64encode(gaze_path.read_bytes()).decode()
 footer = footer.replace('<footer>', '<footer><h2>九方向眼神 · Gaze perspective</h2><p>左上 / 上 / 右上，左 / 正面 / 右，左下 / 下 / 右下。由相同原生渲染器直接输出；下看的极限位置更接近中心，左右方向保持镜像透视。</p><img width="600" height="600" style="display:block;width:100%;max-width:600px;height:auto" alt="Nine gaze directions: up-left, up, up-right; left, center, right; down-left, down, down-right" src="data:image/png;base64,' + gaze_data + '">')
 (out/'intro.html').write_text(header+'\n'.join(cards)+footer)

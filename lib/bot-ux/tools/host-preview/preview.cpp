@@ -782,11 +782,11 @@ struct EyeBox {
     int height() const { return y1-y0+1; }
 };
 struct DirectionRaster { std::vector<uint16_t> pixels; EyeBox eyes[2]; };
-static DirectionRaster directionRaster(botux::BotUx::GazeDirection direction, bool tap = false) {
+static DirectionRaster directionRaster(botux::BotUx::GazeDirection direction, bool tap = false, bool autoFace = false) {
     using Bot = botux::BotUx;
     gNow = 1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
     auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style); bot.seedBlink(1234);
-    bot.setMotionAmount(0); bot.setExpression(Bot::Expression::Neutral);
+    bot.setMotionAmount(0); bot.setExpression(autoFace ? Bot::Expression::Auto : Bot::Expression::Neutral);
     for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
     if (tap) bot.gazeAt(-0.85f,0.85f,5000); else bot.setGazeDirection(direction);
     for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
@@ -808,8 +808,10 @@ static void checkNineDirectionPerspective() {
     assert(directions.size()==9 && !directions.count(0));
     auto front=directionRaster(G::Center), left=directionRaster(G::Left), right=directionRaster(G::Right);
     auto up=directionRaster(G::Up), down=directionRaster(G::Down);
-    assert(left.eyes[1].height() >= left.eyes[0].height()*1.2f);
-    assert(right.eyes[0].height() >= right.eyes[1].height()*1.2f);
+    assert(left.eyes[0].pixels > left.eyes[1].pixels);
+    assert(right.eyes[1].pixels > right.eyes[0].pixels);
+    assert(left.eyes[0].height() <= left.eyes[1].height()*1.15f);
+    assert(right.eyes[1].height() <= right.eyes[0].height()*1.15f);
     assert(std::abs(front.eyes[0].height()-front.eyes[1].height())<=1);
     assert(std::fabs((front.eyes[0].cx()+front.eyes[1].cx())*.5f-100)<1);
     assert(up.eyes[0].cy()<88 && down.eyes[0].cy()>110 && down.eyes[0].cy()<114);
@@ -830,6 +832,47 @@ static void checkNineDirectionPerspective() {
     }
     auto diagonal=directionRaster(G::DownLeft), tapped=directionRaster(G::Auto,true);
     assert(diagonal.pixels==tapped.pixels); // same continuous vector, exactly the same pose/raster
+}
+
+static void checkIdleAndUpperRightProportions() {
+    using G = botux::BotUx::GazeDirection;
+    const auto idle = directionRaster(G::Auto, false, true);
+    const auto upperRight = directionRaster(G::UpRight, false, true);
+    const auto upperLeft = directionRaster(G::UpLeft, false, true);
+    assert(idle.eyes[1].pixels > idle.eyes[0].pixels);
+    assert(upperRight.eyes[1].pixels > upperRight.eyes[0].pixels);
+    assert(idle.eyes[1].height() > idle.eyes[0].height());
+    assert(upperRight.eyes[1].height() > upperRight.eyes[0].height());
+    assert(upperLeft.eyes[0].pixels > upperLeft.eyes[1].pixels);
+    for (int i = 0; i < 2; ++i) {
+        float idleHeight = idle.eyes[i].height(), directedHeight = upperRight.eyes[i].height();
+        float idleWidth = idle.eyes[i].x1-idle.eyes[i].x0+1;
+        float directedWidth = upperRight.eyes[i].x1-upperRight.eyes[i].x0+1;
+        assert(std::fabs(directedHeight / idleHeight - 1) < 0.12f);
+        assert(std::fabs(directedWidth / directedHeight - idleWidth / idleHeight) < 0.08f);
+        std::cout << "Idle/UpRight eye " << i << " width " << idleWidth << "/" << directedWidth
+                  << " height " << idleHeight << "/" << directedHeight
+                  << " ink " << idle.eyes[i].pixels << "/" << upperRight.eyes[i].pixels << "\n";
+    }
+    float idleRatio = (float)idle.eyes[1].pixels / idle.eyes[0].pixels;
+    float directedRatio = (float)upperRight.eyes[1].pixels / upperRight.eyes[0].pixels;
+    assert(std::fabs(idleRatio-directedRatio) < 0.12f);
+    float idleSpacing = idle.eyes[1].cx()-idle.eyes[0].cx();
+    float directedSpacing = upperRight.eyes[1].cx()-upperRight.eyes[0].cx();
+    assert(std::fabs(directedSpacing/idleSpacing-1) < 0.12f);
+}
+
+static void writeIdleComparison(const std::string& path) {
+    using G = botux::BotUx::GazeDirection;
+    const DirectionRaster frames[] = {directionRaster(G::Auto,false,true),
+        directionRaster(G::UpRight,false,true), directionRaster(G::UpLeft,false,true)};
+    std::ofstream out(path, std::ios::binary); assert(out);
+    out << "P6\n600 200\n255\n";
+    for (int y=0;y<200;++y) for (const auto& frame:frames) for (int x=0;x<200;++x) {
+        uint16_t pixel=frame.pixels[y*200+x];
+        char rgb[3]={(char)(((pixel>>11)&31)*255/31),(char)(((pixel>>5)&63)*255/63),(char)((pixel&31)*255/31)};
+        out.write(rgb,3);
+    }
 }
 
 static void checkDirectionTransitionContinuity() {
@@ -988,6 +1031,7 @@ int main(int argc, char** argv) {
     checkDirectionsDominateEveryFace();
     checkReducedMotionAmplitude();
     checkNineDirectionPerspective();
+    checkIdleAndUpperRightProportions();
     checkDirectionTransitionContinuity();
     checkThinkingTravelAndContinuity();
     checkSleepContinuity();
@@ -1001,6 +1045,7 @@ int main(int argc, char** argv) {
     checkTransitionsMotionAndSparseFrames();
     checkMotionStaysInCanvas();
     const char* outDir = (argc > 1) ? argv[1] : ".";
+    writeIdleComparison(std::string(outDir) + "/idle-up-right.ppm");
     std::string tiny = std::string(outDir) + "/moods-40.svg";
     std::string small = std::string(outDir) + "/moods-72.svg";
     std::string large = std::string(outDir) + "/moods-200.svg";

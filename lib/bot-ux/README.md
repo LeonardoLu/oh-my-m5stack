@@ -324,7 +324,8 @@ buffer, not approximated SVG eye primitives. `render.sh` emits both the labelled
 `gaze-directions.svg` and the raw `gaze-directions.svg.ppm` mosaic.
 
 New raster checks compare left/right mirrored ink masks (under 12% difference),
-verify the near/far eye height ratio exceeds 1.2, balanced Front eyes, vertical
+verify the direction-facing eye has slightly more ink with a height ratio below
+1.15 (matching Idle rather than the earlier exaggerated inverse ratio), balanced Front eyes, vertical
 height and position, and both axes of all diagonal poses. A (-0.85,+0.85) tap
 produces exactly the same pixels as Down-left. A sequence through opposite and
 diagonal directions bounds each 16ms eye-group movement to 8px on a 200px sprite,
@@ -369,3 +370,24 @@ Across two Asleep cycles the maximum phase-wrap/ordinary adjacent frame
 RGB565 differences for Round were 1,041/4,172 normally and 207/828 reduced; all
 four body styles passed the wrap check and zero amount
 remained identical. This is host rendering evidence, not hardware acceptance.
+
+
+## Idle-aligned directional eyes (2026-09-06 follow-up)
+
+Right-facing poses now keep the screen-right eye slightly larger, matching the
+actual Idle face; left-facing poses mirror that relationship. The old depth
+coefficient shrank the right eye strongly when looking right. It is now a small
+positive 0.03 coefficient. Directional spacing compression is 0.08, pitch changes
+openness by 0.04, and the signed slant gives UpRight the same 0.34 slope as Idle.
+Eye-group placement is unchanged, including the closer 0.16r downward extent.
+
+![Actual Idle, UpRight and mirrored UpLeft](docs/idle-up-right-raster.png)
+
+Left to right: actual Idle with Auto expression/gaze; UpRight; UpLeft. The native
+200px comparison has Idle left/right widths 14/15px and heights 28/30px, versus
+UpRight widths 15/16px and heights 29/30px. Tests compare size ordering, aspect,
+ink area and pair spacing directly, plus the existing nine-direction mirror,
+position and transition checks. All 1,040 combinations and sleep/thinking motion
+checks pass. `render.sh` emits `idle-up-right.ppm`; catalog packaging converts
+this and the updated nine-direction mosaic to the checked-in PNGs. Default Auto
+catalog examples are regenerated from source; the catalog still has 31 entries.

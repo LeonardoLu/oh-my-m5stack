@@ -222,3 +222,17 @@ coordinates `(233,233)`, `(321,321)`, and `(233,399)`. The existing stable-sampl
 results preserve target, raw mean and range, actual identity-converted mean, sample
 count, and hold duration for `cal dump`. Starting the run restores the loaded baseline;
 completion only displays `9/9 COMPLETE` and never solves, applies, or saves a profile.
+
+The physical repeat run completed all nine points under the identity baseline. Center
+reported `(254,256)`, `(258,243)`, and `(245,256)`; lower-right reported `(340,339)`,
+`(339,340)`, and `(346,339)`; bottom reported `(225,426)`, `(237,437)`, and
+`(240,431)`. Raw and converted means were identical, and every held contact had a
+zero-pixel raw range over 6–18 acquired samples. Variation occurred between independent
+taps: maximum same-target distances were 18.38 px at center, 7.07 px at lower-right,
+and 16.28 px at bottom. Mean offsets from the displayed targets were respectively
+`(+19.33,+18.67)`, `(+20.67,+18.33)`, and `(+1.00,+32.33)` px. This confirms that
+ordinary flat-finger target acquisition is not represented by a single noiseless point;
+it does not by itself distinguish position-dependent controller mapping from contact
+centroid or target-occlusion effects, and it does not establish a non-affine hardware
+mapping. The run ended with `stored=0`, no candidate applied, identity active, and no
+NVS write or reboot.

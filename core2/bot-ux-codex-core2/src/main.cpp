@@ -72,6 +72,7 @@ uint32_t pushMaxUs = 0;
 char serialCommand[16]{};
 uint8_t serialLength = 0;
 bool joystickMoved = false;
+bool joystickActive = false;
 float joystickAngle = 0.0f;
 uint32_t lastJoystickMs = 0;
 bool captureRequested = false;
@@ -203,6 +204,7 @@ void touchBegin(int16_t x, int16_t y)
     if (settings.isOpen()) { settings.touchBegin(x, y); uiDirty = true; return; }
     pressed = hitTarget(x, y);
     joystickMoved = false;
+    joystickActive = false;
     if (pressed.type == TargetType::Command && pressed.index == 4)
     {
         pttSent = codexLink.pressKey("ACT10", selectedAgent);
@@ -218,7 +220,11 @@ void touchMove(int16_t x, int16_t y)
     if (!touching) return;
     lastTouchX = x;
     lastTouchY = y;
-    if (settings.isOpen()) { settings.touchMove(x, y); uiDirty = true; return; }
+    if (settings.isOpen())
+    {
+        if (settings.touchMove(x, y)) uiDirty = true;
+        return;
+    }
     if (pressed.type == TargetType::Joystick)
     {
         const float dx = static_cast<float>(x - 160);
@@ -229,15 +235,20 @@ void touchMove(int16_t x, int16_t y)
             joystickAngle = position.angle;
             if (!joystickMoved || nowMs - lastJoystickMs >= 45)
             {
-                codexLink.moveJoystick(joystickAngle, position.distance);
+                if (codexLink.moveJoystick(joystickAngle, position.distance))
+                    joystickActive = true;
                 lastJoystickMs = nowMs;
             }
             joystickMoved = true;
-            uiDirty = true;
+        }
+        else if (joystickActive)
+        {
+            codexLink.moveJoystick(joystickAngle, 0);
+            joystickActive = false;
         }
         return;
     }
-    if (!sameTarget(pressed, hitTarget(x, y)))
+    if (pressed.type != TargetType::None && !sameTarget(pressed, hitTarget(x, y)))
     {
         if (pttSent) finishPtt();
         pressed = {};
@@ -262,7 +273,11 @@ void touchEnd(int16_t x, int16_t y)
     const bool wasPtt = pressed.type == TargetType::Command && pressed.index == 4;
     const bool wasJoystick = pressed.type == TargetType::Joystick;
     if (pttSent) finishPtt();
-    if (wasJoystick && joystickMoved) codexLink.moveJoystick(joystickAngle, 0);
+    if (wasJoystick && joystickActive)
+    {
+        codexLink.moveJoystick(joystickAngle, 0);
+        joystickActive = false;
+    }
     if (valid)
     {
         if (wasPtt) { audio.action(); bot.poke(); }

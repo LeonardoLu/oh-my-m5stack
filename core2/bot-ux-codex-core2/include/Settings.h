@@ -28,7 +28,7 @@ public:
     void open(uint8_t page = 0);
     void close();
     void touchBegin(int16_t x, int16_t y);
-    void touchMove(int16_t x, int16_t y);
+    bool touchMove(int16_t x, int16_t y);
     void touchEnd(int16_t x, int16_t y);
     void draw(M5Canvas& cv, M5Canvas& botSprite) const;
 

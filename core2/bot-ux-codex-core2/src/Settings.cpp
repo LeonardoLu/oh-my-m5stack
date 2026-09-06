@@ -148,9 +148,11 @@ int8_t Settings::_hit(int16_t x, int16_t y) const
 
 void Settings::touchBegin(int16_t x, int16_t y) { _pressed = _hit(x, y); }
 
-void Settings::touchMove(int16_t x, int16_t y)
+bool Settings::touchMove(int16_t x, int16_t y)
 {
-    if (_pressed >= 0 && _hit(x, y) != _pressed) _pressed = -1;
+    if (_pressed < 0 || _hit(x, y) == _pressed) return false;
+    _pressed = -1;
+    return true;
 }
 
 void Settings::touchEnd(int16_t x, int16_t y)

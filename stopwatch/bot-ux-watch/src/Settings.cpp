@@ -40,6 +40,7 @@ void Settings::begin() {
     prefs.begin(kNamespace, false);
     prefs.getString("botName", "Milo").toCharArray(_data.botName, sizeof(_data.botName));
     _data.language = prefs.getUChar("language", 0) == 1 ? 1 : 0;
+    _data.indicator = prefs.getBool("indicator", false);
     _data.gaze = prefs.getUChar("gaze", 0);
     if (_data.gaze >= botux::BotUx::gazeDirectionCount()) _data.gaze = 0;
     _data.showDescription = prefs.getBool("description", true);
@@ -88,6 +89,7 @@ void Settings::save() {
     prefs.putBool("hour24", _data.hour24);
     prefs.putBool("seconds", _data.showSeconds);
     prefs.putBool("sound", _data.sound);
+    prefs.putBool("indicator", _data.indicator);
     prefs.putUChar("theme", _data.theme);
     prefs.putUChar("look", _data.appearance);
     prefs.putUChar("expr", _data.expression);

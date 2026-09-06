@@ -4,7 +4,7 @@
 
 namespace ux {
 // One owner for a pointer sequence. Buttons capture their down target; only a
-// scroll surface can promote the sequence into a drag. No implicit hold timeout.
+// scroll surface can promote the sequence into a drag. Touch-up-inside within one second activates the captured target.
 class PointerSession {
 public:
     void begin(int target, Rect bounds, int x, int y, uint32_t now, bool scrollable) {
@@ -18,20 +18,19 @@ public:
         if (_scroll || _cancelled) return;
         const int dx = absInt(x - _x0), dy = absInt(y - _y0);
         if (_scrollable) {
-            if (dy >= 14 && dy >= dx) { _scroll = true; return; }
-            if (dx >= 22 && dx > dy) { _cancelled = true; return; }
-        } else if (!inside(x, y, 8)) _cancelled = true;
+            if (dy >= 20 && dy >= dx) { _scroll = true; return; }
+        } // Non-scroll buttons may leave and re-enter before release.
     }
-    int end(int x, int y) {
+    int end(int x, int y, uint32_t now) {
         move(x, y);
-        int clicked = pressed() ? _target : -1;
+        int clicked = pressed() && now - _started <= 1000 ? _target : -1;
         _active = false;
         return clicked;
     }
     void cancel() { _active = false; _scroll = false; _cancelled = true; }
     bool active() const { return _active; }
     bool scrolling() const { return _active && _scroll; }
-    bool pressed() const { return _active && !_scroll && !_cancelled && _target >= 0 && inside(_x, _y, 6); }
+    bool pressed() const { return _active && !_scroll && !_cancelled && _target >= 0 && inside(_x, _y, 0); }
     int pressedTarget() const { return pressed() ? _target : -1; }
     Rect bounds() const { return _bounds; }
     int startX() const { return _x0; }

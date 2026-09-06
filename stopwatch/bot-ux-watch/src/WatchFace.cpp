@@ -103,12 +103,19 @@ void WatchFace::draw(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_
 void WatchFace::_drawClock(bool top, uint16_t ink, uint16_t muted) {
     uint8_t h = _hour24 ? _hh : (_hh % 12 ? _hh % 12 : 12);
     char time[24];
-    const char* suffix = _hour24 ? "" : (_hh >= 12 ? " PM" : " AM");
+    const char* suffix = (_hour24 || _language) ? "" : (_hh >= 12 ? " PM" : " AM");
     if (_showSeconds) snprintf(time, sizeof(time), "%02u:%02u:%02u%s", h, _mm, _ss, suffix);
     else snprintf(time, sizeof(time), "%02u:%02u%s", h, _mm, suffix);
     const ux::Font* font = top ? &ux::Latin24 : &ux::Clock36;
     if (ux::textWidth(time, *font) > (top ? 240 : 300)) font = &ux::Latin24;
-    centered(_hud, time, top ? 30 : 6, ink, *font);
+    if(_language && !_hour24) {
+        const char* period=_hh>=12?"下午":"上午";
+        int prefix=ux::textWidth(period,ux::Cjk18)+8;
+        if(prefix+ux::textWidth(time,*font)>(top?240:300)) font=&ux::Latin24;
+        int x=(466-prefix-ux::textWidth(time,*font))/2, y=top?30:6;
+        ux::drawText(_hud,period,x,y+(ux::lineHeight(*font)-ux::lineHeight(ux::Cjk18))/2,ink,ux::Cjk18);
+        ux::drawText(_hud,time,x+prefix,y,ink,*font);
+    } else centered(_hud, time, top ? 30 : 6, ink, *font);
     char date[48];
     const char* weekday = _language ? kWeekdaysZh[_weekDay % 7] : kWeekdays[_weekDay % 7];
     snprintf(date, sizeof(date), "%04d/%02u/%02u %s", (int)_year, _month, _day, weekday);

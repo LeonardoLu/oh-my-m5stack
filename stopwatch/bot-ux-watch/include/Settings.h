@@ -25,6 +25,7 @@ public:
         bool    hour24      = true;
         bool    showSeconds = false;
         bool    sound       = true;
+        bool    indicator   = false;
         uint8_t theme       = THEME_NIGHT;
         uint8_t appearance  = 0;
         uint8_t expression  = 0;

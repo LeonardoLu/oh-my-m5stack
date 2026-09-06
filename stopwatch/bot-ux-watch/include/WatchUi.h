@@ -2,9 +2,11 @@
 #include <M5Unified.h>
 #include <UxText.h>
 #include <UxRender.h>
+#include "WatchStrings.h"
 
 // Migration adapter: retain deliberate alignment while using native AA glyphs.
-inline void watchText(M5Canvas& cv, const char* text, int x, int y) {
+inline void watchText(M5Canvas& cv, const char* text, int x, int y, bool localize=true) {
+    if(localize) text=watchstrings::translate(text);
     const ux::Font* font = cv.getFont() == &fonts::FreeSansBold12pt7b
         || cv.getFont() == &fonts::FreeSansBold18pt7b ? &ux::Latin24 : &ux::Latin18;
     for (const unsigned char* p = (const unsigned char*)text; *p; ++p)

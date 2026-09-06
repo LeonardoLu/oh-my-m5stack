@@ -24,8 +24,8 @@ int main() {
     assert(tap.poll(false, false, true, 108, 105, 100) == Gesture::Tap);
     assert(tap.tapX() == 108 && tap.tapY() == 105);
     tap.poll(true, true, false, 100, 100, 200);
-    assert(tap.poll(false, false, true, 125, 100, 260) == Gesture::None);
+    assert(tap.poll(false, false, true, 125, 100, 260) == Gesture::Tap);
     tap.poll(true, true, false, 100, 100, 300);
-    assert(tap.poll(false, true, false, 100, 100, 950) == Gesture::Long);
-    assert(tap.poll(false, false, true, 100, 100, 1000) == Gesture::None);
+    assert(tap.poll(false, true, false, 100, 100, 2300) == Gesture::Long);
+    assert(tap.poll(false, false, true, 100, 100, 2400) == Gesture::None);
 }

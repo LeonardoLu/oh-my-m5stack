@@ -2,6 +2,16 @@
 #include <M5Unified.h>
 
 void Power::begin() {
+    // Disable only single-click reset; leave double-off and download intact.
+    uint8_t cfg=0, verify=0;
+    auto& pm=M5.Power.M5pm1;
+    pm.readRegister(0x4a,&_bootOffCfg,1);
+    bool readKey=pm.readRegister(0x49,&cfg,1); _bootKeyCfg=cfg;
+    _homeKeyReady=readKey
+        && pm.writeRegister8(0x49,cfg|0x01)
+        && pm.readRegister(0x49,&verify,1) && verify==(uint8_t)(cfg|0x01);
+    pm.clearButtonIRQStatus();
+    setIndicator(false);
     applyLevel(3);
     update();
 }
@@ -38,4 +48,14 @@ void Power::setBrightness(uint8_t v) {
 
 void Power::applyLevel(uint8_t level) {
     setBrightness(levelToValue(level));
+}
+
+bool Power::setIndicator(bool enabled) {
+    if (_indicatorReady && _indicator==enabled) return true;
+    uint8_t cfg=0;
+    auto& pm=M5.Power.M5pm1;
+    _indicatorReady=pm.setLedEnLevel(enabled) && pm.readRegister(0x06,&cfg,1)
+        && ((cfg&0x10)!=0)==enabled;
+    if (_indicatorReady) _indicator=enabled;
+    return _indicatorReady;
 }

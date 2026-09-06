@@ -17,14 +17,14 @@ public:
             _longSent = true;
             return Gesture::Long;
         }
-        if (wasReleased && !_longSent) return Gesture::Tap;
+        if (wasReleased && !_longSent && nowMs - _downMs <= 1000) return Gesture::Tap;
         return Gesture::None;
     }
 
     void consume(bool isPressed) { _longSent = isPressed; }
 
 private:
-    static constexpr uint32_t kLongMs = 650;
+    static constexpr uint32_t kLongMs = 2000;
     uint32_t _downMs = 0;
     bool _longSent = false;
 };
@@ -66,7 +66,7 @@ public:
             _x = x; _y = y;
             if (magnitude(x - _x0) > 10 || magnitude(y - _y0) > 10) _moved = true;
             _down = false;
-            if (!_moved && !_longSent && !_swipeSent) {
+            if (!_longSent && !_swipeSent && nowMs - _downMs <= 1000) {
                 _tapX = _x;
                 _tapY = _y;
                 return Gesture::Tap;
@@ -88,7 +88,7 @@ public:
     int16_t startY() const { return _y0; }
 
 private:
-    static constexpr uint32_t kLongMs = 650;
+    static constexpr uint32_t kLongMs = 2000;
 
     static int32_t magnitude(int16_t value) {
         return value < 0 ? -(int32_t)value : value;

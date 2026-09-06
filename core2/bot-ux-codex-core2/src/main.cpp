@@ -596,7 +596,7 @@ void handleSerial()
                     if(settings.isOpen()) {
                         settings.touchBegin(settingsX,settingsY); settings.touchEnd(settingsX,settingsY); syncSettings(); uiDirty=true;
                     }
-                    Serial.printf("[settings] open=%u theme=%u\n",settings.isOpen(),settings.data().theme);
+                    Serial.printf("[settings] open=%u theme=%u volume=%u gain=%u audio=%u\n",settings.isOpen(),settings.data().theme,settings.data().volume,audio.volume(),settings.data().audio);
                     serialLength=0; return;
                 }
 

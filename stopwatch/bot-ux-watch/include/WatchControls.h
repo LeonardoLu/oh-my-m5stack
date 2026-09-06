@@ -15,9 +15,13 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
     auto match = [&](int id, ux::Rect bounds) {
         if (result.id == None && bounds.contains(x,y)) result = {id,bounds};
     };
+    if (screen != Screen::Face) {
+        match(Back,{72,374,150,58}); match(Done,{244,374,150,58});
+        if(result.id!=None) return result;
+    }
     if (screen == Screen::Settings || screen == Screen::Personalize) {
         if (y < 76 || y >= 364) return result;
-        int count = screen == Screen::Settings ? (int)MenuItem::Count : (int)PersonalItem::Count;
+        int count = screen == Screen::Settings ? (int)MenuItem::Done : (int)PersonalItem::Back;
         for (int i=0; i<count; ++i) {
             int top=105+i*72-(int)offset-29;
             int bottom=top+58;
@@ -28,7 +32,7 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
         return result;
     }
     if (screen != Screen::Editor) return result;
-    match(Back,{84,374,138,50}); match(Done,{244,374,138,50});
+
     if (editor==Editor::Name) {
         int key=ux::nameKeyAt({78,170,310,205},x,y);
         if (key>=0) {
@@ -63,8 +67,8 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
         const int rows[]={218,262,306,350};
         for(int i=0;i<4;++i) match(First+i,{58,rows[i]-22,350,44});
     } else if (editor==Editor::Display) {
-        const int rows[]={170,250,330};
-        for(int i=0;i<3;++i) match(First+i,{58,rows[i]-30,350,60});
+        const int rows[]={170,230,290,350};
+        for(int i=0;i<4;++i) match(First+i,{58,rows[i]-22,350,44});
     }
     return result;
 }

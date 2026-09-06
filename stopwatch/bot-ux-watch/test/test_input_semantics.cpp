@@ -12,10 +12,10 @@ static void testButtonTapAndLongPress() {
     assert(button.poll(false, false, true, 200) == Gesture::Tap);
 
     assert(button.poll(true, true, false, 1000) == Gesture::None);
-    assert(button.poll(false, true, false, 1649) == Gesture::None);
-    assert(button.poll(false, true, false, 1650) == Gesture::Long);
-    assert(button.poll(false, true, false, 1900) == Gesture::None);
-    assert(button.poll(false, false, true, 2000) == Gesture::None);
+    assert(button.poll(false, true, false, 2999) == Gesture::None);
+    assert(button.poll(false, true, false, 3000) == Gesture::Long);
+    assert(button.poll(false, true, false, 3100) == Gesture::None);
+    assert(button.poll(false, false, true, 3200) == Gesture::None);
 }
 
 static void testConsumedButtonWake() {
@@ -39,9 +39,9 @@ static void testTouchTap() {
 static void testTouchLongDoesNotRepeatOrTap() {
     TouchGesture touch;
     assert(touch.poll(true, true, false, 200, 200, 100) == Gesture::None);
-    assert(touch.poll(false, true, false, 200, 200, 750) == Gesture::Long);
-    assert(touch.poll(false, true, false, 200, 130, 900) == Gesture::None);
-    assert(touch.poll(false, false, true, 200, 130, 920) == Gesture::None);
+    assert(touch.poll(false, true, false, 200, 200, 2100) == Gesture::Long);
+    assert(touch.poll(false, true, false, 200, 130, 2200) == Gesture::None);
+    assert(touch.poll(false, false, true, 200, 130, 2220) == Gesture::None);
 }
 
 static void testSwipeDoesNotRepeatBecomeLongOrTap() {
@@ -74,7 +74,19 @@ static void testConsumedTouchWake() {
     assert(touch.poll(false, false, true, 60, 70, 1010) == Gesture::Tap);
 }
 
+static void testDurationBoundaries() {
+    TouchGesture t;
+    t.poll(true,true,false,200,200,100);
+    assert(t.poll(false,false,true,215,214,1100)==Gesture::Tap);
+    t.poll(true,true,false,200,200,2000);
+    assert(t.poll(false,false,true,200,200,3001)==Gesture::None);
+    t.poll(true,true,false,200,200,4000);
+    assert(t.poll(false,true,false,200,200,5999)==Gesture::None);
+    assert(t.poll(false,true,false,200,200,6000)==Gesture::Long);
+    assert(t.poll(false,false,true,200,200,6100)==Gesture::None);
+}
 int main() {
+    testDurationBoundaries();
     testButtonTapAndLongPress();
     testConsumedButtonWake();
     testTouchTap();

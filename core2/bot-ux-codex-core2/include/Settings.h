@@ -8,6 +8,16 @@
 
 class Settings {
 public:
+    struct ThemePalette {
+        uint16_t background;
+        uint16_t surface;
+        uint16_t surfaceRaised;
+        uint16_t outline;
+        uint16_t text;
+        uint16_t muted;
+        uint16_t accent;
+    };
+
     struct Data {
         uint8_t theme;
         uint8_t audio;
@@ -31,6 +41,7 @@ public:
         uint8_t language;
         uint8_t ledMode;
         uint8_t notifications;
+        uint8_t gaze;
     };
 
     static constexpr uint8_t kThemeCount = 3;
@@ -59,6 +70,7 @@ public:
     bool drawAnimatedPreview(lgfx::LovyanGFX& target);
 
     static const char* themeName(uint8_t value);
+    static ThemePalette themePalette(uint8_t value);
     static botux::BotUx::Style themeStyle(uint8_t value);
 
 private:
@@ -67,11 +79,11 @@ private:
     bool _setColor(uint8_t channel, int16_t x);
     void _activate(int8_t target);
     void _save() const;
-    void _drawPreview(M5Canvas& cv, uint16_t fg, uint16_t rowBg);
+    void _drawPreview(M5Canvas& cv, uint16_t fg, uint16_t rowBg, uint16_t line);
     void _commitName();
 
     Data _data{0, 1, 3, 0, 2, 0, 2, 0, 0,
-               252, 252, 250, 33, 36, 42, 60, 124, 232, "Milo", 0, 2, 1};
+               252, 252, 250, 33, 36, 42, 60, 124, 232, "Milo", 0, 2, 1, 0};
     bool _open = false;
     uint8_t _page = 0;
     uint8_t _colorPart = 0;

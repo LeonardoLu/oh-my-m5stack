@@ -192,6 +192,26 @@ void BottomLeds::notify(uint8_t mask, uint32_t nowMs)
     _events.notificationAt = nowMs;
 }
 
+void BottomLeds::control(uint32_t color, uint32_t nowMs)
+{
+    _events.controlColor = color & 0xFFFFFFu;
+    _events.controlAt = nowMs;
+    _events.hasControl = color != 0;
+}
+
+void BottomLeds::hold(uint32_t color, bool active, uint32_t nowMs)
+{
+    if (active)
+    {
+        _events.holdColor = color & 0xFFFFFFu;
+        _events.controlHeld = color != 0;
+        return;
+    }
+    if (!_events.controlHeld) return;
+    _events.controlHeld = false;
+    control(_events.holdColor, nowMs);
+}
+
 void BottomLeds::update(const LightingState& lighting, uint32_t nowMs, bool reducedMotion,
                         bool connected, uint8_t selectedAgent)
 {

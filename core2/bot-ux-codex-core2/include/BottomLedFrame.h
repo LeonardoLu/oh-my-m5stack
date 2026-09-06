@@ -19,6 +19,11 @@ struct Events {
     uint8_t interactionSlot = 0;
     uint8_t notificationMask = 0;
     bool hasInteraction = false;
+    uint32_t controlAt = 0;
+    uint32_t controlColor = 0;
+    uint32_t holdColor = 0;
+    bool hasControl = false;
+    bool controlHeld = false;
 };
 
 inline uint8_t triangle(uint32_t nowMs, uint16_t period, uint8_t floor)
@@ -72,6 +77,18 @@ inline Color scaleColor(uint32_t color, uint8_t scale)
                  static_cast<uint8_t>((color & 255u) * scale / 255u)};
 }
 
+inline uint32_t mixColor(uint32_t first, uint32_t second, uint8_t amount)
+{
+    const uint8_t inverse = 255 - amount;
+    const uint8_t r = static_cast<uint8_t>((((first >> 16) & 255u) * inverse
+                                          + ((second >> 16) & 255u) * amount) / 255u);
+    const uint8_t g = static_cast<uint8_t>((((first >> 8) & 255u) * inverse
+                                          + ((second >> 8) & 255u) * amount) / 255u);
+    const uint8_t b = static_cast<uint8_t>(((first & 255u) * inverse
+                                          + (second & 255u) * amount) / 255u);
+    return (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | b;
+}
+
 inline float hump(float phase)
 {
     if (phase <= 0.0f || phase >= 1.0f) return 0.0f;
@@ -102,9 +119,19 @@ inline void frame(const LightingState& lighting, const Events& events,
         0.5f - 0.5f * cosf((nowMs % 5400u) * (6.2831853f / 5400.0f));
     if (!connected)
     {
-        // Neutral cool gray communicates controller presence, not agent work.
-        const uint8_t level = static_cast<uint8_t>(30.0f + 26.0f * breath);
-        for (uint8_t i = 0; i < kCount; ++i) colors[i] = scaleColor(0x84909C, level);
+        // A low-saturation cool flow communicates controller presence without
+        // assigning status to any agent slot.
+        for (uint8_t i = 0; i < kCount; ++i)
+        {
+            const float angle = reduced ? 0.0f
+                : (nowMs % 7600u) * (6.2831853f / 7600.0f) - i * 0.62831853f;
+            const float wave = reduced ? 0.5f : 0.5f + 0.5f * cosf(angle);
+            const uint32_t color = mixColor(0x71869A, 0x8B7898,
+                static_cast<uint8_t>(wave * 96.0f));
+            const uint8_t level = static_cast<uint8_t>(28.0f + 24.0f * breath
+                                                       + 8.0f * wave);
+            colors[i] = scaleColor(color, level);
+        }
         return;
     }
     if (selected >= LightingState::kSlotCount) selected = 0;
@@ -117,6 +144,10 @@ inline void frame(const LightingState& lighting, const Events& events,
     const uint32_t notificationAge = nowMs - events.notificationAt;
     const float notice = !reduced && notificationAge < 1800u ?
         hump(notificationAge / 1800.0f) : 0.0f;
+    const uint32_t controlAge = nowMs - events.controlAt;
+    const bool controlPulse = !reduced && events.hasControl && controlAge < 900u;
+    const float controlPhase = controlAge / 900.0f;
+    const float controlHead = -2.0f + 13.0f * controlPhase;
     for (uint8_t i = 0; i < kCount; ++i)
     {
         int8_t slot = -1;
@@ -126,8 +157,13 @@ inline void frame(const LightingState& lighting, const Events& events,
         if (slot >= 0 && !zone.active()) continue;
         // Empty ambient LEDs may show quiet device presence; empty agent LEDs
         // stay black so Alive never invents a per-slot status color.
-        const uint32_t color = zone.active() ? zone.color : 0x84909C;
-        const uint8_t hostLevel = zone.active() ? zone.brightness : 52;
+        const bool localAmbient = slot < 0 && !zone.active()
+            && (events.controlHeld || controlPulse);
+        const uint32_t color = zone.active() ? zone.color
+            : (localAmbient ? (events.controlHeld ? events.holdColor : events.controlColor)
+                            : 0x84909C);
+        const uint8_t hostLevel = zone.active() ? zone.brightness
+            : (localAmbient ? 150 : 52);
         float gain = 112.0f + 48.0f * breath;
         if (slot == selected) gain += 30.0f;
         if (!reduced)
@@ -143,6 +179,21 @@ inline void frame(const LightingState& lighting, const Events& events,
                 gain += 48.0f * (1.0f - distance / 2.5f) * hump(interactionPhase);
         }
         if (slot >= 0 && (events.notificationMask & (1u << slot))) gain += 80.0f * notice;
+        if (events.controlHeld)
+        {
+            const float heldBreath = reduced ? 0.55f
+                : 0.5f - 0.5f * cosf((nowMs % 1700u) * (6.2831853f / 1700.0f));
+            gain += (slot < 0 ? 52.0f : 26.0f) * heldBreath;
+        }
+        if (controlPulse)
+        {
+            const float distance = fabsf(i - controlHead);
+            if (distance < 2.5f)
+            {
+                const float motion = (1.0f - distance / 2.5f) * hump(controlPhase);
+                gain += (slot < 0 ? 92.0f : 48.0f) * motion;
+            }
+        }
         if (gain > 255.0f) gain = 255.0f;
         const uint8_t level = static_cast<uint8_t>(hostLevel * gain / 255.0f);
         colors[i] = scaleColor(color, level);

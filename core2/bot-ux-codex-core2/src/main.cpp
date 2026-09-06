@@ -21,12 +21,16 @@ constexpr int16_t kScreenH = 240;
 constexpr int16_t kBotSize = 40;
 constexpr uint32_t kFrameMs = 33;
 constexpr uint16_t kInk = botux::rgb565(31, 34, 39);
-constexpr uint16_t kKey = botux::rgb565(252, 251, 247);
-constexpr uint16_t kLine = botux::rgb565(193, 191, 184);
-constexpr uint16_t kMuted = botux::rgb565(105, 106, 108);
 constexpr uint16_t kWhite = botux::rgb565(255, 255, 255);
 constexpr uint16_t kGreen = botux::rgb565(39, 164, 91);
-constexpr uint16_t kRed = botux::rgb565(215, 53, 53);
+constexpr uint32_t kControlColor[6] = {
+    0x3C7CF0, // Fast: configurable action whose state is unknown locally.
+    0x27A45B, // Approve
+    0xD73535, // Decline
+    0x8759D6, // Fork
+    0xE8972F, // Push to talk
+    0x168FA0, // Send
+};
 
 enum class Page : uint8_t { Agents, Control };
 enum class TargetType : uint8_t {
@@ -139,16 +143,23 @@ Target hitTarget(int16_t x, int16_t y)
     return {};
 }
 
-uint16_t foreground() { return settings.data().theme == 2 ? botux::rgb565(239, 239, 235) : kInk; }
-uint16_t surface() { return settings.data().theme == 2 ? botux::rgb565(57, 60, 66) : kKey; }
-uint16_t mutedText()
-{
-    return settings.data().theme == 2 ? botux::rgb565(184, 187, 192) : kMuted;
-}
+uint16_t foreground() { return Settings::themePalette(settings.data().theme).text; }
+uint16_t surface() { return Settings::themePalette(settings.data().theme).surface; }
+uint16_t raisedSurface() { return Settings::themePalette(settings.data().theme).surfaceRaised; }
+uint16_t outline() { return Settings::themePalette(settings.data().theme).outline; }
+uint16_t mutedText() { return Settings::themePalette(settings.data().theme).muted; }
 uint16_t rgb24to565(uint32_t color)
 {
     return botux::rgb565(static_cast<uint8_t>(color >> 16),
                          static_cast<uint8_t>(color >> 8), static_cast<uint8_t>(color));
+}
+
+uint32_t controlColor(uint8_t index)
+{
+    if (index == 0 && codexLink.lighting().keys.active()
+        && codexLink.lighting().keys.color)
+        return codexLink.lighting().keys.color;
+    return kControlColor[index < 6 ? index : 0];
 }
 
 void setBotMood()
@@ -191,11 +202,12 @@ void syncSettings()
     uiDirty = true;
 }
 
-bool sendTap(const char* key)
+bool sendTap(const char* key, uint32_t feedbackColor = 0)
 {
     if (!codexLink.tapKey(key, selectedAgent)) { audio.error(); return false; }
     audio.action();
     bot.poke();
+    if (feedbackColor) bottomLeds.control(feedbackColor, nowMs);
     return true;
 }
 
@@ -220,7 +232,8 @@ void activate(const Target& target)
         }
         case TargetType::Command:
             if (target.index == 4) { if (pttSent) audio.action(); }
-            else if (target.index >= 0 && target.index < 6) sendTap(actionKeys[target.index]);
+            else if (target.index >= 0 && target.index < 6)
+                sendTap(actionKeys[target.index], controlColor(target.index));
             break;
         case TargetType::Reasoning:
             if (target.index >= 0)
@@ -242,6 +255,7 @@ void activate(const Target& target)
 void finishPtt()
 {
     if (pttSent) codexLink.releaseKey("ACT10", selectedAgent);
+    bottomLeds.hold(kControlColor[4], false, nowMs);
     pttSent = false;
     listening = false;
     setBotMood();
@@ -267,7 +281,12 @@ void touchBegin(int16_t x, int16_t y)
     {
         pttSent = codexLink.pressKey("ACT10", selectedAgent);
         listening = pttSent;
-        if (pttSent) audio.select(); else audio.error();
+        if (pttSent)
+        {
+            bottomLeds.hold(kControlColor[4], true, nowMs);
+            audio.select();
+        }
+        else audio.error();
         setBotMood();
     }
     uiDirty = true;
@@ -467,6 +486,8 @@ void drawAgentCard(uint8_t index)
 void drawTabs()
 {
     const uint16_t accent = Settings::themeStyle(settings.data().theme).accentColor;
+    if (page == Page::Agents) canvas.fillRect(0, 201, 160, 39, raisedSurface());
+    else canvas.fillRect(160, 201, 160, 39, raisedSurface());
     if (pressed.type == TargetType::PageAgents) canvas.fillRect(0, 201, 160, 39, surface());
     if (pressed.type == TargetType::PageControl) canvas.fillRect(160, 201, 160, 39, surface());
     canvas.drawFastHLine(0, 200, 320, accent);
@@ -495,41 +516,42 @@ void drawAgentsPage()
 }
 
 void drawKey(int16_t x, int16_t y, int16_t w, const char* label, const char* code,
-             bool down, uint16_t accent)
+             bool down, uint32_t semanticColor)
 {
-    ux::roundRect(canvas, x, y, w, 40, 8, down ? accent : surface());
-    ux::strokeRoundRect(canvas, x, y, w, 40, 8, kLine);
+    const uint16_t color = rgb24to565(semanticColor);
+    const uint16_t fill = down ? color : ux::blend565(surface(), color, 92);
+    const uint16_t ink = down ? contrastingInk(semanticColor) : foreground();
+    ux::roundRect(canvas, x, y, w, 40, 8, fill);
+    ux::strokeRoundRect(canvas, x, y, w, 40, 8, down ? color : ux::blend565(outline(), color, 96));
     canvas.setTextDatum(middle_center);
-    canvas.setTextColor(down ? kWhite : foreground());
+    canvas.setTextColor(ink);
     coreText(label, x + w / 2, y + 12);
-    canvas.setTextColor(down ? kWhite : mutedText());
+    canvas.setTextColor(down ? ink : ux::blend565(mutedText(), color, 52));
     coreText(code, x + w / 2, y + 29);
 }
 
 void drawControlPage()
 {
     static const char* labels[] = {"FAST", "APPROVE", "DECLINE", "FORK", "HOLD MIC", "SEND"};
-    static const char* hints[] = {"TOGGLE", "REQUEST", "REQUEST", "TASK", "MAC AUDIO", "COMPOSER"};
-    const uint16_t styleAccent = Settings::themeStyle(settings.data().theme).accentColor;
-    const uint16_t keyAccent = codexLink.lighting().keys.active()
-                                   ? rgb24to565(codexLink.lighting().keys.color) : styleAccent;
+    static const char* hints[] = {"TOGGLE", "CLICK", "CLICK", "CLICK", "HOLD / MAC", "CLICK"};
     for (uint8_t i = 0; i < 6; ++i)
     {
         const int16_t x = 4 + (i % 3) * 106;
         const int16_t y = i < 3 ? 48 : 92;
         const bool down = pressed.type == TargetType::Command && pressed.index == i;
-        drawKey(x, y, 100, labels[i], hints[i], down || (i == 4 && listening),
-                i == 2 ? kRed : (i == 1 ? kGreen : keyAccent));
+        const char* label = i == 4 && listening ? "MIC ACTIVE" : labels[i];
+        const char* hint = i == 4 && listening ? "RELEASE" : hints[i];
+        drawKey(x, y, 100, label, hint, down || (i == 4 && listening), controlColor(i));
     }
     const bool lessDown = pressed.type == TargetType::Reasoning && pressed.index == 0;
     const bool moreDown = pressed.type == TargetType::Reasoning && pressed.index == 1;
-    drawKey(4, 143, 58, "LESS", "TURN", lessDown, styleAccent);
+    drawKey(4, 143, 58, "LESS", "TURN", lessDown, 0x697386);
     ux::roundRect(canvas, 66, 143, 188, 40, 8, surface());
-    ux::strokeRoundRect(canvas, 66, 143, 188, 40, 8, kLine);
+    ux::strokeRoundRect(canvas, 66, 143, 188, 40, 8, outline());
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(foreground());
     coreText("TAP KNOB / DRAG STICK", 160, 163);
-    drawKey(258, 143, 58, "MORE", "TURN", moreDown, styleAccent);
+    drawKey(258, 143, 58, "MORE", "TURN", moreDown, 0x697386);
     drawTabs();
 }
 

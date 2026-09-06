@@ -9,12 +9,7 @@
 #include "UxRender.h"
 
 namespace {
-constexpr uint16_t kPaper = botux::rgb565(238, 236, 229);
-constexpr uint16_t kWarm = botux::rgb565(244, 232, 215);
-constexpr uint16_t kGraphite = botux::rgb565(38, 40, 45);
 constexpr uint16_t kInk = botux::rgb565(33, 36, 42);
-constexpr uint16_t kLine = botux::rgb565(199, 197, 190);
-constexpr uint16_t kBlue = botux::rgb565(60, 124, 232);
 constexpr uint8_t kDisplayBrightness[5] = {40, 88, 144, 204, 255};
 constexpr int16_t kRowY[4] = {40, 80, 120, 160};
 constexpr int16_t kSliderLeft = 42;
@@ -84,12 +79,12 @@ void fittedText(M5Canvas& cv, const char* value, int x, int y, int width,
 }
 
 void drawRow(M5Canvas& cv, int16_t y, const char* label, const char* value,
-             bool down, uint16_t bg, uint16_t fg, uint16_t accent,
+             bool down, uint16_t bg, uint16_t fg, uint16_t accent, uint16_t line,
              const ux::Font& valueFont = ux::Latin18)
 {
-    const uint16_t fill = down ? ux::blend565(bg, accent, 45) : bg;
+    const uint16_t fill = down ? ux::blend565(bg, accent, 72) : bg;
     ux::roundRect(cv, 6, y + 2, 308, 36, 7, fill);
-    ux::strokeRoundRect(cv, 6, y + 2, 308, 36, 7, kLine);
+    ux::strokeRoundRect(cv, 6, y + 2, 308, 36, 7, down ? accent : line);
     text(cv, label, 16, y + 10, fg, ux::Latin14);
     const int valueWidth = ux::textWidth(value, valueFont);
     text(cv, value, 304 - valueWidth, y + (40 - ux::lineHeight(valueFont)) / 2,
@@ -142,12 +137,32 @@ const char* Settings::themeName(uint8_t value)
     return names[value < kThemeCount ? value : 0];
 }
 
+Settings::ThemePalette Settings::themePalette(uint8_t value)
+{
+    static constexpr ThemePalette palettes[kThemeCount] = {
+        {botux::rgb565(244, 242, 235), botux::rgb565(255, 254, 250),
+         botux::rgb565(235, 232, 223), botux::rgb565(190, 188, 180),
+         botux::rgb565(28, 32, 38), botux::rgb565(101, 102, 105),
+         botux::rgb565(43, 103, 215)},
+        {botux::rgb565(247, 237, 222), botux::rgb565(255, 248, 238),
+         botux::rgb565(237, 217, 196), botux::rgb565(201, 174, 145),
+         botux::rgb565(53, 39, 32), botux::rgb565(121, 91, 73),
+         botux::rgb565(220, 100, 45)},
+        {botux::rgb565(28, 31, 38), botux::rgb565(45, 49, 58),
+         botux::rgb565(61, 66, 78), botux::rgb565(92, 98, 112),
+         botux::rgb565(244, 244, 239), botux::rgb565(174, 178, 188),
+         botux::rgb565(117, 170, 255)},
+    };
+    return palettes[value < kThemeCount ? value : 0];
+}
+
 botux::BotUx::Style Settings::themeStyle(uint8_t value)
 {
+    const ThemePalette palette = themePalette(value);
     botux::BotUx::Style style;
-    style.bgColor = value == 1 ? kWarm : (value == 2 ? kGraphite : kPaper);
+    style.bgColor = palette.background;
     style.bodyColor = botux::rgb565(252, 252, 250);
-    style.accentColor = value == 1 ? botux::rgb565(224, 112, 55) : kBlue;
+    style.accentColor = palette.accent;
     style.eyeColor = kInk;
     style.pupilColor = botux::rgb565(12, 14, 18);
     style.mouthColor = kInk;
@@ -220,6 +235,7 @@ void Settings::begin()
     _data.language = prefs.getUChar("language", 0);
     _data.ledMode = prefs.getUChar("ledmode", 2);
     _data.notifications = prefs.getUChar("notify", 1);
+    _data.gaze = prefs.getUChar("gaze", 0);
     prefs.end();
     // Reuse BotUx's public sanitizer so persisted and displayed names agree.
     _preview.setName(_data.botName);
@@ -227,6 +243,7 @@ void Settings::begin()
     if (_data.language > 1) _data.language = 0;
     if (_data.ledMode > 2) _data.ledMode = 2;
     if (_data.notifications > 1) _data.notifications = 1;
+    if (_data.gaze >= botux::BotUx::gazeDirectionCount()) _data.gaze = 0;
     if (!_previewAttempted)
     {
         _previewAttempted = true;
@@ -276,6 +293,7 @@ void Settings::_save() const
     prefs.putUChar("language", _data.language);
     prefs.putUChar("ledmode", _data.ledMode);
     prefs.putUChar("notify", _data.notifications);
+    prefs.putUChar("gaze", _data.gaze);
     prefs.end();
 }
 
@@ -288,6 +306,7 @@ void Settings::apply(botux::BotUx& bot) const
     bot.setAnimationSpeed(1.0f);
     bot.setMotionAmount(_data.motion * 0.5f);
     bot.setReducedMotion(_data.reducedMotion != 0);
+    bot.setGazeDirection(static_cast<botux::BotUx::GazeDirection>(_data.gaze));
     applyBrightness();
 }
 
@@ -332,7 +351,7 @@ int8_t Settings::_hit(int16_t x, int16_t y) const
             if (y >= 44 + i * 50 && y < 88 + i * 50) return i + 1;
         return -1;
     }
-    const int8_t rowCount = _page == 3 ? 2 : (_page == 4 || _page == 6 ? 3 : 4);
+    const int8_t rowCount = (_page == 3 || _page == 4 || _page == 6) ? 3 : 4;
     for (int8_t i = 0; i < rowCount; ++i)
         if (y >= kRowY[i] && y < kRowY[i] + 40) return i + 1;
     return -1;
@@ -457,6 +476,7 @@ void Settings::_activate(int8_t target)
     {
         if (target == 1) _data.motion = (_data.motion + 1) % 5;
         else if (target == 2) _data.reducedMotion ^= 1;
+        else if (target == 3) _data.gaze = (_data.gaze + 1) % botux::BotUx::gazeDirectionCount();
     }
     else if (_page == 4)
     {
@@ -500,6 +520,7 @@ bool Settings::drawAnimatedPreview(lgfx::LovyanGFX& target)
     _preview.setTalking(mood == botux::BotUx::Mood::Speaking);
     _preview.setMotionAmount(_data.motion * 0.5f);
     _preview.setReducedMotion(_data.reducedMotion != 0);
+    _preview.setGazeDirection(static_cast<botux::BotUx::GazeDirection>(_data.gaze));
     _preview.update(_previewNow ? _previewNow : millis());
     _preview.draw();
     const ux::Rect region = previewRect();
@@ -507,7 +528,7 @@ bool Settings::drawAnimatedPreview(lgfx::LovyanGFX& target)
     return true;
 }
 
-void Settings::_drawPreview(M5Canvas& cv, uint16_t fg, uint16_t rowBg)
+void Settings::_drawPreview(M5Canvas& cv, uint16_t fg, uint16_t rowBg, uint16_t line)
 {
     const auto language = static_cast<botux::BotUx::Language>(_data.language);
     const ux::Font& font = _data.language ? ux::Cjk18 : ux::Latin18;
@@ -527,7 +548,7 @@ void Settings::_drawPreview(M5Canvas& cv, uint16_t fg, uint16_t rowBg)
     {
         const int y = 44 + i * 50;
         ux::roundRect(cv, 124, y, 190, 44, 7, _pressed == i + 1 ? ux::blend565(rowBg, fg, 32) : rowBg);
-        ux::strokeRoundRect(cv, 124, y, 190, 44, 7, kLine);
+        ux::strokeRoundRect(cv, 124, y, 190, 44, 7, line);
         char label[28];
         snprintf(label, sizeof(label), "%s %u/%u", labels[i], indices[i] + 1, counts[i]);
         text(cv, label, 134, y + 2, fg, ux::Latin14);
@@ -540,17 +561,19 @@ void Settings::draw(M5Canvas& cv, M5Canvas& botSprite)
 {
     (void)botSprite; // The local preview has its own sprite; never borrow host state.
     const botux::BotUx::Style style = themeStyle(_data.theme);
-    const uint16_t fg = _data.theme == 2 ? botux::rgb565(238, 238, 234) : kInk;
-    const uint16_t rowBg = _data.theme == 2 ? botux::rgb565(57, 60, 66) : botux::rgb565(250, 249, 245);
+    const ThemePalette palette = themePalette(_data.theme);
+    const uint16_t fg = palette.text;
+    const uint16_t rowBg = palette.surface;
     // UI contrast is independent of personalized Bot body/eye colors.
-    const uint16_t accent = _data.theme == 2 ? botux::rgb565(144, 190, 255) : botux::rgb565(35, 85, 175);
+    const uint16_t accent = palette.accent;
+    const uint16_t line = palette.outline;
     const auto language = static_cast<botux::BotUx::Language>(_data.language);
     const ux::Font& stateFont = _data.language ? ux::Cjk18 : ux::Latin18;
     cv.fillSprite(style.bgColor);
     if (_page == kNamePage)
     {
-        ux::roundRect(cv, 4, 2, 76, 36, 7, _pressed == 50 ? kLine : rowBg);
-        ux::roundRect(cv, 240, 2, 76, 36, 7, _pressed == 51 ? kLine : rowBg);
+        ux::roundRect(cv, 4, 2, 76, 36, 7, _pressed == 50 ? line : rowBg);
+        ux::roundRect(cv, 240, 2, 76, 36, 7, _pressed == 51 ? line : rowBg);
         text(cv, "Cancel", 12, 8, fg);
         text(cv, "NAME", 160 - ux::textWidth("NAME") / 2, 8, fg);
         text(cv, "Done", 252, 8, accent);
@@ -573,51 +596,54 @@ void Settings::draw(M5Canvas& cv, M5Canvas& botSprite)
     if (_page == 0)
     {
         char level[2] = {static_cast<char>('0' + _data.brightness), 0};
-        drawRow(cv, kRowY[0], "DISPLAY", level, _pressed == 1, rowBg, fg, accent);
-        drawRow(cv, kRowY[1], "AUDIO FEEDBACK", onOff(_data.audio), _pressed == 2, rowBg, fg, accent);
-        drawRow(cv, kRowY[2], "THEME", themeName(_data.theme), _pressed == 3, rowBg, fg, accent);
-        drawRow(cv, kRowY[3], "BOTTOM LEDs", ledName(_data.ledBrightness), _pressed == 4, rowBg, fg, accent);
+        drawRow(cv, kRowY[0], "DISPLAY", level, _pressed == 1, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[1], "AUDIO FEEDBACK", onOff(_data.audio), _pressed == 2, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[2], "THEME", themeName(_data.theme), _pressed == 3, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[3], "BOTTOM LEDs", ledName(_data.ledBrightness), _pressed == 4, rowBg, fg, accent, line);
     }
     else if (_page == 1)
     {
-        drawRow(cv, kRowY[0], "STYLE", botStyleName(_data.botStyle), _pressed == 1, rowBg, fg, accent);
-        drawRow(cv, kRowY[1], "EXPRESSION", botux::BotUx::expressionName(static_cast<botux::BotUx::Expression>(_data.expression), language), _pressed == 2, rowBg, fg, accent, stateFont);
-        drawRow(cv, kRowY[2], "ANIMATION", botux::BotUx::animationName(static_cast<botux::BotUx::Animation>(_data.animation), language), _pressed == 3, rowBg, fg, accent, stateFont);
-        drawRow(cv, kRowY[3], "COLOR", "EDIT", _pressed == 4, rowBg, fg, accent);
+        drawRow(cv, kRowY[0], "STYLE", botStyleName(_data.botStyle), _pressed == 1, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[1], "EXPRESSION", botux::BotUx::expressionName(static_cast<botux::BotUx::Expression>(_data.expression), language), _pressed == 2, rowBg, fg, accent, line, stateFont);
+        drawRow(cv, kRowY[2], "ANIMATION", botux::BotUx::animationName(static_cast<botux::BotUx::Animation>(_data.animation), language), _pressed == 3, rowBg, fg, accent, line, stateFont);
+        drawRow(cv, kRowY[3], "COLOR", "EDIT", _pressed == 4, rowBg, fg, accent, line);
     }
     else if (_page == 2)
     {
         const uint8_t red = _colorPart == 0 ? _data.bodyRed : (_colorPart == 1 ? _data.eyeRed : _data.accentRed);
         const uint8_t green = _colorPart == 0 ? _data.bodyGreen : (_colorPart == 1 ? _data.eyeGreen : _data.accentGreen);
         const uint8_t blue = _colorPart == 0 ? _data.bodyBlue : (_colorPart == 1 ? _data.eyeBlue : _data.accentBlue);
-        drawRow(cv, kRowY[0], "COLOR PART", colorPartName(_colorPart), _pressed == 1, rowBg, fg, accent);
+        drawRow(cv, kRowY[0], "COLOR PART", colorPartName(_colorPart), _pressed == 1, rowBg, fg, accent, line);
         ux::roundRect(cv, 190, 49, 28, 22, 5, botux::rgb565(red, green, blue));
-        ux::strokeRoundRect(cv, 190, 49, 28, 22, 5, kLine);
-        drawSlider(cv, kRowY[1], "R", red, 0, red, green, blue, fg, kLine);
-        drawSlider(cv, kRowY[2], "G", green, 1, red, green, blue, fg, kLine);
-        drawSlider(cv, kRowY[3], "B", blue, 2, red, green, blue, fg, kLine);
+        ux::strokeRoundRect(cv, 190, 49, 28, 22, 5, line);
+        drawSlider(cv, kRowY[1], "R", red, 0, red, green, blue, fg, line);
+        drawSlider(cv, kRowY[2], "G", green, 1, red, green, blue, fg, line);
+        drawSlider(cv, kRowY[3], "B", blue, 2, red, green, blue, fg, line);
     }
     else if (_page == 3)
     {
-        drawRow(cv, kRowY[0], "IMU MOTION", motionName(_data.motion), _pressed == 1, rowBg, fg, accent);
-        drawRow(cv, kRowY[1], "REDUCED MOTION", onOff(_data.reducedMotion), _pressed == 2, rowBg, fg, accent);
-        text(cv, "Tilt and shake response", 16, 140, fg, ux::Latin14);
+        drawRow(cv, kRowY[0], "IMU MOTION", motionName(_data.motion), _pressed == 1, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[1], "REDUCED MOTION", onOff(_data.reducedMotion), _pressed == 2, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[2], "GAZE", botux::BotUx::gazeDirectionName(
+            static_cast<botux::BotUx::GazeDirection>(_data.gaze), language),
+            _pressed == 3, rowBg, fg, accent, line, stateFont);
+        text(cv, "Tilt, shake and eye direction", 16, 174, fg, ux::Latin14);
     }
     else if (_page == 4)
     {
-        drawRow(cv, kRowY[0], "NAME", _data.botName, _pressed == 1, rowBg, fg, accent, ux::Latin14);
-        drawRow(cv, kRowY[1], "LANGUAGE", _data.language ? "中文" : "English", _pressed == 2, rowBg, fg, accent, stateFont);
-        drawRow(cv, kRowY[2], "COMBINATIONS", "PREVIEW", _pressed == 3, rowBg, fg, accent);
+        drawRow(cv, kRowY[0], "NAME", _data.botName, _pressed == 1, rowBg, fg, accent, line, ux::Latin14);
+        drawRow(cv, kRowY[1], "LANGUAGE", _data.language ? "中文" : "English", _pressed == 2, rowBg, fg, accent, line, stateFont);
+        drawRow(cv, kRowY[2], "COMBINATIONS", "PREVIEW", _pressed == 3, rowBg, fg, accent, line);
         text(cv, _data.language ? "状态 / 表情 / 动作" : "Mood / expression / animation", 16, 174, fg,
              _data.language ? ux::Cjk18 : ux::Latin14);
     }
-    else if (_page == 5) _drawPreview(cv, fg, rowBg);
+    else if (_page == 5) _drawPreview(cv, fg, rowBg, line);
     else if (_page == 6)
     {
         static const char* modes[] = {"OFF", "HOST", "ALIVE"};
-        drawRow(cv, kRowY[0], "LED MODE", modes[_data.ledMode], _pressed == 1, rowBg, fg, accent);
-        drawRow(cv, kRowY[1], "NOTIFICATIONS", onOff(_data.notifications), _pressed == 2, rowBg, fg, accent);
-        drawRow(cv, kRowY[2], "LED BRIGHTNESS", ledName(_data.ledBrightness), _pressed == 3, rowBg, fg, accent);
+        drawRow(cv, kRowY[0], "LED MODE", modes[_data.ledMode], _pressed == 1, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[1], "NOTIFICATIONS", onOff(_data.notifications), _pressed == 2, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[2], "LED BRIGHTNESS", ledName(_data.ledBrightness), _pressed == 3, rowBg, fg, accent, line);
         const char* notes[] = {"Bottom lights stay off", "Follow desktop lighting", "Idle glow + desktop feedback"};
         text(cv, notes[_data.ledMode], 16, 171, fg, ux::Latin14);
     }

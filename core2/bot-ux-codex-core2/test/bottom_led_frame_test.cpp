@@ -63,6 +63,11 @@ static void aliveAndReducedMotion()
     bottomled::frame(lighting, events, 1000, false, false, 0, 2, true, first);
     assert(first[0].r > 0 && first[0].g > 0 && first[0].b > 0);
     assert(first[0].r < 40 && first[0].b < 40); // quiet neutral presence
+    bottomled::frame(lighting, events, 3700, false, false, 0, 2, true, later);
+    assert(!equal(first, later));
+    bottomled::frame(lighting, events, 1000, true, false, 0, 2, true, first);
+    bottomled::frame(lighting, events, 3700, true, false, 0, 2, true, later);
+    assert(equal(first, later));
 }
 
 static void transientFeedbackEnds()
@@ -95,6 +100,50 @@ static void transientFeedbackEnds()
     assert(!equal(feedback, baseline)); // duration remains valid across wrap
 }
 
+static void controlFeedbackPreservesHostHue()
+{
+    LightingState lighting = sample();
+    bottomled::Events events, empty;
+    events.hasControl = true;
+    events.controlAt = 1000;
+    events.controlColor = 0xF59E32;
+    bottomled::Color feedback[10], baseline[10];
+    bottomled::frame(lighting, events, 1450, false, true, 0, 2, true, feedback);
+    bottomled::frame(lighting, empty, 1450, false, true, 0, 2, true, baseline);
+    assert(!equal(feedback, baseline));
+    for (uint8_t i : bottomled::kAgentLed)
+        assert(feedback[i].r > 0 && feedback[i].g == 0 && feedback[i].b == 0);
+    for (uint8_t i = 3; i <= 6; ++i)
+        assert(feedback[i].g > 0 && feedback[i].r == 0 && feedback[i].b == 0);
+
+    lighting.ambient = LightingZone{};
+    bottomled::frame(lighting, events, 1450, false, true, 0, 2, true, feedback);
+    assert(feedback[4].r > feedback[4].g && feedback[4].g > feedback[4].b);
+    bottomled::frame(lighting, events, 2000, false, true, 0, 2, true, feedback);
+    bottomled::frame(lighting, empty, 2000, false, true, 0, 2, true, baseline);
+    assert(equal(feedback, baseline));
+    bottomled::frame(lighting, events, 1450, false, true, 0, 1, true, feedback);
+    bottomled::frame(lighting, empty, 1450, false, true, 0, 1, true, baseline);
+    assert(equal(feedback, baseline));
+}
+
+static void heldControlIsKnownAndReducedMotionIsStatic()
+{
+    LightingState lighting = sample();
+    lighting.ambient = LightingZone{};
+    bottomled::Events held;
+    held.controlHeld = true;
+    held.holdColor = 0xF59E32;
+    bottomled::Color first[10], later[10];
+    bottomled::frame(lighting, held, 1000, false, true, 0, 2, true, first);
+    bottomled::frame(lighting, held, 1500, false, true, 0, 2, true, later);
+    assert(!equal(first, later));
+    assert(first[3].r > first[3].g && first[3].g > first[3].b);
+    bottomled::frame(lighting, held, 1000, true, true, 0, 2, true, first);
+    bottomled::frame(lighting, held, 3700, true, true, 0, 2, true, later);
+    assert(equal(first, later));
+}
+
 static void boundedFrameChanges()
 {
     LightingState lighting = sample();
@@ -121,5 +170,7 @@ int main()
     offAndHost();
     aliveAndReducedMotion();
     transientFeedbackEnds();
+    controlFeedbackPreservesHostHue();
+    heldControlIsKnownAndReducedMotionIsStatic();
     boundedFrameChanges();
 }

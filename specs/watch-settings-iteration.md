@@ -36,3 +36,21 @@ second hold and full mood-set host checks, the full host runner, a clean Watch b
 and native captures of Settings, Bot Personality, pressed Done, Motion before/after
 scroll, and the final Combinations row. Upload and injected-contact evidence must
 identify the explicit Watch serial port.
+
+## Validation result
+
+The complete host runner passed with 21 reported products, including the new
+companion mood/presentation and Watch control geometry checks. The final Watch
+build used 37,736 B RAM and 726,149 B flash. Its 726,512 B image was uploaded and
+hash-verified on `/dev/cu.usbmodem214201` from commit `a926d87`.
+
+Native RGB565 captures under `tmp/watch-settings-native/` show four unselected
+left/right rows in Settings and Bot Personality, the exact pressed Done pill,
+Motion at offsets 0 and 120, and Combinations at its maximum offset 60. Injected
+contact stayed on Face at 2.15 seconds and entered Bot Personality after 3.15
+seconds. Working and Speaking each changed to the temporary Idle/Auto/Auto gaze
+presentation, then restored their original mood after 2.2 seconds; Asleep rendered
+as mood 12. The session finished by hardware-resetting volatile diagnostic state;
+the final readback was Face, automatic mode, Idle, with the original persisted
+Chinese language and other settings intact. These captures and injected contacts
+exercise firmware paths but do not claim physical touch-panel acceptance.

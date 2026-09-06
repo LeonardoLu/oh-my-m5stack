@@ -24,8 +24,9 @@ constexpr ux::Rect nameKeyboardBounds() { return {78,126,310,214}; }
 constexpr ux::Rect useThemeBounds() { return {163,207,140,32}; }
 constexpr ux::Rect colorPadBounds() { return {66,242,260,96}; }
 constexpr ux::Rect hueBarBounds() { return {344,242,56,96}; }
+constexpr uint8_t displayRowCount() { return 5; }
 constexpr int16_t displayRowCenter(uint8_t index) {
-    return index==0?130:index==1?194:index==2?258:322;
+    return (int16_t)(100+index*58);
 }
 constexpr ux::Rect displayRowBounds(uint8_t index) {
     return {58,(int16_t)(displayRowCenter(index)-22),350,44};
@@ -131,7 +132,7 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
     } else if (editor==Editor::Expression) {
         match(First,{48,126,76,96},38); match(First+1,{342,126,76,96},38); match(First+2,{144,62,178,178},89);
     } else if (editor==Editor::Display) {
-        for(uint8_t i=0;i<4;++i) match(First+i,displayRowBounds(i),17);
+        for(uint8_t i=0;i<displayRowCount();++i) match(First+i,displayRowBounds(i),17);
     }
     return result;
 }

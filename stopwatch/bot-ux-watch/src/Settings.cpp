@@ -48,6 +48,7 @@ void Settings::begin() {
     _data.hour24      = prefs.getBool("hour24", _data.hour24);
     _data.showSeconds = prefs.getBool("seconds", _data.showSeconds);
     _data.sound       = prefs.getBool("sound", _data.sound);
+    _data.buttonFeedback = prefs.getBool("buttonFx", _data.buttonFeedback);
     _data.theme       = prefs.getUChar("theme", _data.theme);
     _data.appearance  = prefs.getUChar("look", _data.appearance);
     _data.expression  = prefs.getUChar("expr", _data.expression);
@@ -90,6 +91,7 @@ void Settings::save() {
     prefs.putBool("seconds", _data.showSeconds);
     prefs.putBool("sound", _data.sound);
     prefs.putBool("indicator", _data.indicator);
+    prefs.putBool("buttonFx", _data.buttonFeedback);
     prefs.putUChar("theme", _data.theme);
     prefs.putUChar("look", _data.appearance);
     prefs.putUChar("expr", _data.expression);

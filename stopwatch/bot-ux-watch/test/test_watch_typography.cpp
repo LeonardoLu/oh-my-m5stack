@@ -99,6 +99,8 @@ int main(int argc,char** argv) {
     assertPair("COMBINATIONS","960",Latin24);
     assertPair("DIRECTION","Down-right",Latin24);
     assertPair("BRIGHTNESS","5 / 5",Latin24);
+    assertPair("BUTTON FX","OFF",Latin24);
+    assertPair("按下效果","关闭",Cjk24);
     assertPair("伙伴描述","显示",Cjk24);
     assertPair("方向","右下",Cjk24);
     assertPair("表情","怀疑",Cjk24);

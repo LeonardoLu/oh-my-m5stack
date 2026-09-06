@@ -42,16 +42,16 @@ inline bool displayContains(int x, int y) {
     return dx*dx+dy*dy<=(int32_t)displayRadius()*displayRadius();
 }
 
-constexpr int16_t batteryToothShoulderY() { return 21; }
-constexpr int16_t batteryToothBodyLeft() { return 137; }
-constexpr int16_t batteryToothBodyRight() { return 329; }
-constexpr int16_t batteryToothRoundStartY() { return 63; }
-constexpr int16_t batteryToothBottomY() { return 83; }
-constexpr int16_t batteryToothCornerRadius() { return 20; }
-constexpr int16_t batteryPercentX() { return 159; }
-constexpr int16_t batteryPercentY() { return 25; }
-constexpr int16_t batteryGaugeX() { return 245; }
-constexpr int16_t batteryGaugeY() { return 28; }
+constexpr int16_t batteryToothShoulderY() { return 14; }
+constexpr int16_t batteryToothBodyLeft() { return 154; }
+constexpr int16_t batteryToothBodyRight() { return 312; }
+constexpr int16_t batteryToothRoundStartY() { return 53; }
+constexpr int16_t batteryToothBottomY() { return 71; }
+constexpr int16_t batteryToothCornerRadius() { return 18; }
+constexpr int16_t batteryPercentX() { return 165; }
+constexpr int16_t batteryPercentY() { return 18; }
+constexpr int16_t batteryGaugeX() { return 232; }
+constexpr int16_t batteryGaugeY() { return 21; }
 
 inline RowSpan intersect(RowSpan a, RowSpan b) {
     int16_t left=a.x>b.x?a.x:b.x;

@@ -21,10 +21,12 @@ color and editor layouts do not move for this smaller footer.
 ## Battery tooth
 
 The top swipe panel is a front-tooth silhouette within the existing 466x90 HUD. At
-full reveal it follows the display's top arc through `y=21`, continues as a
-193 px body from `x=137..329`, and rounds both lower corners to a flat final row
-`x=157..309` at `y=83`. A cubic slide moves the complete shape from offset -84 to
+full reveal it follows the display's top arc through `y=14`, continues as a
+159 px body from `x=154..312`, and rounds both lower corners to a flat final row
+`x=172..294` at `y=71`. A cubic slide moves the complete shape from offset -72 to
 zero. Every scanline intersects the local tooth with the physical display circle.
+Compared with the first tooth iteration, the body is 34 px narrower and the panel
+is 12 px shorter.
 
 The container itself communicates charge level with fixed colors independent of
 the selected theme:
@@ -35,8 +37,9 @@ the selected theme:
 
 Percentage text, gauge and outline use fixed dark `#101820`, so they remain legible
 on each level color. Charging retains the measured level fill and adds a separate
-dark breathing bolt. Percentage and gauge remain in the straight body at `(159,25)`
-and `(245,28)`. After text and antialiased primitives render, a final scanline mask
+dark breathing bolt. Percentage and gauge remain in the straight body at `(165,18)`
+and `(232,21)`. Even `100%` leaves six pixels before the gauge, and the charging
+bolt ends 17 px before the right edge. After text and antialiased primitives render, a final scanline mask
 restores the face background outside the current animated tooth; intermediate slide
 frames therefore cannot leak glyph or bolt pixels into the uncovered HUD.
 
@@ -55,9 +58,10 @@ animation progress samples. It covers symmetry, the complete rounded bottom row,
 content bounds, battery thresholds and monotonic gauge fill.
 
 Both focused C++11 builds pass with `-Wall -Wextra -Werror`. The host RGB565 sample
-at `tmp/watch-edge-ui/battery-tooth-native.png` renders 72 percent, charging 24
-percent and 8 percent with the native Latin24 font and shared antialiased shape
-primitives. It is a host raster for visual review, not a panel photograph or proof
+at `tmp/watch-edge-ui/battery-tooth-compact-full.png` shows the compact tooth on
+three full 466 px faces at charging 100 percent, 24 percent and 8 percent with the
+native Latin24 font and shared antialiased shape primitives. It is a host raster
+for visual review, not a panel photograph or proof
 of touch behavior. Final firmware and hardware evidence must be added after Watch
 integration and upload.
 
@@ -97,6 +101,13 @@ underlying content returns without residual pixels on release. Serial-only `keys
 and battery percentage
 overrides support framebuffer geometry captures. These overrides do not prove the
 physical button signals and must be disabled after capture.
+
+Display & Sound has a fifth `BUTTON FX` / `按下效果` row. Its persisted
+`buttonFx` preference defaults on. Turning it off suppresses and clears the
+colored liquid overlays immediately; A, B and power gestures continue through
+their existing input paths. The five shared visible/hit rows use centers
+`100,158,216,274,332`, end at `y=354`, and remain separate from the Done footer
+beginning at `y=406`.
 
 `test_watch_button_feedback.cpp` covers held/released transitions, independent
 expansion clocks, simultaneous buttons and invalid power samples. The clean

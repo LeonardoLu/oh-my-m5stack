@@ -19,7 +19,7 @@ static const Entry entries[] = {
     {"SHAPE","形状"},{"EYES","眼睛"},{"Tap arrows; tap the bot to react","轻点箭头切换，轻点伙伴互动"},
     {"MOTION","动态效果"},{"WRIST","手腕感应"},{"ON","开启"},{"OFF","关闭"},
     {"BOT COLOR","伙伴颜色"},{"USE THEME","使用主题"},{"DISPLAY & SOUND","显示与声音"},
-    {"BRIGHTNESS","亮度"},{"SOUND","声音"},{"INDICATOR","指示灯"},{"BOT NAME","伙伴名字"},
+    {"BRIGHTNESS","亮度"},{"SOUND","声音"},{"INDICATOR","指示灯"},{"BUTTON FX","按下效果"},{"BOT NAME","伙伴名字"},
     {"English","英语"},{"WATCH LAYOUT","表盘布局"},{"BOT TEXT","伙伴描述"},
     {"SHOW","显示"},{"HIDE","隐藏"},{"TOP","顶部"},{"STATE","状态"},{"FACE","表情"},{"DIRECTION","方向"},
     {"Night","夜色"},{"Dusk","暮色"},{"Mono","单色"},{"Orb","圆球"},{"Bean","豆形"},{"Pebble","卵石"},

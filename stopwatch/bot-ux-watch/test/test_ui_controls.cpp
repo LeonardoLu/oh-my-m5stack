@@ -74,12 +74,13 @@ int main() {
     assert(colorPadBounds().y+colorPadBounds().h==338);
     assert(hueBarBounds().y+hueBarBounds().h==338);
     assert(at(Screen::Editor,Editor::Color,0,160,338).id==None);
-    for(uint8_t i=0;i<4;++i) {
+    assert(displayRowCount()==5);
+    for(uint8_t i=0;i<displayRowCount();++i) {
         auto row=displayRowBounds(i);
-        assert(row.y+row.h<=344);
+        assert(row.y>=76&&row.y+row.h<=354);
         assert(at(Screen::Editor,Editor::Display,0,233,displayRowCenter(i)).id==First+i);
     }
-    assert(at(Screen::Editor,Editor::Display,0,233,345).id==None);
+    assert(at(Screen::Editor,Editor::Display,0,233,355).id==None);
     // Buttons accept up-inside through 1 s; page cancellation consumes the release.
     ux::PointerSession p; auto t=at(Screen::Editor,Editor::Format,0,doneLabelX(),doneLabelY());
     p.begin(t.id,t.bounds,doneLabelX(),doneLabelY(),100,false); p.move(250,409);

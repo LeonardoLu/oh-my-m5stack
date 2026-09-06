@@ -26,6 +26,7 @@ public:
         bool    showSeconds = false;
         bool    sound       = true;
         bool    indicator   = false;
+        bool    buttonFeedback = true;
         uint8_t theme       = THEME_NIGHT;
         uint8_t appearance  = 0;
         uint8_t expression  = 0;

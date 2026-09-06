@@ -8,4 +8,5 @@ int main() {
     }
     assert(!strcmp(watchstrings::translate("Milo",true),"Milo"));
     assert(!strcmp(watchstrings::translate("Working",true),"工作"));
+    assert(!strcmp(watchstrings::translate("BUTTON FX",true),"按下效果"));
 }

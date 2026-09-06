@@ -1200,7 +1200,11 @@ static void changeEditorValue(int8_t delta) {
             settings.data().theme = (uint8_t)((settings.data().theme + Settings::THEME_COUNT + delta) % Settings::THEME_COUNT);
         } else if(_editField==2) {
             settings.data().sound = !settings.data().sound;
-        } else { settings.data().indicator=!settings.data().indicator; }
+        } else if(_editField==3) {
+            settings.data().indicator=!settings.data().indicator;
+        } else {
+            settings.data().buttonFeedback=!settings.data().buttonFeedback;
+        }
         applySettings();
     }
     clickSound();
@@ -1855,6 +1859,7 @@ static void drawDisplayEditor() {
     drawArrowRow(watchcontrols::displayRowBounds(1),"THEME",Settings::themeName(settings.data().theme),_buttonNavigation&&_editField==1);
     drawArrowRow(watchcontrols::displayRowBounds(2),"SOUND",settings.data().sound?"ON":"OFF",_buttonNavigation&&_editField==2);
     drawArrowRow(watchcontrols::displayRowBounds(3),"INDICATOR",settings.data().indicator?"ON":"OFF",_buttonNavigation&&_editField==3);
+    drawArrowRow(watchcontrols::displayRowBounds(4),"BUTTON FX",settings.data().buttonFeedback?"ON":"OFF",_buttonNavigation&&_editField==4);
     drawFooter();
 }
 
@@ -2274,9 +2279,9 @@ static void selectDiagnosticPage(uint8_t page) {
 
 static uint32_t _diagnosticSeq=0;
 static void printUiState() {
-    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u status=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u keys_held=%u pwr_valid=%u pwr_held=%u keys_diag=%u\n",
+    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u button_fx=%u status=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u keys_held=%u pwr_valid=%u pwr_held=%u keys_diag=%u\n",
         (unsigned long)_diagnosticSeq,(unsigned)_screen,(unsigned)_editor,exactPressedTarget(),_pointer.scrolling(),
-        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,_statusPanelUntilMs!=0,
+        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,settings.data().buttonFeedback,_statusPanelUntilMs!=0,
         _manualPreset,(unsigned)face.bot().mood(),(unsigned)face.bot().effectiveMood(),(unsigned)face.bot().expression(),(unsigned)face.bot().effectiveExpression(),(unsigned)face.bot().animation(),
         (unsigned)_buttonFeedback.held(),_powerButtonValid,_powerButtonPressed,_diagnosticButtons);
     // Drain this diagnostic reply now, rather than waiting for later telemetry.

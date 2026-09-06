@@ -150,8 +150,9 @@ The retained tail has four Settings contacts: `(275,424)` ended `no_target`;
 `(232,440)` ended `no_target`; and `(230,416)` was accepted and immediately changed
 Settings to Face. These are post-conversion coordinates; that trace version did not
 retain the same-read sensor coordinates, so none are inferred after the fact. The
-trial confirms that the deterministic stale-scale bug was fixed and that physical
-acceptance still needs device-specific mapping evidence.
+runtime `cal map` confirms that the deterministic stale-scale bug was fixed; this
+physical trial shows that Done acceptance remains intermittent and needs
+device-specific mapping evidence.
 
 The factory CST820 driver provides no additional offset, scale or rotation constants:
 it decodes the 12-bit register coordinates and passes them directly to LVGL. The
@@ -163,6 +164,12 @@ high-2 ms reset sequence satisfies the CST820B table's
 startup delay exceeds the 100 ms reset-to-operation requirement.
 These checks do not yield a further physical touch affine, so a remaining per-device
 transform cannot be justified as a universal constant.
+The source references are the factory
+[`hal_display.cpp`](https://github.com/m5stack/M5StopWatch-UserDemo/blob/6b4aa125288b6fe9dca661f10159f6e1e5ee785c/main/hal/hal_display.cpp),
+factory
+[`cst820.cpp`](https://github.com/m5stack/M5StopWatch-UserDemo/blob/6b4aa125288b6fe9dca661f10159f6e1e5ee785c/main/hal/drivers/cst820/cst820.cpp),
+and the official
+[`CST820B` datasheet](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1242/CST820B_datasheet.pdf).
 
 The trace recorder now keeps contact samples separately from a 128-entry critical
 Down/End/Screen ring. Idle acquisitions update counters without consuming either

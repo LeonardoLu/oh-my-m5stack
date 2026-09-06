@@ -437,7 +437,8 @@ static bool loadTouchAffine() {
     Preferences preferences;
     if(preferences.begin("watch-touch",true)) {
         TouchAffineBlob blob{};
-        bool complete=preferences.getBytesLength("affine")==sizeof(blob)
+        bool complete=preferences.isKey("affine")
+            &&preferences.getBytesLength("affine")==sizeof(blob)
             &&preferences.getBytes("affine",&blob,sizeof(blob))==sizeof(blob);
         preferences.end();
         if(complete&&blob.magic==kTouchAffineMagic&&blob.version==kTouchAffineVersion

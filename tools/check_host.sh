@@ -5,13 +5,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 OUT="$ROOT/tmp/host-checks"
 mkdir -p "$OUT"
-for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls test_ui_controls test_touch_contact test_watch_strings; do
+for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls test_companion_presets test_ui_controls test_touch_contact test_watch_strings; do
   c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
     "stopwatch/bot-ux-watch/test/$name.cpp" -o "$OUT/$name"
   "$OUT/$name"
   echo "PASS $name"
 done
-for name in hid_framing analog_input battery_double_tap agent_signal bottom_led_frame feedback_level; do
+for name in hid_framing analog_input battery_double_tap agent_signal bottom_led_frame feedback_level fresh_reply_attention; do
   case "$name" in
     hid_framing) source=core2/bot-ux-codex-core2/src/HidFraming.cpp ;;
     analog_input) source=core2/bot-ux-codex-core2/src/AnalogInput.cpp ;;

@@ -4,6 +4,7 @@
 #include <BotUx.h>
 
 #include "CalendarMath.h"
+#include "CompanionPresets.h"
 #include "InputSemantics.h"
 #include "TouchContact.h"
 #include "Power.h"
@@ -35,7 +36,6 @@ constexpr int16_t kBotY = 90;
 constexpr int16_t kPreviewSize = 178;
 constexpr int16_t kPreviewX = (kW - kPreviewSize) / 2;
 constexpr int16_t kPreviewY = 62;
-constexpr int16_t kMenuY = 105;
 constexpr int16_t kMenuStep = 72;
 constexpr uint8_t kVisibleRows = 4;
 constexpr uint8_t kMenuCount=(uint8_t)MenuItem::Done;
@@ -84,6 +84,7 @@ watchinteraction::SingleDoubleClick _bClick;
 ux::PointerSession _pointer;
 ux::Rect _clickRect{0,0,0,0};
 uint32_t _clickUntil=0;
+int _capturedTarget=watchcontrols::None;
 bool _soundReady=false;
 ux::sound::Synth _sounds;
 ux::sound::M5Output<m5::Speaker_Class> _soundOutput;
@@ -93,11 +94,13 @@ watchinteraction::SettingsChord _settingsChord;
 watchinteraction::ScrollList _settingsList;
 watchinteraction::ScrollList _personalList;
 ux::ScrollModel _settingsScroll, _personalScroll;
+ux::ScrollModel _editorScroll;
 ux::NameEditor _nameEditor;
 uint32_t _scrollMs = 0;
 uint8_t _previewMood = 0, _previewExpression = 0, _previewAnimation = 0;
 bool _manualPreset = false;
 botux::BotUx::Preset _manualCombo{botux::BotUx::Mood::Idle, botux::BotUx::Expression::Auto, botux::BotUx::Animation::Auto};
+watchcompanion::MoodDeck _moodDeck(botux::BotUx::moodCount());
 uint32_t _gazeUntil = 0;
 bool _originalManualPreset = false;
 botux::BotUx::Preset _originalManualCombo = _manualCombo;
@@ -123,6 +126,7 @@ botux::BotUx::Mood _ambientMood = botux::BotUx::Mood::Idle;
 botux::BotUx::Mood _drawMood = (botux::BotUx::Mood)0xFF;
 uint8_t _colorDrag = 0;
 bool _gestureActive = false;
+bool _buttonNavigation = false;
 
 uint8_t _editHour = 0;
 uint8_t _editMinute = 0;
@@ -150,6 +154,31 @@ static bool tapHit(int16_t left, int16_t top, int16_t width, int16_t height) {
         && hit(_touch.startX(), _touch.startY(), left, top, width, height);
 }
 
+static bool actualBotContains(int16_t x,int16_t y) {
+    const auto& metrics=face.bot().metrics();
+    if(metrics.bodyR<=0) return false;
+    int32_t dx=x-(kBotX+metrics.cx),dy=y-(kBotY+metrics.cy);
+    return dx*dx+dy*dy<=(int32_t)metrics.bodyR*metrics.bodyR;
+}
+
+static void directFaceGaze(int16_t x,int16_t y,uint32_t now) {
+    const auto& metrics=face.bot().metrics();
+    float gx=0.0f,gy=0.0f;
+    if(!actualBotContains(x,y)) {
+        float dx=(float)(x-(kBotX+metrics.cx));
+        float dy=(float)(y-(kBotY+metrics.cy));
+        float length=sqrtf(dx*dx+dy*dy);
+        if(length>0.0f) { gx=dx/length; gy=dy/length; }
+    }
+    _gazeUntil=now+2200;
+    face.bot().setMood(botux::BotUx::Mood::Idle);
+    face.bot().setExpression(botux::BotUx::Expression::Auto,180);
+    face.bot().setAnimation(botux::BotUx::Animation::Auto);
+    face.bot().setTalking(false);
+    _drawMood=botux::BotUx::Mood::Idle;
+    face.bot().gazeAt(gx,gy,2200);
+}
+
 static void markListMoved() {
     if (!_uiDirty) _listBandOnly = true;
     _uiDirty = true;
@@ -166,8 +195,8 @@ static void confirmSound() { _sounds.play(ux::sound::Cue::Confirm); }
 static void pokeSound()    { _sounds.play(ux::sound::Cue::Poke); }
 
 static void resetUiPointer() {
-    _faceTracking=false; _pointer.cancel(); _clickUntil=0; _settingsScroll.cancel(); _personalScroll.cancel();
-    _namePressedKey = -1; _colorDrag = 0;
+    _faceTracking=false; _pointer.cancel(); _clickUntil=0; _settingsScroll.cancel(); _personalScroll.cancel(); _editorScroll.cancel();
+    _capturedTarget=watchcontrols::None; _namePressedKey = -1; _colorDrag = 0;
 }
 
 static void consumeWakeInput() {
@@ -272,12 +301,23 @@ static float statusPanelProgress(uint32_t now) {
 
 static botux::BotUx::Mood faceMood(uint32_t now) {
     if (_dozing) return botux::BotUx::Mood::Sleepy;
+    if (_screen != Screen::Face) return botux::BotUx::Mood::Listening;
+    if ((int32_t)(_gazeUntil - now) > 0) return botux::BotUx::Mood::Idle;
+    if (_manualPreset) return _manualCombo.mood;
     if (_happyAcknowledgment.active(now)) return botux::BotUx::Mood::Happy;
     if (_battery <= kLowBattery) return botux::BotUx::Mood::Sleepy;
-    if (_screen != Screen::Face) return botux::BotUx::Mood::Listening;
-    if (_manualPreset) return _manualCombo.mood;
-    if ((int32_t)(_gazeUntil - now) > 0) return botux::BotUx::Mood::Idle;
     return settings.data().expression == 0 ? _ambientMood : botux::BotUx::Mood::Idle;
+}
+
+static void showManualMood(botux::BotUx::Mood mood) {
+    _gazeUntil=0; face.bot().clearGaze();
+    _manualPreset=true;
+    _manualCombo={mood,botux::BotUx::Expression::Auto,botux::BotUx::Animation::Auto};
+    face.bot().setExpression(botux::BotUx::Expression::Auto,300);
+    face.bot().setAnimation(botux::BotUx::Animation::Auto);
+    face.bot().setTalking(mood==botux::BotUx::Mood::Speaking);
+    _drawMood=(botux::BotUx::Mood)0xFF;
+    face.invalidate(); clickSound();
 }
 
 static void enterSettings() {
@@ -290,6 +330,7 @@ static void enterSettings() {
     _settingsList.select(0);
     _settingsScroll.setBounds(kMenuCount * kMenuStep, 288);
     _settingsScroll.setOffset(0);
+    _buttonNavigation=false;
     _uiDirty = true;
     confirmSound();
 }
@@ -339,6 +380,11 @@ static void enterEditor(Editor editor, Screen parent = Screen::Settings) {
     _originalManualPreset = _manualPreset; _originalManualCombo = _manualCombo;
     _editorParent = parent;
     _editField = 0;
+    if(watchcontrols::editorUsesPreviewList(editor)) {
+        auto layout=watchcontrols::previewList();
+        _editorScroll.setBounds(watchcontrols::editorRowCount(editor)*layout.step,layout.h);
+        _editorScroll.setOffset(0);
+    } else _editorScroll.setBounds(0,0);
     _uiDirty = true;
     auto dt = M5.Rtc.getDateTime();
     _editHour = (uint8_t)dt.time.hours;
@@ -413,6 +459,7 @@ static void startDoze() {
 
 static void cycleExpression(int8_t delta, bool persist = false) {
     _manualPreset = false;
+    face.bot().setTalking(false);
     settings.data().expression = (uint8_t)((settings.data().expression
         + Settings::EXPRESSION_COUNT + delta) % Settings::EXPRESSION_COUNT);
     auto expression = (botux::BotUx::Expression)settings.data().expression;
@@ -565,15 +612,11 @@ static void handleFaceInput(Gesture gesture) {
         }
         const int clockY=settings.data().swapLayout?20:376;
         if(_clockDoubleTap.tap(tapHit(90,clockY,286,70),millis())) { enterSettings(); return; }
-        if (!_manualPreset || _manualCombo.mood == botux::BotUx::Mood::Idle) {
-            _gazeUntil = millis() + 2200;
-            face.bot().setMood(botux::BotUx::Mood::Idle);
-            _drawMood = botux::BotUx::Mood::Idle;
-            face.bot().gazeAt((_tapX - 233) / 143.0f, (_tapY - 233) / 143.0f,2200);
-        }
+        directFaceGaze(_tapX,_tapY,millis());
     } else if (gesture == Gesture::Long) {
         _clockDoubleTap.reset();
-        if (tapHit(kBotX, kBotY, kBotSize, kBotSize)) enterPersonalize(Screen::Face);
+        if (actualBotContains(_touch.startX(),_touch.startY())&&actualBotContains(_tapX,_tapY))
+            enterPersonalize(Screen::Face);
     } else if (gesture != Gesture::None) {
         _clockDoubleTap.reset();
         if (gesture == Gesture::SwipeDown && _touch.startY() <= 20)
@@ -598,11 +641,7 @@ static void updateColorPicker(int16_t x, int16_t y) {
 static void activateUiControl(int target) {
     using namespace watchcontrols;
     if(_screen==Screen::Settings || _screen==Screen::Personalize) {
-        if(target==Done) { leaveSettings(); return; }
-        if(target==Back) {
-            if(_screen==Screen::Personalize) leavePersonalize(); else leaveSettings();
-            return;
-        }
+        if(target==Done) { if(_screen==Screen::Personalize) leavePersonalize(); else leaveSettings(); return; }
     }
     if (_screen == Screen::Settings && target >= MenuRow) {
         _settingsList.select(target-MenuRow); _menu=(MenuItem)_settingsList.selected(); selectMenuItem(); return;
@@ -611,7 +650,6 @@ static void activateUiControl(int target) {
         _personalList.select(target-PersonalRow); _personal=(PersonalItem)_personalList.selected(); selectPersonalItem(); return;
     }
     if (_screen != Screen::Editor) return;
-    if (target == Back) { cancelEditor(); _sounds.play(ux::sound::Cue::Back); return; }
     if (target == Done) { saveEditor(); return; }
     int field=target-First;
     if (_editor == Editor::Name && target >= NameKey && target < NameKey+30) {
@@ -638,16 +676,29 @@ static void activateUiControl(int target) {
     }
 }
 
+static int exactPressedTarget() {
+    if(!_pointer.pressed()) return watchcontrols::None;
+    float offset=_screen==Screen::Settings?_settingsScroll.offset():
+        _screen==Screen::Personalize?_personalScroll.offset():
+        _screen==Screen::Editor&&watchcontrols::editorUsesPreviewList(_editor)?_editorScroll.offset():0;
+    auto target=watchcontrols::at(_screen,_editor,offset,_pointer.x(),_pointer.y());
+    return target.id==_capturedTarget?target.id:watchcontrols::None;
+}
+
 // Hardware and diagnostic input share this path; one session owns each gesture.
 static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_t now) {
     if (_screen==Screen::Face) return;
     ux::ScrollModel* scroll=_screen==Screen::Settings?&_settingsScroll:
-        _screen==Screen::Personalize?&_personalScroll:nullptr;
-    int oldPressed=_pointer.pressedTarget();
+        _screen==Screen::Personalize?&_personalScroll:
+        _screen==Screen::Editor&&watchcontrols::editorUsesPreviewList(_editor)?&_editorScroll:nullptr;
+    const auto scrollLayout=_screen==Screen::Editor?watchcontrols::previewList():watchcontrols::mainList();
+    int oldPressed=exactPressedTarget();
     if(down) {
+        _buttonNavigation=false; _uiDirty=true; _listBandOnly=false;
         if(scroll) scroll->cancel(); // Stop inertia before capturing the visible row.
         auto target=watchcontrols::at(_screen,_editor,scroll?scroll->offset():0,x,y);
-        _pointer.begin(target.id,target.bounds,x,y,now,scroll && y>=76 && y<364);
+        _capturedTarget=target.id;
+        _pointer.begin(target.id,target.bounds,x,y,now,scroll&&y>=scrollLayout.y&&y<scrollLayout.y+scrollLayout.h);
         _colorDrag=target.id==watchcontrols::ColorPad?1:target.id==watchcontrols::HueBar?2:0;
     }
     if(_pointer.active() && (held||up)) {
@@ -663,14 +714,17 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
     if(up && _pointer.active()) {
         bool dragged=_pointer.scrolling();
         auto releasedBounds=_pointer.bounds();
+        auto releasedTarget=watchcontrols::at(_screen,_editor,scroll?scroll->offset():0,x,y);
+        if(!dragged&&releasedTarget.id!=_capturedTarget) _pointer.cancel();
         int clicked=_pointer.end(x,y,now);
         if(clicked>=0) { _clickRect=releasedBounds; _clickUntil=now+90; }
         if(scroll && dragged) scroll->end(now);
         _colorDrag=0;
+        _capturedTarget=watchcontrols::None;
         _tapX=x; _tapY=y;
         if(clicked>=0 && clicked<watchcontrols::ColorPad) activateUiControl(clicked);
     }
-    int pressed=_pointer.pressedTarget();
+    int pressed=exactPressedTarget();
     _namePressedKey=pressed>=watchcontrols::NameKey&&pressed<watchcontrols::NameKey+30?pressed-watchcontrols::NameKey:-1;
     if(pressed!=oldPressed) { _uiDirty=true; _listBandOnly=false; }
 }
@@ -714,39 +768,34 @@ static void handleInputs(uint32_t now) {
     Gesture gb = _buttonB.poll(M5.BtnB.wasPressed(), M5.BtnB.isPressed(), M5.BtnB.wasReleased(), now);
     Gesture gt = Gesture::None;
     if (_screen == Screen::Face) {
-        if(touch.wasPressed()) _faceTracking=hit(touch.x,touch.y,kBotX,kBotY,kBotSize,kBotSize);
-        if(touch.isPressed() && _faceTracking
-            && (!_manualPreset || _manualCombo.mood==botux::BotUx::Mood::Idle)
-            && now-_gazeTouchMs>=33) {
-            _gazeTouchMs=now; _gazeUntil=now+2200;
-            face.bot().setMood(botux::BotUx::Mood::Idle); _drawMood=botux::BotUx::Mood::Idle;
-            face.bot().gazeAt((touch.x-233)/143.0f,(touch.y-233)/143.0f,2200);
+        if(touch.wasPressed()) _faceTracking=true;
+        if(touch.isPressed()&&_faceTracking&&now-_gazeTouchMs>=33) {
+            _gazeTouchMs=now; directFaceGaze(touch.x,touch.y,now);
         }
         if(touch.wasReleased()) _faceTracking=false;
-        gt = _touch.poll(touch.wasPressed(),touch.isPressed(),touch.wasReleased(),touch.x,touch.y,now);
+        gt = _touch.poll(touch.wasPressed(),touch.isPressed(),touch.wasReleased(),touch.x,touch.y,now,3000);
         if(gt==Gesture::Tap) { _tapX=_touch.tapX(); _tapY=_touch.tapY(); }
         else if(gt!=Gesture::None) { _tapX=touch.x; _tapY=touch.y; }
     } else handleUiPointer(touch.wasPressed(),touch.isPressed(),touch.wasReleased(),touch.x,touch.y,now);
 
     if (_screen == Screen::Face) {
         if (ga == Gesture::Tap) {
-            _manualPreset = true;
-            _manualCombo = botux::BotUx::preset(face.bot().randomPreset());
-            _drawMood = face.bot().mood();
-            face.invalidate(); clickSound();
+            _bClick.cancel();
+            uint8_t current=(uint8_t)(_manualPreset?_manualCombo.mood:face.bot().mood());
+            auto mood=(botux::BotUx::Mood)_moodDeck.random(current);
+            showManualMood(mood);
         }
         if (gb == Gesture::Long) { _bClick.cancel(); startDoze(); }
-        auto click = _bClick.poll(gb == Gesture::Tap, now);
-        if (click == watchinteraction::SingleDoubleClick::Event::Single) {
-            _manualPreset = true;
-            _manualCombo = botux::BotUx::preset(face.bot().nextPreset());
-            _drawMood = face.bot().mood();
-            face.invalidate(); clickSound();
-        } else if (click == watchinteraction::SingleDoubleClick::Event::Double) {
-            _manualPreset = false;
-            settings.data().expression = settings.data().animation = 0;
-            face.bot().resetToIdle();
-            _ambientMood = _drawMood = botux::BotUx::Mood::Idle;
+        auto click=_bClick.poll(gb==Gesture::Tap,now);
+        if(click==watchinteraction::SingleDoubleClick::Event::Single) {
+            uint8_t current=(uint8_t)(_manualPreset?_manualCombo.mood:face.bot().mood());
+            auto mood=(botux::BotUx::Mood)_moodDeck.next(current);
+            showManualMood(mood);
+        } else if(click==watchinteraction::SingleDoubleClick::Event::Double) {
+            _manualPreset=false;
+            settings.data().expression=settings.data().animation=0;
+            face.bot().resetToIdle(); face.bot().setTalking(false);
+            _ambientMood=_drawMood=botux::BotUx::Mood::Idle;
             _ambientCycle.postpone(now);
             face.invalidate(); confirmSound();
         }
@@ -757,9 +806,10 @@ static void handleInputs(uint32_t now) {
     _bClick.cancel();
 
     if (_screen == Screen::Settings) {
-        if (ga == Gesture::Tap) selectMenuItem();
+        if (ga == Gesture::Tap) { _buttonNavigation=true; selectMenuItem(); }
         else if (ga == Gesture::Long) leaveSettings();
         if (gb == Gesture::Tap) {
+            _buttonNavigation=true;
             _settingsList.move(1);
             _menu = (MenuItem)_settingsList.selected();
             revealRow(_settingsScroll, (uint8_t)_menu);
@@ -770,9 +820,10 @@ static void handleInputs(uint32_t now) {
     }
 
     if (_screen == Screen::Personalize) {
-        if (ga == Gesture::Tap) selectPersonalItem();
+        if (ga == Gesture::Tap) { _buttonNavigation=true; selectPersonalItem(); }
         else if (ga == Gesture::Long) leavePersonalize();
         if (gb == Gesture::Tap) {
+            _buttonNavigation=true;
             _personalList.move(1);
             _personal = (PersonalItem)_personalList.selected();
             revealRow(_personalScroll, (uint8_t)_personal);
@@ -781,15 +832,15 @@ static void handleInputs(uint32_t now) {
         return;
     }
 
-    if (ga == Gesture::Tap) changeEditorValue(-1);
+    if (ga == Gesture::Tap) { _buttonNavigation=true; changeEditorValue(-1); }
     else if (ga == Gesture::Long) cancelEditor();
-    if (gb == Gesture::Tap) changeEditorValue(1);
+    if (gb == Gesture::Tap) { _buttonNavigation=true; changeEditorValue(1); }
     else if (gb == Gesture::Long) saveEditor();
 
 }
 
 static bool pointerFeedback(ux::Rect& r) {
-    if(_pointer.pressed()) { r=_pointer.bounds(); return true; }
+    if(exactPressedTarget()!=watchcontrols::None) { r=_pointer.bounds(); return true; }
     if(_clickUntil && (int32_t)(millis()-_clickUntil)<0) { r=_clickRect; return true; }
     return false;
 }
@@ -798,12 +849,7 @@ static bool pressedOver(int x,int y,int w,int h) {
     return hit(r.x+r.w/2,r.y+r.h/2,x,y,w,h);
 }
 static void drawPointerFeedback() {
-    ux::Rect r; if(!pointerFeedback(r)) return;
-    // A two-pixel inset keeps clipped list targets inside the circular viewport.
-    float radius=(r.w<r.h?r.w:r.h)*0.5f-2;
-    if(r.w>300) radius=17;
-    if(r.w<60 && r.h<42) radius=6;
-    ux::strokeRoundRect(canvas,r.x+2,r.y+2,r.w-4,r.h-4,radius,settings.style().accentColor,2);
+    // Each control paints feedback in its own exact hit geometry.
 }
 
 static void drawPill(int16_t x, int16_t y, int16_t w, int16_t h,
@@ -833,19 +879,22 @@ static void drawFooter();
 
 static void drawSettingsList(bool chrome = true) {
     if (chrome) drawTitle("SETTINGS");
-    canvas.setClipRect(50, 76, 366, 288);
+    const auto layout=watchcontrols::mainList();
+    canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
     for (uint8_t i = 0; i < kMenuCount; ++i) {
-        int16_t cy = kMenuY + i * kMenuStep - (int16_t)_settingsScroll.offset();
-        if (cy + 29 < 76 || cy - 29 >= 364) continue;
-        bool selected = i == (uint8_t)_menu;
-        ux::roundRect(canvas, 62, cy - 29, 342, 58, 25, pressedOver(62,cy-29,342,58) ? ux::blend565(settings.panel(),settings.style().accentColor,55) : selected ? settings.panel() : settings.style().bgColor);
-        if (selected) ux::strokeRoundRect(canvas, 62, cy - 29, 342, 58, 25, settings.style().accentColor);
+        auto row=watchcontrols::rowBounds(layout,i,_settingsScroll.offset());
+        int16_t cy=row.y+row.h/2;
+        if(row.y+row.h<=layout.y||row.y>=layout.y+layout.h) continue;
+        bool selected=_buttonNavigation&&i==(uint8_t)_menu;
+        bool pressed=pressedOver(row.x,row.y,row.w,row.h);
+        ux::roundRect(canvas,row.x,row.y,row.w,row.h,layout.radius,pressed?ux::blend565(settings.panel(),settings.style().accentColor,55):selected?settings.panel():settings.style().bgColor);
+        if(selected) ux::strokeRoundRect(canvas,row.x,row.y,row.w,row.h,layout.radius,settings.style().accentColor);
 
-        canvas.setTextDatum(middle_center);
+        canvas.setTextDatum(middle_left);
         canvas.setFont(&fonts::FreeSansBold9pt7b);
         canvas.setTextSize(1.0f);
         canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
-        watchText(canvas, kMenuLabels[i], 233, cy-11);
+        watchText(canvas,kMenuLabels[i],84,cy);
 
         char value[40] = {};
         switch ((MenuItem)i) {
@@ -862,9 +911,9 @@ static void drawSettingsList(bool chrome = true) {
         }
         if (value[0]) {
             canvas.setFont(&fonts::FreeSansBold9pt7b);
-            canvas.setTextDatum(middle_center);
+            canvas.setTextDatum(middle_right);
             canvas.setTextColor(settings.muted());
-            watchText(canvas, value, 233, cy+12);
+            watchText(canvas,value,382,cy);
         }
     }
     canvas.clearClipRect();
@@ -873,17 +922,20 @@ static void drawSettingsList(bool chrome = true) {
 
 static void drawPersonalizeList(bool chrome = true) {
     if (chrome) drawTitle("BOT PERSONALITY");
-    canvas.setClipRect(50, 76, 366, 288);
+    const auto layout=watchcontrols::mainList();
+    canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
     for (uint8_t i = 0; i < kPersonalCount; ++i) {
-        int16_t cy = kMenuY + i * kMenuStep - (int16_t)_personalScroll.offset();
-        if (cy + 29 < 76 || cy - 29 >= 364) continue;
-        bool selected = i == (uint8_t)_personal;
-        ux::roundRect(canvas, 62, cy - 29, 342, 58, 25, pressedOver(62,cy-29,342,58) ? ux::blend565(settings.panel(),settings.style().accentColor,55) : selected ? settings.panel() : settings.style().bgColor);
-        if (selected) ux::strokeRoundRect(canvas, 62, cy - 29, 342, 58, 25, settings.style().accentColor);
+        auto row=watchcontrols::rowBounds(layout,i,_personalScroll.offset());
+        int16_t cy=row.y+row.h/2;
+        if(row.y+row.h<=layout.y||row.y>=layout.y+layout.h) continue;
+        bool selected=_buttonNavigation&&i==(uint8_t)_personal;
+        bool pressed=pressedOver(row.x,row.y,row.w,row.h);
+        ux::roundRect(canvas,row.x,row.y,row.w,row.h,layout.radius,pressed?ux::blend565(settings.panel(),settings.style().accentColor,55):selected?settings.panel():settings.style().bgColor);
+        if(selected) ux::strokeRoundRect(canvas,row.x,row.y,row.w,row.h,layout.radius,settings.style().accentColor);
         canvas.setFont(&fonts::FreeSansBold9pt7b);
-        canvas.setTextDatum(middle_center);
+        canvas.setTextDatum(middle_left);
         canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
-        watchText(canvas, kPersonalLabels[i], 233, cy-11);
+        watchText(canvas,kPersonalLabels[i],84,cy);
         char value[40] = {};
         switch ((PersonalItem)i) {
             case PersonalItem::Expression: snprintf(value, sizeof(value), "%s", Settings::expressionName(settings.data().expression)); break;
@@ -900,9 +952,9 @@ static void drawPersonalizeList(bool chrome = true) {
         }
         if (value[0]) {
             canvas.setFont(&fonts::FreeSansBold9pt7b);
-            canvas.setTextDatum(middle_center);
+            canvas.setTextDatum(middle_right);
             canvas.setTextColor(settings.muted());
-            watchText(canvas, value, 233, cy+12,i!=(uint8_t)PersonalItem::Name);
+            watchText(canvas,value,382,cy,i!=(uint8_t)PersonalItem::Name);
         }
     }
     canvas.clearClipRect();
@@ -910,8 +962,8 @@ static void drawPersonalizeList(bool chrome = true) {
 }
 
 static void drawFooter() {
-    drawPill(84, 376, 138, 46, "BACK", false);
-    drawPill(244, 376, 138, 46, "DONE", true, true);
+    auto bounds=watchcontrols::doneBounds();
+    drawPill(bounds.x,bounds.y,bounds.w,bounds.h,"DONE",false,true);
 }
 
 static void drawStepper(int16_t cx, const char* label, const char* value, bool selected, int16_t width) {
@@ -932,8 +984,8 @@ static void drawTimeEditor() {
     char hour[4], minute[4];
     snprintf(hour, sizeof(hour), "%02u", (unsigned)_editHour);
     snprintf(minute, sizeof(minute), "%02u", (unsigned)_editMinute);
-    drawStepper(157, "HOUR", hour, _editField == 0, 100);
-    drawStepper(309, "MINUTE", minute, _editField == 1, 100);
+    drawStepper(157,"HOUR",hour,_buttonNavigation&&_editField==0,100);
+    drawStepper(309,"MINUTE",minute,_buttonNavigation&&_editField==1,100);
     canvas.setTextDatum(middle_center);
     canvas.setFont(&fonts::FreeSansBold18pt7b);
     canvas.setTextColor(settings.muted());
@@ -946,9 +998,9 @@ static void drawDateEditor() {
     char day[4], year[6];
     snprintf(day, sizeof(day), "%02u", (unsigned)_editDay);
     snprintf(year, sizeof(year), "%d", (int)_editYear);
-    drawStepper(108, "MONTH", kMonths[_editMonth - 1], _editField == 0, 86);
-    drawStepper(233, "DAY", day, _editField == 1, 86);
-    drawStepper(358, "YEAR", year, _editField == 2, 86);
+    drawStepper(108,"MONTH",kMonths[_editMonth-1],_buttonNavigation&&_editField==0,86);
+    drawStepper(233,"DAY",day,_buttonNavigation&&_editField==1,86);
+    drawStepper(358,"YEAR",year,_buttonNavigation&&_editField==2,86);
     drawFooter();
 }
 
@@ -957,7 +1009,7 @@ static void drawFormatEditor() {
     drawPill(78, 128, 146, 76, "12 HOUR", !settings.data().hour24, !settings.data().hour24);
     drawPill(242, 128, 146, 76, "24 HOUR", settings.data().hour24, settings.data().hour24);
     drawPill(100, 242, 266, 58, settings.data().showSeconds ? "SECONDS  ON" : "SECONDS  OFF",
-             _editField == 1, settings.data().showSeconds);
+             _buttonNavigation&&_editField==1, settings.data().showSeconds);
     canvas.setTextDatum(middle_center);
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
@@ -969,21 +1021,32 @@ static void drawFormatEditor() {
 static void drawArrowRow(int16_t cy, const char* label, const char* value, bool selected) {
     if (selected || pressedOver(58,cy-22,350,44)) ux::roundRect(canvas,58,cy-22,350,44,17,
         pressedOver(58,cy-22,350,44)?ux::blend565(settings.panel(),settings.style().accentColor,55):settings.panel());
-    canvas.setTextDatum(middle_center);
+    canvas.setTextDatum(middle_left);
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
-    canvas.setTextColor(settings.muted()); watchText(canvas,label,233,cy-10);
-    canvas.setTextColor(settings.ink()); watchText(canvas,value,233,cy+11);
+    canvas.setTextColor(settings.muted()); watchText(canvas,label,84,cy);
+    canvas.setTextDatum(middle_right);
+    canvas.setTextColor(settings.ink()); watchText(canvas,value,382,cy);
     canvas.setTextColor(settings.style().accentColor);
-    watchText(canvas,"<",80,cy); watchText(canvas,">",388,cy);
+    canvas.setTextDatum(middle_center);
+    watchText(canvas,"<",68,cy); watchText(canvas,">",398,cy);
+}
+
+static void drawPreviewArrowRow(uint8_t index,const char* label,const char* value) {
+    const auto layout=watchcontrols::previewList();
+    auto row=watchcontrols::rowBounds(layout,index,_editorScroll.offset());
+    if(row.y+row.h<=layout.y||row.y>=layout.y+layout.h) return;
+    drawArrowRow(row.y+row.h/2,label,value,_buttonNavigation&&_editField==index);
 }
 
 static void drawAppearanceEditor() {
     drawTitle("APPEARANCE");
     previewBot.draw();
     previewSprite.pushSprite(&canvas, kPreviewX, kPreviewY);
-    drawArrowRow(278, "SHAPE", Settings::appearanceName(settings.data().appearance), _editField == 0);
-    drawArrowRow(340, "EYES", Settings::eyeStyleName(settings.data().eyeStyle), _editField == 1);
+    auto layout=watchcontrols::previewList(); canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
+    drawPreviewArrowRow(0,"SHAPE",Settings::appearanceName(settings.data().appearance));
+    drawPreviewArrowRow(1,"EYES",Settings::eyeStyleName(settings.data().eyeStyle));
+    canvas.clearClipRect();
     drawFooter();
 }
 
@@ -1010,10 +1073,12 @@ static void drawMotionEditor() {
     char amount[8], speed[8];
     snprintf(amount, sizeof(amount), "%u / 5", settings.data().motionAmount);
     snprintf(speed, sizeof(speed), "%u / 5", settings.data().animationSpeed);
-    drawArrowRow(218, "ACTION", Settings::animationName(settings.data().animation), _editField == 0);
-    drawArrowRow(262, "WRIST", settings.data().motion ? "ON" : "OFF", _editField == 1);
-    drawArrowRow(306, "INTENSITY", amount, _editField == 2);
-    drawArrowRow(350, "SPEED", speed, _editField == 3);
+    auto layout=watchcontrols::previewList(); canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
+    drawPreviewArrowRow(0,"ACTION",Settings::animationName(settings.data().animation));
+    drawPreviewArrowRow(1,"WRIST",settings.data().motion?"ON":"OFF");
+    drawPreviewArrowRow(2,"INTENSITY",amount);
+    drawPreviewArrowRow(3,"SPEED",speed);
+    canvas.clearClipRect();
     drawFooter();
 }
 
@@ -1043,10 +1108,10 @@ static void drawDisplayEditor() {
     drawTitle("DISPLAY & SOUND");
     char brightness[8];
     snprintf(brightness, sizeof(brightness), "%u / 5", settings.data().brightness);
-    drawArrowRow(170, "BRIGHTNESS", brightness, _editField == 0);
-    drawArrowRow(230, "THEME", Settings::themeName(settings.data().theme), _editField == 1);
-    drawArrowRow(290, "SOUND", settings.data().sound ? "ON" : "OFF", _editField == 2);
-    drawArrowRow(350,"INDICATOR",settings.data().indicator?"ON":"OFF",_editField==3);
+    drawArrowRow(170,"BRIGHTNESS",brightness,_buttonNavigation&&_editField==0);
+    drawArrowRow(230,"THEME",Settings::themeName(settings.data().theme),_buttonNavigation&&_editField==1);
+    drawArrowRow(290,"SOUND",settings.data().sound?"ON":"OFF",_buttonNavigation&&_editField==2);
+    drawArrowRow(350,"INDICATOR",settings.data().indicator?"ON":"OFF",_buttonNavigation&&_editField==3);
     drawFooter();
 }
 
@@ -1072,8 +1137,8 @@ static void drawLanguageEditor() {
 
 static void drawLayoutEditor() {
     drawTitle("WATCH LAYOUT");
-    drawArrowRow(170, "BOT TEXT", settings.data().showDescription ? "SHOW" : "HIDE", _editField == 0);
-    drawArrowRow(250, "TOP", settings.data().swapLayout ? "TIME" : "BOT TEXT", _editField == 1);
+    drawArrowRow(170,"BOT TEXT",settings.data().showDescription?"SHOW":"HIDE",_buttonNavigation&&_editField==0);
+    drawArrowRow(250,"TOP",settings.data().swapLayout?"TIME":"BOT TEXT",_buttonNavigation&&_editField==1);
     drawFooter();
 }
 
@@ -1081,16 +1146,20 @@ static void drawCombinationEditor() {
     drawTitle("COMBINATIONS");
     previewBot.draw();
     previewSprite.pushSprite(&canvas, kPreviewX, 62);
-    drawArrowRow(250, "STATE", botux::BotUx::moodName((botux::BotUx::Mood)_previewMood), _editField == 0);
-    drawArrowRow(296, "FACE", botux::BotUx::expressionName((botux::BotUx::Expression)_previewExpression), _editField == 1);
-    drawArrowRow(342, "ACTION", botux::BotUx::animationName((botux::BotUx::Animation)_previewAnimation), _editField == 2);
+    auto layout=watchcontrols::previewList(); canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
+    drawPreviewArrowRow(0,"STATE",botux::BotUx::moodName((botux::BotUx::Mood)_previewMood));
+    drawPreviewArrowRow(1,"FACE",botux::BotUx::expressionName((botux::BotUx::Expression)_previewExpression));
+    drawPreviewArrowRow(2,"ACTION",botux::BotUx::animationName((botux::BotUx::Animation)_previewAnimation));
+    canvas.clearClipRect();
     drawFooter();
 }
 
 static void drawGazeEditor() {
     drawTitle("GAZE"); previewBot.draw();
     previewSprite.pushSprite(&canvas,kPreviewX,62);
-    drawArrowRow(250,"DIRECTION",botux::BotUx::gazeDirectionName((botux::BotUx::GazeDirection)settings.data().gaze,settings.data().language?botux::BotUx::Language::Chinese:botux::BotUx::Language::English),true);
+    auto layout=watchcontrols::previewList(); canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
+    drawPreviewArrowRow(0,"DIRECTION",botux::BotUx::gazeDirectionName((botux::BotUx::GazeDirection)settings.data().gaze,settings.data().language?botux::BotUx::Language::Chinese:botux::BotUx::Language::English));
+    canvas.clearClipRect();
     drawFooter();
 }
 
@@ -1159,6 +1228,12 @@ static void render(uint32_t now) {
     if (mood != _drawMood) {
         face.bot().setMood(mood, 700);
         _drawMood = mood;
+    }
+    if(_manualPreset) {
+        bool restored=mood==_manualCombo.mood&&(int32_t)(now-_gazeUntil)>=0;
+        face.bot().setExpression(restored?_manualCombo.expression:botux::BotUx::Expression::Auto);
+        face.bot().setAnimation(restored?_manualCombo.animation:botux::BotUx::Animation::Auto);
+        face.bot().setTalking(restored&&mood==botux::BotUx::Mood::Speaking);
     }
     auto selectedExpression = (botux::BotUx::Expression)settings.data().expression;
     if (!_manualPreset) face.bot().setExpression((_dozing || _battery <= kLowBattery)
@@ -1311,6 +1386,11 @@ static void selectDiagnosticPage(uint8_t page) {
             _previewAnimation = (uint8_t)botux::BotUx::Animation::Wave;
         }
         _editField = 0;
+        if(watchcontrols::editorUsesPreviewList(_editor)) {
+            auto layout=watchcontrols::previewList();
+            _editorScroll.setBounds(watchcontrols::editorRowCount(_editor)*layout.step,layout.h);
+            _editorScroll.setOffset(0);
+        }
     }
     _uiDirty = true;
 }
@@ -1319,7 +1399,7 @@ static uint32_t _diagnosticSeq=0;
 static void printUiState() {
     Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u status=%u\n",
         (unsigned long)_diagnosticSeq,(unsigned)_screen,(unsigned)_editor,_pointer.pressedTarget(),_pointer.scrolling(),
-        _screen==Screen::Personalize?_personalScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,_statusPanelUntilMs!=0);
+        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,_statusPanelUntilMs!=0);
     // Drain this diagnostic reply now, rather than waiting for later telemetry.
     Serial.flush();
 }
@@ -1418,12 +1498,7 @@ void loop() {
     _soundOutput.update();
     if (_screen == Screen::Face && !_manualPreset && !_gestureActive
         && settings.data().expression == 0 && _ambientCycle.update(now)) {
-        static const botux::BotUx::Mood moods[6] = {
-            botux::BotUx::Mood::Idle, botux::BotUx::Mood::Listening,
-            botux::BotUx::Mood::Thinking, botux::BotUx::Mood::Done,
-            botux::BotUx::Mood::Happy, botux::BotUx::Mood::Waiting,
-        };
-        _ambientMood = moods[_ambientCycle.index()];
+        _ambientMood=(botux::BotUx::Mood)watchcompanion::ambientMood(_ambientCycle.index());
     }
     handleSerialCommands();
     if (_diagnosticScroll && _screen == Screen::Settings) {
@@ -1433,6 +1508,8 @@ void loop() {
     uint32_t scrollDt = _scrollMs ? now - _scrollMs : 0; _scrollMs = now;
     if (_screen == Screen::Settings && _settingsScroll.update(scrollDt)) markListMoved();
     if (_screen == Screen::Personalize && _personalScroll.update(scrollDt)) markListMoved();
+    if (_screen == Screen::Editor && watchcontrols::editorUsesPreviewList(_editor)
+        && _editorScroll.update(scrollDt)) markListMoved();
 
     if (_screen != Screen::Face && !_uiDirty && !previewIsAnimated()) {
         delay(2);

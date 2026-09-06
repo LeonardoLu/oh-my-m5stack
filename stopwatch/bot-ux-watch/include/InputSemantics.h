@@ -32,7 +32,7 @@ private:
 class TouchGesture {
 public:
     Gesture poll(bool wasPressed, bool isPressed, bool wasReleased,
-                 int16_t x, int16_t y, uint32_t nowMs) {
+                 int16_t x, int16_t y, uint32_t nowMs, uint32_t longMs=2000) {
         if (wasPressed) {
             _down = true;
             _moved = _longSent = _swipeSent = false;
@@ -57,7 +57,7 @@ public:
                 _swipeSent = true;
                 return dx < 0 ? Gesture::SwipeLeft : Gesture::SwipeRight;
             }
-            if (!_moved && !_longSent && nowMs - _downMs >= kLongMs) {
+            if (!_moved && !_longSent && nowMs - _downMs >= longMs) {
                 _longSent = true;
                 return Gesture::Long;
             }
@@ -88,8 +88,6 @@ public:
     int16_t startY() const { return _y0; }
 
 private:
-    static constexpr uint32_t kLongMs = 2000;
-
     static int32_t magnitude(int16_t value) {
         return value < 0 ? -(int32_t)value : value;
     }

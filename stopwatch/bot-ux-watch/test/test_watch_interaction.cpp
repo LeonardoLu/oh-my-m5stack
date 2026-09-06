@@ -84,7 +84,7 @@ static void testAmbientCycleIsSlowAndCanBePostponed() {
     cycle.begin(1000);
     assert(!cycle.update(28999));
     assert(cycle.update(29000));
-    assert(cycle.index() > 0 && cycle.index() < 6);
+    assert(cycle.index() > 0 && cycle.index() < 7);
     uint32_t next = cycle.nextMs();
     assert(next >= 55000 && next <= 77000);
     cycle.postpone(100000);

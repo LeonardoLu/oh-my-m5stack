@@ -62,10 +62,11 @@ official bot treatment uses dark pill eyes.
 
 ## Input semantics
 
-- Face: A selects a random curated preset; B single advances the preset, B double
-  within 320 ms resets idle. Idle screen taps temporarily redirect gaze. Long Bot
-  opens personalization; A+B held together for 3 seconds opens settings. Chords
-  consume both releases and cancel pending B single clicks. Long B enters dim doze.
+- Face: A selects a random mood from the complete shared set; B advances through
+  every mood, while B double returns to automatic Idle. A face touch inside the actual bot body looks Front; one outside it
+  follows that direction before returning to the selected mood. A stationary
+  three-second hold on the bot opens personalization. A+B held together for three
+  seconds opens settings, and Long B enters dim doze.
 - Hardware touch bypasses the SDK gesture classifier: `M5.Touch.end()` disables its
   polling, then the app samples `M5.Display.getTouch()` every 8 ms and derives one
   press/release edge per physical contact. A stationary face hold becomes Long at
@@ -74,11 +75,15 @@ official bot treatment uses dark pill eyes.
   compact battery panel. Tap the panel to dismiss it; otherwise it closes after six
   seconds. Double-tap the visible time within 420 ms to open settings; panel taps and
   non-tap gestures cancel the pending clock tap.
-- Settings and Bot Personality show a 288 px continuous list viewport. Shared
+- Settings and Bot Personality show four rows in a 288 px continuous list viewport. Shared
   ScrollModel follows finger displacement in pixels and applies bounded inertia;
   draw and hit tests use the same offset, and a drag cannot activate a row. Fixed
-  Back/Done controls sit outside list scrolling on every non-face screen; buttons
-  remain optional shortcuts.
+  One centered Done control sits outside list scrolling on every non-face screen;
+  editors save through it and hardware Long A remains the cancel path. Buttons
+  remain optional shortcuts. Touch feedback clears after release; only hardware
+  button navigation keeps a selected row visible. Rows place labels on the left
+  and current values on the right. Preview editors show up to two rows and scroll
+  additional rows in their 120 px lower viewport.
   `ux::PointerSession` owns each settings sequence: 20 px vertical travel promotes
   list scrolling. Otherwise, release inside the captured original target within
   one second activates it, including after small drift or leaving and re-entering.

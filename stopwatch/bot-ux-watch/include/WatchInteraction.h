@@ -146,8 +146,8 @@ public:
     bool update(uint32_t nowMs) {
         if ((int32_t)(nowMs - _nextMs) < 0) return false;
         _seed = _seed * 1664525u + 1013904223u;
-        uint8_t next = (uint8_t)(_seed % 6);
-        if (next == _index) next = (next + 1) % 6;
+        uint8_t next = (uint8_t)(_seed % 7);
+        if (next == _index) next = (next + 1) % 7;
         _index = next;
         _nextMs = nowMs + 26000 + (_seed % 22000);
         return true;

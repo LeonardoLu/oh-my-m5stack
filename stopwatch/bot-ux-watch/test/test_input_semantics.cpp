@@ -85,7 +85,15 @@ static void testDurationBoundaries() {
     assert(t.poll(false,true,false,200,200,6000)==Gesture::Long);
     assert(t.poll(false,false,true,200,200,6100)==Gesture::None);
 }
+static void testFaceLongUsesThreeSeconds() {
+    TouchGesture t;
+    t.poll(true,true,false,200,200,100,3000);
+    assert(t.poll(false,true,false,200,200,3099,3000)==Gesture::None);
+    assert(t.poll(false,true,false,200,200,3100,3000)==Gesture::Long);
+    assert(t.poll(false,false,true,200,200,3200,3000)==Gesture::None);
+}
 int main() {
+    testFaceLongUsesThreeSeconds();
     testDurationBoundaries();
     testButtonTapAndLongPress();
     testConsumedButtonWake();

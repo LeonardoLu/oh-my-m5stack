@@ -8,67 +8,102 @@ enum class MenuItem : uint8_t { Time, Date, Format, Personalize, Display, Layout
 enum class PersonalItem : uint8_t { Expression, Action, Appearance, Color, Name, Language, Preview, Gaze, Intensity, Speed, Back, Count };
 
 namespace watchcontrols {
-enum Id { None=-1, Back=1, Done=2, First=10, NameKey=40, MenuRow=100, PersonalRow=200, ColorPad=300, HueBar=301 };
-struct Target { int id; ux::Rect bounds; };
+enum Id { None=-1, Done=1, First=10, NameKey=40, MenuRow=100, PersonalRow=200, ColorPad=300, HueBar=301 };
+struct Target { int id; ux::Rect bounds; int16_t radius; };
+struct ListLayout { int16_t x,y,w,h,step,rowHeight,radius; uint8_t visibleRows; };
+constexpr ListLayout mainList() { return {62,76,342,288,72,58,25,4}; }
+constexpr ListLayout previewList() { return {58,244,350,120,60,44,17,2}; }
+constexpr ux::Rect doneBounds() { return {154,376,158,46}; }
+constexpr int16_t doneRadius() { return 23; }
+
+inline bool roundedContains(ux::Rect r, int16_t radius, int x, int y) {
+    if (!r.contains(x,y)) return false;
+    if (radius <= 0) return true;
+    int16_t maxRadius=(r.w<r.h?r.w:r.h)/2;
+    if(radius>maxRadius) radius=maxRadius;
+    if(x>=r.x+radius&&x<r.x+r.w-radius) return true;
+    if(y>=r.y+radius&&y<r.y+r.h-radius) return true;
+    int32_t cx=x<r.x+radius?r.x+radius:r.x+r.w-radius-1;
+    int32_t cy=y<r.y+radius?r.y+radius:r.y+r.h-radius-1;
+    int32_t dx=x-cx,dy=y-cy;
+    return dx*dx+dy*dy<=(int32_t)radius*radius;
+}
+
+inline bool editorUsesPreviewList(Editor editor) {
+    return editor==Editor::Appearance||editor==Editor::Motion||editor==Editor::Preview||editor==Editor::Gaze;
+}
+inline uint8_t editorRowCount(Editor editor) {
+    switch(editor) {
+        case Editor::Appearance:return 2; case Editor::Motion:return 4;
+        case Editor::Preview:return 3; case Editor::Gaze:return 1;
+        default:return 0;
+    }
+}
+inline ux::Rect rowBounds(ListLayout layout,uint8_t index,float offset) {
+    int16_t top=layout.y+index*layout.step-(int16_t)offset+(layout.step-layout.rowHeight)/2;
+    return {layout.x,top,layout.w,layout.rowHeight};
+}
+inline bool inViewport(ListLayout layout,int x,int y) {
+    return x>=layout.x&&x<layout.x+layout.w&&y>=layout.y&&y<layout.y+layout.h;
+}
 inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
-    Target result{None,{0,0,0,0}};
-    auto match = [&](int id, ux::Rect bounds) {
-        if (result.id == None && bounds.contains(x,y)) result = {id,bounds};
+    Target result{None,{0,0,0,0},0};
+    auto match = [&](int id, ux::Rect bounds, int16_t radius=0) {
+        if(result.id==None&&roundedContains(bounds,radius,x,y)) result={id,bounds,radius};
     };
     if (screen != Screen::Face) {
-        match(Back,{72,374,150,58}); match(Done,{244,374,150,58});
+        match(Done,doneBounds(),doneRadius());
         if(result.id!=None) return result;
     }
     if (screen == Screen::Settings || screen == Screen::Personalize) {
-        if (y < 76 || y >= 364) return result;
+        const auto layout=mainList();
+        if(!inViewport(layout,x,y)) return result;
         int count = screen == Screen::Settings ? (int)MenuItem::Done : (int)PersonalItem::Back;
         for (int i=0; i<count; ++i) {
-            int top=105+i*72-(int)offset-29;
-            int bottom=top+58;
-            if (top<76) top=76;
-            if (bottom>364) bottom=364;
-            if (bottom>top) match((screen==Screen::Settings?MenuRow:PersonalRow)+i,{62,top,342,bottom-top});
+            auto bounds=rowBounds(layout,(uint8_t)i,offset);
+            if(roundedContains(bounds,layout.radius,x,y))
+                return {screen==Screen::Settings?MenuRow+i:PersonalRow+i,bounds,layout.radius};
         }
         return result;
     }
     if (screen != Screen::Editor) return result;
 
-    if (editor==Editor::Name) {
+    if(editorUsesPreviewList(editor)) {
+        const auto layout=previewList();
+        if(!inViewport(layout,x,y)) return result;
+        for(uint8_t i=0;i<editorRowCount(editor);++i) {
+            auto bounds=rowBounds(layout,i,offset);
+            if(roundedContains(bounds,layout.radius,x,y)) return {First+i,bounds,layout.radius};
+        }
+    } else if (editor==Editor::Name) {
         int key=ux::nameKeyAt({78,170,310,205},x,y);
         if (key>=0) {
-            // Match the shared keyboard's exact rectangle, including its gaps.
             const auto rect=ux::nameKeyRect({78,170,310,205},key);
-            match(NameKey+key,rect);
+            match(NameKey+key,rect,6);
         }
     } else if (editor==Editor::Language) {
-        match(First,{72,160,152,70}); match(First+1,{242,160,152,70});
-    } else if (editor==Editor::Layout || editor==Editor::Preview || editor==Editor::Gaze) {
-        const int rows[]={editor==Editor::Layout?170:250,editor==Editor::Layout?250:296,342};
-        int count=editor==Editor::Layout?2:editor==Editor::Gaze?1:3;
-        for(int i=0;i<count;++i) match(First+i,{58,rows[i]-22,350,44});
+        match(First,{72,160,152,70},35); match(First+1,{242,160,152,70},35);
+    } else if (editor==Editor::Layout) {
+        const int rows[]={170,250};
+        for(int i=0;i<2;++i) match(First+i,{58,rows[i]-22,350,44},17);
     } else if (editor==Editor::Color) {
-        match(First,{163,207,140,34}); match(ColorPad,{66,246,260,108}); match(HueBar,{344,246,56,108});
+        match(First,{163,207,140,32},16); match(ColorPad,{66,246,260,108}); match(HueBar,{344,246,56,108});
     } else if (editor==Editor::Time || editor==Editor::Date) {
         const int timeCenters[]={157,309}, dateCenters[]={108,233,358};
         const int* centers=editor==Editor::Time?timeCenters:dateCenters;
         int count=editor==Editor::Time?2:3, width=editor==Editor::Time?100:86;
         for(int i=0;i<count;++i) {
-            match(First+i*3,{centers[i]-width/2,115,width,54});
-            match(First+i*3+1,{centers[i]-width/2,255,width,54});
+            match(First+i*3,{centers[i]-width/2,116,width,52},26);
+            match(First+i*3+1,{centers[i]-width/2,256,width,52},26);
             match(First+i*3+2,{centers[i]-width/2-5,175,width+10,72});
         }
     } else if (editor==Editor::Format) {
-        match(First,{78,128,146,76}); match(First+1,{242,128,146,76}); match(First+2,{100,242,266,58});
+        match(First,{78,128,146,76},38); match(First+1,{242,128,146,76},38); match(First+2,{100,242,266,58},29);
     } else if (editor==Editor::Expression) {
-        match(First,{48,126,76,96}); match(First+1,{342,126,76,96}); match(First+2,{144,62,178,178});
-    } else if (editor==Editor::Appearance) {
-        match(First,{58,255,350,46}); match(First+1,{58,317,350,46});
-    } else if (editor==Editor::Motion) {
-        const int rows[]={218,262,306,350};
-        for(int i=0;i<4;++i) match(First+i,{58,rows[i]-22,350,44});
+        match(First,{48,126,76,96},38); match(First+1,{342,126,76,96},38); match(First+2,{144,62,178,178},89);
     } else if (editor==Editor::Display) {
         const int rows[]={170,230,290,350};
-        for(int i=0;i<4;++i) match(First+i,{58,rows[i]-22,350,44});
+        for(int i=0;i<4;++i) match(First+i,{58,rows[i]-22,350,44},17);
     }
     return result;
 }

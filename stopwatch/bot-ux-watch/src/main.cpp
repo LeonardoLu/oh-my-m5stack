@@ -150,6 +150,26 @@ volatile uint32_t _touchIrqTimes[kTouchIrqCapacity];
 volatile uint32_t _touchIrqTotal = 0, _touchIrqDropped = 0;
 volatile uint8_t _touchIrqHead = 0, _touchIrqCount = 0;
 
+struct TouchCalibrationResult {
+    int16_t targetX, targetY;
+    int16_t firstX, firstY, stableX, stableY;
+    int16_t firstRawX, firstRawY, stableRawX, stableRawY;
+    uint16_t samples, heldMs;
+};
+constexpr uint8_t kTouchCalibrationCount = 5;
+const int16_t kTouchCalibrationTargets[kTouchCalibrationCount][2] = {
+    {233,233}, {233,100}, {100,233}, {366,233}, {233,399}
+};
+TouchCalibrationResult _touchCalibrationResults[kTouchCalibrationCount];
+bool _touchCalibration = false, _touchCalibrationTracking = false, _touchCalibrationAwaitRelease = false;
+uint8_t _touchCalibrationIndex = 0, _touchCalibrationReleaseSamples = 0;
+int16_t _touchRawX = 0, _touchRawY = 0;
+int32_t _touchCalibrationSumX = 0, _touchCalibrationSumY = 0;
+int32_t _touchCalibrationRawSumX = 0, _touchCalibrationRawSumY = 0;
+uint32_t _touchCalibrationStartedMs = 0;
+uint32_t _touchCalibrationLastContactMs = 0;
+Screen _touchCalibrationPriorScreen = Screen::Face;
+
 uint8_t _editHour = 0;
 uint8_t _editMinute = 0;
 int16_t _editYear = 2026;
@@ -341,6 +361,108 @@ static void pokeSound()    { _sounds.play(ux::sound::Cue::Poke); }
 static void resetUiPointer() {
     _faceTracking=false; _pointer.cancel(); _clickUntil=0; _settingsScroll.cancel(); _personalScroll.cancel(); _editorScroll.cancel();
     _capturedTarget=watchcontrols::None; _namePressedKey = -1; _colorDrag = 0;
+}
+
+static void startTouchCalibration() {
+    resetUiPointer();
+    _diagnosticContact=false;
+    _touchCalibrationPriorScreen=_screen;
+    _touchCalibration=true;
+    _touchCalibrationTracking=false;
+    _touchCalibrationAwaitRelease=true;
+    _touchCalibrationReleaseSamples=0;
+    _touchCalibrationIndex=0;
+    memset(_touchCalibrationResults,0,sizeof(_touchCalibrationResults));
+    _touchCalibrationLastContactMs=millis();
+    _contact.sample(false,0,0);
+    setTouchTraceEnabled(true);
+    _uiDirty=true;
+    _listBandOnly=false;
+}
+
+static void stopTouchCalibration() {
+    if(!_touchCalibration) return;
+    _touchCalibration=false;
+    _touchCalibrationTracking=false;
+    _touchCalibrationAwaitRelease=false;
+    _touchCalibrationReleaseSamples=0;
+    stopTouchTrace();
+    _contact.sample(false,0,0);
+    resetUiPointer();
+    _screen=_touchCalibrationPriorScreen;
+    _uiDirty=true;
+    _listBandOnly=false;
+    if(_screen==Screen::Face) { _faceNeedsClear=true; face.invalidate(); }
+}
+
+static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16_t y,
+                                   uint32_t now) {
+    if(!acquired||_touchCalibrationIndex>=kTouchCalibrationCount) return;
+    if(_touchCalibrationAwaitRelease) {
+        if(contact) {
+            _touchCalibrationReleaseSamples=0;
+            _touchCalibrationLastContactMs=now;
+        } else if(++_touchCalibrationReleaseSamples>=3
+                  && now-_touchCalibrationLastContactMs>=24) {
+            _touchCalibrationAwaitRelease=false;
+            _touchCalibrationReleaseSamples=0;
+        }
+        return;
+    }
+    auto& result=_touchCalibrationResults[_touchCalibrationIndex];
+    if(!_touchCalibrationTracking&&contact) {
+        result={kTouchCalibrationTargets[_touchCalibrationIndex][0],
+                kTouchCalibrationTargets[_touchCalibrationIndex][1],
+                x,y,x,y,
+                _touchRawX,_touchRawY,_touchRawX,_touchRawY,1,0};
+        _touchCalibrationSumX=x;
+        _touchCalibrationSumY=y;
+        _touchCalibrationRawSumX=_touchRawX;
+        _touchCalibrationRawSumY=_touchRawY;
+        _touchCalibrationStartedMs=now;
+        _touchCalibrationLastContactMs=now;
+        _touchCalibrationReleaseSamples=0;
+        _touchCalibrationTracking=true;
+        return;
+    }
+    if(contact&&_touchCalibrationTracking) {
+        _touchCalibrationSumX+=x;
+        _touchCalibrationSumY+=y;
+        _touchCalibrationRawSumX+=_touchRawX;
+        _touchCalibrationRawSumY+=_touchRawY;
+        if(result.samples<65535) ++result.samples;
+        _touchCalibrationLastContactMs=now;
+        _touchCalibrationReleaseSamples=0;
+        return;
+    }
+    if(!contact&&_touchCalibrationTracking
+       && ++_touchCalibrationReleaseSamples>=3
+       && now-_touchCalibrationLastContactMs>=24) {
+        uint16_t count=result.samples?result.samples:1;
+        result.stableX=(int16_t)(_touchCalibrationSumX/count);
+        result.stableY=(int16_t)(_touchCalibrationSumY/count);
+        result.stableRawX=(int16_t)(_touchCalibrationRawSumX/count);
+        result.stableRawY=(int16_t)(_touchCalibrationRawSumY/count);
+        result.heldMs=traceClamp16(now-_touchCalibrationStartedMs);
+        _touchCalibrationTracking=false;
+        _touchCalibrationReleaseSamples=0;
+        ++_touchCalibrationIndex;
+        _uiDirty=true;
+        _listBandOnly=false;
+    }
+}
+
+static void dumpTouchCalibration() {
+    dumpTouchTrace();
+    Serial.printf("CAL begin completed=%u total=%u\n",_touchCalibrationIndex,kTouchCalibrationCount);
+    for(uint8_t i=0;i<_touchCalibrationIndex&&i<kTouchCalibrationCount;++i) {
+        const auto& r=_touchCalibrationResults[i];
+        Serial.printf("CAL point=%u target=%d,%d first=%d,%d stable=%d,%d raw_first=%d,%d raw_stable=%d,%d samples=%u held=%u\n",
+                      i+1,r.targetX,r.targetY,r.firstX,r.firstY,r.stableX,r.stableY,
+                      r.firstRawX,r.firstRawY,r.stableRawX,r.stableRawY,r.samples,r.heldMs);
+    }
+    Serial.println("CAL end");
+    Serial.flush();
 }
 
 static void consumeWakeInput() {
@@ -908,13 +1030,22 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
 }
 
 static void handleInputs(uint32_t now) {
-    bool contact=_contact.isPressed(); int32_t x=_contact.x,y=_contact.y;
+    bool contact=_contact.isPressed(), acquired=false; int32_t x=_contact.x,y=_contact.y;
     if(_diagnosticContact) { contact=_diagnosticDown; x=_diagnosticX; y=_diagnosticY; }
     else if(now-_contactReadMs>=8) {
         uint32_t previousReadMs=_contactReadMs;
         _contactReadMs=now;
         uint32_t readStartUs=micros();
-        contact=M5.Display.getTouch(&x,&y);
+        acquired=true;
+        if(_touchCalibration) {
+            lgfx::touch_point_t point;
+            contact=M5.Display.getTouchRaw(&point,1)!=0;
+            if(contact) {
+                _touchRawX=point.x; _touchRawY=point.y;
+                M5.Display.convertRawXY(&point,1);
+                x=point.x; y=point.y;
+            }
+        } else contact=M5.Display.getTouch(&x,&y);
         uint32_t readUs=micros()-readStartUs;
         uint32_t sampleGapMs=previousReadMs?now-previousReadMs:0;
         if(_touchTraceEnabled) {
@@ -940,6 +1071,10 @@ static void handleInputs(uint32_t now) {
     }
     _contact.sample(contact,x,y);
     const auto& touch=_contact;
+    if(_touchCalibration) {
+        sampleTouchCalibration(contact,acquired,(int16_t)x,(int16_t)y,now);
+        return;
+    }
     if(M5.BtnPWR.wasClicked()) {
         returnHome(); return;
     }
@@ -1421,7 +1556,39 @@ static void recordFrame(uint32_t now, uint32_t updateUs, uint32_t drawUs, uint32
     _telemetry.screen = screen;
 }
 
+static void drawTouchCalibration() {
+    canvas.fillSprite(settings.style().bgColor);
+    canvas.setTextDatum(middle_center);
+    canvas.setFont(&fonts::FreeSansBold12pt7b);
+    canvas.setTextColor(settings.ink());
+    char progress[24];
+    if(_touchCalibrationIndex>=kTouchCalibrationCount) {
+        snprintf(progress,sizeof(progress),"5 / 5  COMPLETE");
+        watchText(canvas,progress,kW/2,kH/2,false);
+        return;
+    }
+    snprintf(progress,sizeof(progress),"TOUCH TEST  %u / 5",_touchCalibrationIndex+1);
+    watchText(canvas,progress,kW/2,44,false);
+    int16_t x=kTouchCalibrationTargets[_touchCalibrationIndex][0];
+    int16_t y=kTouchCalibrationTargets[_touchCalibrationIndex][1];
+    uint16_t accent=settings.style().accentColor;
+    canvas.drawCircle(x,y,28,accent);
+    canvas.drawCircle(x,y,27,accent);
+    canvas.drawFastHLine(x-20,y,41,accent);
+    canvas.drawFastVLine(x,y-20,41,accent);
+    canvas.fillCircle(x,y,4,accent);
+}
+
 static void render(uint32_t now) {
+    if(_touchCalibration) {
+        if(!_uiDirty) return;
+        drawTouchCalibration();
+        canvas.pushSprite(0,0);
+        M5.Display.waitDisplay();
+        _uiDirty=false;
+        _listBandOnly=false;
+        return;
+    }
     uint32_t t0 = micros();
     face.setBattery(_battery);
     face.setCharging(_charging);
@@ -1503,7 +1670,9 @@ static void render(uint32_t now) {
 }
 
 static void emitFrameCapture() {
-    if (_screen == Screen::Face) {
+    if(_touchCalibration) {
+        drawTouchCalibration();
+    } else if (_screen == Screen::Face) {
         canvas.fillSprite(settings.style().bgColor);
         botSprite.pushSprite(&canvas, kBotX, kBotY);
         face.invalidate();
@@ -1624,6 +1793,9 @@ static void handleSerialCommands() {
             _diagnosticContact=true; _diagnosticDown=down!=0;
             _diagnosticX=x; _diagnosticY=y; _contactReplyPending=true;
         } else if(!strcmp(line,"physical")) { _diagnosticContact=false; printUiState(); }
+        else if(!strcmp(line,"cal on")) { _diagnosticContact=false; startTouchCalibration(); Serial.println("CAL armed 1/5"); Serial.flush(); }
+        else if(!strcmp(line,"cal off")) { stopTouchCalibration(); Serial.println("CAL disarmed"); Serial.flush(); }
+        else if(!strcmp(line,"cal dump")) dumpTouchCalibration();
         else if(!strcmp(line,"trace on")) { setTouchTraceEnabled(true); Serial.println("TRACE armed"); Serial.flush(); }
         else if(!strcmp(line,"trace off")) { stopTouchTrace(); Serial.println("TRACE disarmed"); Serial.flush(); }
         else if(!strcmp(line,"trace clear")) { bool enabled=_touchTraceEnabled; setTouchTraceEnabled(enabled); Serial.println("TRACE cleared"); Serial.flush(); }
@@ -1696,7 +1868,7 @@ void setup() {
     _personalList.configure(kPersonalCount, kVisibleRows);
     _ambientCycle.begin(millis());
     showStatusPanel(millis(), 1800);
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, trace on/off/clear/dump, sound N\n",
+    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, trace on/off/clear/dump, cal on/off/dump, sound N\n",
                   M5.Imu.isEnabled());
 }
 

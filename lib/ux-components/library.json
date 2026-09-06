@@ -1,0 +1,23 @@
+{
+  "name": "ux-components",
+  "version": "0.1.0",
+  "description": "Selective native coverage typography, geometry, input and name editing for M5Stack",
+  "license": "MIT AND OFL-1.1",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": [
+    "UxRender.h",
+    "UxText.h",
+    "UxInput.h",
+    "UxKeyboard.h",
+    "UxTokens.h"
+  ],
+  "export": {
+    "include": [
+      "src",
+      "fonts",
+      "README.md",
+      "LICENSE"
+    ]
+  }
+}

@@ -200,5 +200,25 @@ The calibration firmware at `bc06505` passed 24 host-runner products and built w
 Runtime readback before training reported `stored=0`, no RAM candidate, and the exact
 identity matrix. All six `cal map` anchors, including separate x/y axes and the former
 bottom probe, converted identically. The native 466 by 466 TRAIN 1/5 framebuffer in
-`tmp/done-debug/affine-train.png` passed layout review. Physical training, independent
-holdout acceptance, a normal Done trial, and any subsequent profile save remain pending.
+`tmp/done-debug/affine-train.png` passed layout review. At that firmware-readiness point,
+physical training and holdout validation had not yet run and no profile had been saved.
+
+The first complete calibration attempt on that firmware failed its fixed validation
+limits and rolled back to identity without writing NVS. The five training taps produced
+an affine candidate with 8.126 px RMS and 9.729 px maximum training error, so validation
+started. Its unseen-point errors were 8.062, 8.062, 3.000, 21.954, and 14.866 px: RMS
+12.977 and maximum 21.954 exceeded the predeclared 7 px RMS and 10 px per-point limits.
+The final profile report confirmed `stored=0`, no candidate applied, and identity active.
+Each held contact itself was stable to 0–1 raw pixel, but there was only one independent
+tap at each target. That run therefore does not establish whether the remaining pattern
+is a repeatable spatial nonlinearity or variation in the contact centroid of ordinary
+flat-finger touches.
+
+The follow-up `cal repeat` diagnostic measures that distinction without fitting or
+applying another transform. It presents cyan targets in the fixed order center,
+lower-right, bottom, lower-right, bottom, center, bottom, center, lower-right, using
+coordinates `(233,233)`, `(321,321)`, and `(233,399)`. The existing stable-sample,
+16 px span, and confirmed-release gates make all nine taps independent. Its dedicated
+results preserve target, raw mean and range, actual identity-converted mean, sample
+count, and hold duration for `cal dump`. Starting the run restores the loaded baseline;
+completion only displays `9/9 COMPLETE` and never solves, applies, or saves a profile.

@@ -13,6 +13,7 @@
 
 #include <M5GFX.h> // M5Canvas (== LGFX_Sprite); lighter than pulling all of M5Unified
 #include <stdint.h>
+#include <stddef.h>
 
 namespace botux {
 
@@ -81,6 +82,35 @@ public:
         Wave,
         Sparkle,
     };
+
+    enum class Language : uint8_t { English = 0, Chinese };
+    static constexpr size_t kNameMax = 16;
+    static constexpr uint8_t moodCount() { return 12; }
+    static constexpr uint8_t expressionCount() { return 10; }
+    static constexpr uint8_t animationCount() { return 8; }
+    static const char* moodName(Mood value, Language language = Language::English);
+    static const char* expressionName(Expression value, Language language = Language::English);
+    static const char* animationName(Animation value, Language language = Language::English);
+    // ASCII letters/digits/spaces/hyphens/apostrophes; trims spaces, empty => Milo.
+    void setName(const char* name);
+    const char* name() const { return _name; }
+    Mood mood() const { return _mood; }
+    Mood effectiveMood() const { return _effMood; }
+    Expression effectiveExpression() const { return _effExpression; }
+    // Natural named caption: effective mood, or explicit expression while Idle.
+    // Bounded, NUL-terminated UTF-8; returns required byte count (excluding NUL).
+    size_t describe(char* out, size_t capacity, Language language = Language::English) const;
+    struct Preset { Mood mood; Expression expression; Animation animation; };
+    static constexpr uint8_t presetCount() { return 8; }
+    static Preset preset(uint8_t index);
+    void applyPreset(uint8_t index);
+    uint8_t randomPreset();
+    uint8_t nextPreset();
+    void resetToIdle();
+    // Normalized canvas direction [-1,1], positive y down. Only accepted in Idle.
+    // Temporary target eases in, then resumes wandering; 0 cancels the hold.
+    void gazeAt(float x, float y, uint16_t holdMs = 1800);
+    void clearGaze();
 
     // Everything that makes one bot "this bot".
     struct Style {
@@ -196,6 +226,8 @@ private:
     void _drawOverlays(); // battery/signal/label/time
     void _fillCapsule(float cx, float cy, float halfDx, float halfDy,
                       float radius, uint16_t color);
+    void _fillEyeCurve(float cx, float cy, float dx, float dy, float rise,
+                       float radius, uint16_t color);
     void _fillEllipseAA(float cx, float cy, float rx, float ry, uint16_t color);
 
     M5Canvas* _cv = nullptr;
@@ -203,6 +235,12 @@ private:
     Style _style;
     Metrics _m;
 
+    char _name[kNameMax + 1] = "Milo";
+    uint8_t _presetIndex = 0;
+    uint32_t _presetSeed = 0xA341316Cu;
+    bool _gazeHeld = false;
+    uint32_t _gazeUntil = 0;
+    float _gazeX = 0.0f, _gazeY = 0.0f;
     Mood _mood = Mood::Idle;
     Expression _expression = Expression::Auto;
     Animation _animation = Animation::Auto;

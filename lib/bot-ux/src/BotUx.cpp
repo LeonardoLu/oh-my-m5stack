@@ -125,6 +125,7 @@ void BotUx::setMotion(float tiltX, float tiltY, float shake) {
 
 void BotUx::seedBlink(uint32_t s) {
     _blinkSeed = s ? s : 0x1234u;
+    _presetSeed = _blinkSeed ^ 0xA341316Cu;
     _gazeSeed = _blinkSeed ^ 0x9E3779B9u;
     uint32_t now = millis();
     _nextBlink = now + blinkDelay(_style, _blinkSeed);
@@ -203,6 +204,109 @@ void BotUx::_updateBlink(uint32_t now) {
         _nextBlink = now + blinkDelay(_style, _blinkSeed);
     }
 }
+
+const char* BotUx::moodName(Mood value, Language language) {
+    static const char* const en[] = {"Idle", "Listening", "Thinking", "Speaking", "Happy", "Sad", "Sleepy", "Surprised", "Working", "Waiting", "Blocked", "Done"};
+    static const char* const zh[] = {"空闲", "聆听", "思考", "说话", "开心", "难过", "困倦", "惊讶", "工作", "等待", "受阻", "完成"};
+    return (language == Language::Chinese ? zh : en)[(uint8_t)value < moodCount() ? (uint8_t)value : 0];
+}
+const char* BotUx::expressionName(Expression value, Language language) {
+    static const char* const en[] = {"Auto", "Neutral", "Curious", "Focused", "Joy", "Skeptical", "Bashful", "Wink", "Dizzy", "Alarmed"};
+    static const char* const zh[] = {"自动", "自然", "好奇", "专注", "喜悦", "怀疑", "害羞", "眨眼", "眩晕", "警觉"};
+    return (language == Language::Chinese ? zh : en)[(uint8_t)value < expressionCount() ? (uint8_t)value : 0];
+}
+const char* BotUx::animationName(Animation value, Language language) {
+    static const char* const en[] = {"Auto", "Calm", "Curious", "Orbit", "Bounce", "Glitch", "Wave", "Sparkle"};
+    static const char* const zh[] = {"自动", "平静", "好奇", "环绕", "弹跳", "闪动", "波浪", "闪耀"};
+    return (language == Language::Chinese ? zh : en)[(uint8_t)value < animationCount() ? (uint8_t)value : 0];
+}
+void BotUx::setName(const char* name) {
+    size_t n = 0;
+    if (name) for (; *name && n < kNameMax; ++name) {
+        const unsigned char c = (unsigned char)*name;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '\'' || (c == ' ' && n))
+            _name[n++] = (char)c;
+    }
+    while (n && _name[n - 1] == ' ') --n;
+    _name[n] = 0;
+    if (!n) { _name[0] = 'M'; _name[1] = 'i'; _name[2] = 'l'; _name[3] = 'o'; _name[4] = 0; }
+}
+size_t BotUx::describe(char* out, size_t capacity, Language language) const {
+    if (!out) capacity = 0;
+    static const char* const moodEn[] = {
+        "is resting", "is listening", "is thinking", "is speaking", "is happy",
+        "feels sad", "feels sleepy", "feels surprised", "is working", "is waiting",
+        "has hit a blocker", "has finished"
+    };
+    static const char* const moodZh[] = {
+        "正在休息", "正在聆听", "正在思考", "正在说话", "很高兴", "有些难过",
+        "有些困倦", "感到惊讶", "正在工作", "正在等待", "遇到阻碍", "已经完成"
+    };
+    static const char* const expressionEn[] = {
+        "is resting", "looks relaxed", "feels curious", "looks focused", "is happy",
+        "looks skeptical", "feels shy", "is winking", "feels dizzy", "looks alert"
+    };
+    static const char* const expressionZh[] = {
+        "正在休息", "神态自然", "感到好奇", "神情专注", "很高兴", "有些怀疑",
+        "有些害羞", "正在眨眼", "感到眩晕", "保持警觉"
+    };
+    // Describe the principal current state. An explicitly selected idle face
+    // carries the meaning when no active mood or transient reaction supersedes it.
+    bool idleExpression = _effMood == Mood::Idle && _expression != Expression::Auto;
+    uint8_t index = idleExpression ? (uint8_t)_effExpression : (uint8_t)_effMood;
+    const char* phrase = idleExpression
+        ? (language == Language::Chinese ? expressionZh : expressionEn)[index < expressionCount() ? index : 0]
+        : (language == Language::Chinese ? moodZh : moodEn)[index < moodCount() ? index : 0];
+    int required = snprintf(out, capacity, "%s %s", _name, phrase);
+    // Never leave an incomplete UTF-8 character in a short caller buffer.
+    if (out && capacity && required >= (int)capacity) {
+        size_t end = capacity - 1, start = end;
+        while (start && ((unsigned char)out[start - 1] & 0xC0) == 0x80) --start;
+        if (start && (unsigned char)out[start - 1] >= 0xC0) {
+            --start;
+            unsigned char c = (unsigned char)out[start];
+            size_t width = c < 0xE0 ? 2 : (c < 0xF0 ? 3 : 4);
+            if (end - start < width) out[start] = 0;
+        }
+    }
+    return required > 0 ? (size_t)required : 0;
+}
+BotUx::Preset BotUx::preset(uint8_t index) {
+    static const Preset presets[] = {
+        {Mood::Idle, Expression::Neutral, Animation::Calm},
+        {Mood::Idle, Expression::Curious, Animation::Curious},
+        {Mood::Happy, Expression::Joy, Animation::Bounce},
+        {Mood::Listening, Expression::Focused, Animation::Calm},
+        {Mood::Idle, Expression::Wink, Animation::Wave},
+        {Mood::Done, Expression::Bashful, Animation::Sparkle},
+        {Mood::Surprised, Expression::Alarmed, Animation::Orbit},
+        {Mood::Sleepy, Expression::Auto, Animation::Calm},
+    };
+    return presets[index % presetCount()];
+}
+void BotUx::applyPreset(uint8_t index) {
+    _presetIndex = index % presetCount();
+    const Preset p = preset(_presetIndex);
+    _pokeUntil = _reactionUntil = 0;
+    clearGaze(); setMood(p.mood); setExpression(p.expression); setAnimation(p.animation);
+}
+uint8_t BotUx::randomPreset() {
+    _presetSeed = _presetSeed * 1664525u + 1013904223u;
+    applyPreset((_presetIndex + 1 + ((_presetSeed >> 16) % (presetCount() - 1))) % presetCount());
+    return _presetIndex;
+}
+uint8_t BotUx::nextPreset() { applyPreset(_presetIndex + 1); return _presetIndex; }
+void BotUx::resetToIdle() {
+    _presetIndex = 0; _pokeUntil = _reactionUntil = 0;
+    clearGaze(); setMood(Mood::Idle); setExpression(Expression::Auto); setAnimation(Animation::Auto);
+}
+void BotUx::gazeAt(float x, float y, uint16_t holdMs) {
+    if (_mood != Mood::Idle) return;
+    _gazeX = clampf(x, -1.0f, 1.0f); _gazeY = clampf(y, -1.0f, 1.0f);
+    _gazeUntil = millis() + holdMs; _gazeHeld = holdMs != 0;
+}
+void BotUx::clearGaze() { _gazeHeld = false; }
 
 void BotUx::_updateGaze(uint32_t now) {
     if ((int32_t)(now - _nextGaze) < 0) return;
@@ -392,6 +496,8 @@ void BotUx::_resolveMood(uint32_t now) {
     _eyeAngle += (targetAngle - _eyeAngle) * a;
     _bodyLean += (targetLean - _bodyLean) * a;
     _eyeTwist += (targetTwist - _eyeTwist) * a;
+    if (_gazeHeld && ((int32_t)(now - _gazeUntil) >= 0 || _mood != Mood::Idle)) clearGaze();
+    if (_gazeHeld && _effMood == Mood::Idle) { gazeX = _gazeX; gazeY = _gazeY; }
     _pupilDX += (gazeX - _pupilDX) * a;
     _pupilDY += (gazeY - _pupilDY) * a;
     _snapPose = false;
@@ -688,6 +794,50 @@ void BotUx::_fillCapsule(float cx, float cy, float halfDx, float halfDy,
     }
 }
 
+// A single swept quadratic: union distance is evaluated before coverage blending.
+// 12 chords bound flattening error below 0.04px even at eyeRadius=24.
+// No separately rounded/alpha-blended joins, no heap, no secondary framebuffer.
+void BotUx::_fillEyeCurve(float cx, float cy, float dx, float dy, float rise,
+                          float radius, uint16_t color) {
+    constexpr int segments = 12;
+    float ax[segments], ay[segments], vx[segments], vy[segments], inv[segments];
+    float minX = -fabsf(dx), maxX = fabsf(dx);
+    float minY = fminf(-fabsf(dy), -2 * rise), maxY = fabsf(dy);
+    for (int i = 0; i < segments; ++i) {
+        float t = (float)i / segments, u = (float)(i + 1) / segments;
+        ax[i] = (2 * t - 1) * dx;
+        ay[i] = (2 * t - 1) * dy - 4 * rise * t * (1 - t);
+        vx[i] = (2 * u - 1) * dx - ax[i];
+        vy[i] = (2 * u - 1) * dy - 4 * rise * u * (1 - u) - ay[i];
+        inv[i] = 1.0f / fmaxf(vx[i] * vx[i] + vy[i] * vy[i], 0.000001f);
+    }
+    radius = fmaxf(radius, 0.8f);
+    int left = (int)floorf(cx + minX - radius - 0.5f);
+    int right = (int)ceilf(cx + maxX + radius + 0.5f);
+    float inner2 = (radius - 0.5f) * (radius - 0.5f);
+    float outer2 = (radius + 0.5f) * (radius + 0.5f);
+    for (int y = (int)floorf(cy + minY - radius - 0.5f);
+         y <= (int)ceilf(cy + maxY + radius + 0.5f); ++y) {
+        int run = -1;
+        for (int x = left; x <= right; ++x) {
+            float nearest = outer2;
+            for (int i = 0; i < segments; ++i) {
+                float px = x - cx - ax[i], py = y - cy - ay[i];
+                float t = clampf((px * vx[i] + py * vy[i]) * inv[i], 0, 1);
+                px -= t * vx[i]; py -= t * vy[i];
+                nearest = fminf(nearest, px * px + py * py);
+            }
+            if (nearest <= inner2) { if (run < 0) run = x; continue; }
+            if (run >= 0) { _cv->fillRect(run, y, x - run, 1, color); run = -1; }
+            if (nearest < outer2) {
+                uint8_t coverage = (uint8_t)(clampf(radius + 0.5f - sqrtf(nearest), 0, 1) * 255);
+                _cv->drawPixel(x, y, mix565(_cv->readPixel(x, y), color, coverage));
+            }
+        }
+        if (run >= 0) _cv->fillRect(run, y, right - run + 1, 1, color);
+    }
+}
+
 void BotUx::_drawEyes() {
     if (_effMood == Mood::Thinking || _effMood == Mood::Blocked) return;
     int16_t side = min16(_w, _h);
@@ -697,8 +847,8 @@ void BotUx::_drawEyes() {
     float sensorAmount = _reducedMotion ? _motionAmount * 0.32f : _motionAmount;
     float gazeX = clampf(_pupilDX - _motionX * 0.18f * sensorAmount, -1.0f, 1.0f);
     float gazeY = clampf(_pupilDY - _motionY * 0.14f * sensorAmount, -1.0f, 1.0f);
-    float pairCx = bodyCx + _eyePairX * r + gazeX * r * 0.075f;
-    float pairCy = bodyCy + _eyePairY * r + gazeY * r * 0.075f;
+    float pairCx = bodyCx + _eyePairX * r + gazeX * r * 0.24f;
+    float pairCy = bodyCy + _eyePairY * r + gazeY * r * 0.20f;
     int16_t dx = _m.eyeDX;
     float er = (float)_m.eyeRadius;
 
@@ -741,16 +891,11 @@ void BotUx::_drawEyes() {
         radius = radius * (1.0f - smile) + er * 0.27f * smile;
         float closedWidth = er * 0.60f * (1.0f - closure);
         halfDx += closedWidth;
-        if (smile > 0.01f) {
-            // Three joined capsules form a shallow smile, with rounded ends.
-            const float width = er * 0.90f * smile;
-            const float rise = er * 0.46f * smile;
-            _fillCapsule(ex - width * 0.65f, ey - rise * 0.5f,
-                         width * 0.35f + halfDx, -rise * 0.5f + halfDy, radius, _style.eyeColor);
-            _fillCapsule(ex, ey - rise, width * 0.30f + halfDx,
-                         halfDy, radius, _style.eyeColor);
-            _fillCapsule(ex + width * 0.65f, ey - rise * 0.5f,
-                         width * 0.35f + halfDx, rise * 0.5f + halfDy, radius, _style.eyeColor);
+        if (smile > 0.001f) {
+            float curveDx = halfDx + er * 0.90f * smile;
+            if (side <= 48) curveDx = fminf(curveDx, fmaxf(0.5f, dx - radius - 1.0f));
+            _fillEyeCurve(ex, ey, curveDx, halfDy,
+                          er * 0.46f * smile, radius, _style.eyeColor);
         } else {
             _fillCapsule(ex, ey, halfDx, halfDy, radius, _style.eyeColor);
         }

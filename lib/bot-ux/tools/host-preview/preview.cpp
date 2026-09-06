@@ -1,6 +1,8 @@
 #include <BotUx.h>
 
 #include <assert.h>
+#include <cstring>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -496,8 +498,134 @@ static bool writeTransitionSheet(const char* path) {
     return true;
 }
 
+static void checkCompanionSemantics() {
+    using Bot = botux::BotUx;
+    Bot bot;
+    assert(std::strcmp(bot.name(), "Milo") == 0);
+    bot.setName("  Ava<script>你好 !  ");
+    assert(std::strcmp(bot.name(), "Avascript") == 0);
+    bot.setName("abcdefghijklmnopqrst"); assert(std::strlen(bot.name()) == Bot::kNameMax);
+    bot.setName(nullptr); assert(std::strcmp(bot.name(), "Milo") == 0);
+    for (uint8_t i = 0; i < Bot::presetCount(); ++i) {
+        bot.applyPreset(i); const auto p = Bot::preset(i);
+        assert(bot.mood() == p.mood && bot.expression() == p.expression && bot.animation() == p.animation);
+        assert(bot.randomPreset() != i);
+    }
+    bot.resetToIdle(); assert(bot.mood() == Bot::Mood::Idle && bot.expression() == Bot::Expression::Auto);
+    assert(bot.nextPreset() == 1);
+    char desc[96]; bot.describe(desc, sizeof(desc), Bot::Language::Chinese);
+    assert(std::strstr(desc, "Milo ") == desc);
+    for (size_t capacity = 1; capacity < 30; ++capacity) {
+        std::memset(desc, 0x7f, sizeof(desc));
+        bot.describe(desc, capacity, Bot::Language::Chinese);
+        assert(std::strlen(desc) < capacity && desc[capacity] == 0x7f);
+        // Our corpus consists of ASCII and three-byte UTF-8 codepoints.
+        for (size_t i = 0; desc[i];) {
+            if ((unsigned char)desc[i] < 128) ++i;
+            else { assert(desc[i + 1] && desc[i + 2]); i += 3; }
+        }
+    }
+    assert(Bot::moodCount() * Bot::expressionCount() * Bot::animationCount() == 960);
+    M5Canvas canvas(72, 72); bot.begin(&canvas);
+    bot.resetToIdle(); gNow += 16; bot.update(gNow);
+    bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Milo is resting") == 0);
+    bot.setExpression(Bot::Expression::Dizzy, 0); gNow += 16; bot.update(gNow);
+    bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Milo feels dizzy") == 0);
+    bot.describe(desc, sizeof(desc), Bot::Language::Chinese);
+    assert(std::strcmp(desc, "Milo 感到眩晕") == 0);
+    bot.setMood(Bot::Mood::Thinking, 0); gNow += 16; bot.update(gNow);
+    bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Milo is thinking") == 0);
+    bot.describe(desc, sizeof(desc), Bot::Language::Chinese);
+    assert(std::strcmp(desc, "Milo 正在思考") == 0);
+    bot.setName("Ava"); bot.setMood(Bot::Mood::Happy, 0); gNow += 16; bot.update(gNow);
+    bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Ava is happy") == 0);
+    bot.describe(desc, sizeof(desc), Bot::Language::Chinese);
+    assert(std::strcmp(desc, "Ava 很高兴") == 0);
+    for (uint8_t m = 0; m < Bot::moodCount(); ++m)
+        for (uint8_t e = 0; e < Bot::expressionCount(); ++e)
+            for (uint8_t a = 0; a < Bot::animationCount(); ++a) {
+                assert(*Bot::moodName((Bot::Mood)m, Bot::Language::Chinese));
+                assert(*Bot::expressionName((Bot::Expression)e, Bot::Language::Chinese));
+                assert(*Bot::animationName((Bot::Animation)a, Bot::Language::Chinese));
+                bot.setMood((Bot::Mood)m, 0); bot.setExpression((Bot::Expression)e, 0);
+                bot.setAnimation((Bot::Animation)a); gNow += 16; bot.update(gNow);
+                canvas.clear(); bot.draw(); assert(!canvas.outOfBounds());
+            }
+}
+
+static float eyeCentroidX(M5Canvas& canvas) {
+    float sum = 0, count = 0;
+    for (int y = 0; y < canvas.height(); ++y) for (int x = 0; x < canvas.width(); ++x)
+        if (canvas.readPixel(x, y) == botux::rgb565(32, 36, 41)) { sum += x; ++count; }
+    assert(count); return sum / count;
+}
+static void checkTemporaryGaze() {
+    using Bot = botux::BotUx;
+    M5Canvas canvas(200, 200); Bot bot; bot.begin(&canvas);
+    auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 60000; bot.setStyle(style);
+    bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
+    gNow += 1000; bot.gazeAt(-1, 0, 1800); bot.update(gNow); canvas.clear(); bot.draw();
+    float left = eyeCentroidX(canvas);
+    bot.setExpression(Bot::Expression::Neutral, 0); bot.gazeAt(1, 0, 1800);
+    gNow += 16; bot.update(gNow); canvas.clear(); bot.draw();
+    assert(eyeCentroidX(canvas) > left + 20);
+    gNow += 1900; bot.setExpression(Bot::Expression::Neutral, 0); bot.update(gNow); canvas.clear(); bot.draw();
+    assert(eyeCentroidX(canvas) < left + 36);
+}
+
+static void checkConnectedEyeMorphs() {
+    using Bot = botux::BotUx;
+    for (int size : {40, 72, 200}) for (int styleIndex = 0; styleIndex < 4; ++styleIndex) {
+        M5Canvas canvas(size, size); Bot bot; bot.begin(&canvas);
+        auto style = bot.style(); style.bodyStyle = Bot::BodyStyle::None;
+        style.eyeStyle = (Bot::EyeStyle)styleIndex;
+        style.bgColor = botux::rgb565(255,255,255);
+        style.eyeColor = style.pupilColor = botux::rgb565(0,0,0);
+        style.blinkMinMs = style.blinkMaxMs = 60000; bot.setStyle(style);
+        bot.setMotionAmount(0); bot.setExpression(Bot::Expression::Neutral, 0);
+        gNow += 16; bot.update(gNow); bot.setExpression(Bot::Expression::Joy, 600);
+        for (int frame = 0; frame < 40; ++frame) {
+            gNow += 25; bot.update(gNow); canvas.clear(); bot.draw();
+            std::vector<bool> seen(size * size, false); int components = 0;
+            for (int y = 0; y < size; ++y) for (int x = 0; x < size; ++x) {
+                if (seen[y * size + x] || ((canvas.readPixel(x,y) >> 11) & 31) >= 24) continue;
+                ++components; std::vector<int> queue(1, y * size + x); seen[y * size + x] = true;
+                for (size_t k = 0; k < queue.size(); ++k) {
+                    int px = queue[k] % size, py = queue[k] / size;
+                    for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                        int nx = px + dx, ny = py + dy;
+                        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+                        int id = ny * size + nx;
+                        if (!seen[id] && ((canvas.readPixel(nx,ny) >> 11) & 31) < 24) {
+                            seen[id] = true; queue.push_back(id);
+                        }
+                    }
+                }
+            }
+            assert(components == 2);
+        }
+    }
+}
+
+static void benchmarkEyes() {
+    using Bot = botux::BotUx;
+    for (int size : {40, 72, 200}) for (auto expr : {Bot::Expression::Neutral, Bot::Expression::Joy}) {
+        M5Canvas canvas(size, size); canvas.setRecording(false);
+        Bot bot; bot.begin(&canvas); bot.setExpression(expr, 0); bot.setMotionAmount(0);
+        bot.update(gNow);
+        auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 500; ++i) bot.draw();
+        double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / 500;
+        std::cout << "raster host " << size << " " << Bot::expressionName(expr) << ": " << us << " us/frame\n";
+    }
+}
+
 int main(int argc, char** argv) {
     assert(botux::BotUx().style().eyeColor == botux::rgb565(32, 36, 41));
+    checkCompanionSemantics();
+    checkTemporaryGaze();
+    checkConnectedEyeMorphs();
+    benchmarkEyes();
     checkCoverageAndFacePlacement();
     checkExplicitNeutralOverridesRestingMood();
     checkBodylessStateGlyphs();

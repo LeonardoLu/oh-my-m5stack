@@ -15,6 +15,7 @@ public:
     int32_t width() const { return _w; }
     int32_t height() const { return _h; }
     void clear() { _out.str(""); _out.clear(); _outOfBounds = false; }
+    void setRecording(bool on) { _recording = on; }
     std::string svgBody() const { return _out.str(); }
     bool outOfBounds() const { return _outOfBounds; }
 
@@ -104,6 +105,7 @@ private:
         if (fill) for (int yy = y; yy < y + h; ++yy)
             for (int xx = x; xx < x + w; ++xx)
                 if (!pointOutside(xx, yy)) _pixels[yy * _w + xx] = c;
+        if (!_recording) return;
         _out << "<rect shape-rendering='crispEdges' x='" << x << "' y='" << y << "' width='" << w << "' height='" << h
              << "' rx='" << r << "' " << (fill ? "fill='" : "fill='none' stroke='")
              << color(c) << "'/>\n";
@@ -114,6 +116,7 @@ private:
     uint32_t _textColor = 0;
     float _textSize = 1.0f;
     bool _outOfBounds = false;
+    bool _recording = true;
     std::vector<uint16_t> _pixels;
     std::ostringstream _out;
 };

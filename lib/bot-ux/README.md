@@ -147,3 +147,83 @@ A parent-run isolated StopWatch benchmark (310 px orb, existing host app) measur
 previous 39 FPS / 8.7 ms drawing. This is a measured quality/performance tradeoff,
 not a claim that antialiasing is free. Final application timing is tracked by the
 device integration validation.
+
+## Companion semantics (September 2026)
+
+The name defaults to `Milo`. `setName()` copies up to `kNameMax` (16) ASCII
+letters, digits, spaces, hyphens and apostrophes, strips other bytes and trims
+outer spaces. Null/empty input resets to Milo. The host owns persistence and its
+English-only name editor; the Bot owns the bounded copy.
+
+`Language::English` and `Language::Chinese` select static UTF-8 labels through
+`moodName`, `expressionName`, and `animationName`. `describe(buffer, capacity,
+language)` writes a short natural description, for example `Milo is resting`,
+`Milo feels dizzy`, `Milo is thinking`, or `Milo 正在思考`. While Idle, an explicitly
+selected expression supplies the description; otherwise the effective mood
+(including transient reactions) takes precedence. This keeps captions readable
+without listing enum labels. Menu labels still use the static name helpers.
+It returns the required byte count,
+always terminates a nonempty buffer, and avoids cutting UTF-8 characters. Hosts
+must provide an appropriate font; BotUx does not add font assets or render this
+text automatically. Names remain English in either language.
+
+`moodCount()` = 12, `expressionCount()` = 10 (including Auto), and
+`animationCount()` = 8 (including Auto). All existing enum numeric values remain
+unchanged. Hosts can independently iterate all **960 combinations** in a preview
+Bot. `mood()`, `expression()`, `animation()` report selections;
+`effectiveMood()` / `effectiveExpression()` report mood reactions and Auto's
+resolved face. Thinking and Blocked retain their intentional silhouette
+replacements, so a selected expression is preserved but not visible in those
+moods. Preview Bot state must not overwrite actual host status.
+
+`presetCount()` / `preset(index)` expose eight curated combinations. Indices wrap.
+`applyPreset(index)` applies one; `nextPreset()` advances and returns the index;
+`randomPreset()` returns a different preset using independent deterministic RNG
+(seed with `seedBlink` for device variation). `resetToIdle()` clears reactions and
+restores Idle / Auto / Auto. They preserve style, name, speed and motion settings.
+Hosts map A to random, B to next and double B to reset, delaying single B until
+the double-click window closes.
+
+`gazeAt(x, y, holdMs=1800)` takes normalized canvas coordinates, with negative x
+left, negative y up, each clamped to [-1,1]. Map a canvas-local tap as
+`2*x/width-1`, `2*y/height-1`. Only persistent Idle accepts it. The target eases in,
+expires using the same `millis()` clock as `update`, and then resumes wandering;
+`clearGaze()` cancels it. It does not call `poke` or change mood. Idle gaze now has
+24% radius horizontal and 20% vertical travel, independent of animation motion
+amount, preserving the characteristic neutral eye arrangement.
+
+### Eye coverage and validation
+
+Joy is now a single swept quadratic curve. Twelve small chords approximate its
+centerline with under 0.04 pixel flattening error at eyeRadius 24; each pixel
+receives coverage from the union distance exactly once. Endcaps remain round,
+and the neutral-to-Joy control points interpolate continuously. This removes
+independent capsule alpha overlap and the old three-piece geometry's bumps.
+At <=48px, the curve width is bounded to retain separation between the eyes.
+The curve uses 240 bytes of fixed float arrays on the stack and no frame heap
+allocation or extra framebuffer.
+
+Source-derived previews (top: Neutral to Joy; bottom: Neutral to Wink; first
+six frames plus part of the seventh, 100ms apart) capture the prior implementation
+and this change using the same existing host preview renderer:
+
+![Previous eye morph](docs/eye-morph-before.png)
+![Continuous eye morph](docs/eye-morph-after.png)
+
+These are RGB565 coverage primitives rendered through the SVG host adapter,
+not native device captures. Regenerate current source sheets with
+`tools/host-preview/render.sh`; the durable PNGs preserve the before/after
+comparison. The default rounded body and eye primitives are backed by real
+RGB565 raster pixels; other shapes remain SVG approximations.
+
+Validation on 2026-09-06: existing host checks pass; added checks exercise all 960
+selector combinations, safe names, tiny UTF-8 buffers, preset transitions,
+temporary tap gaze and expiry. A connected-component pixel check verifies two
+continuous eye marks through 40 morph frames for all four eye styles at 40, 72,
+and 200px (480 frames). It caught and fixed eyes touching at 40px.
+
+Clang C++11 `-O2`, 500 draws, raster-backed host adapter with SVG recording
+disabled: full Neutral/Joy draw at 40px **3.12/3.42 µs**, 72px **8.25/8.91 µs**,
+200px **48.33/50.68 µs**. These isolate CPU/raster cost from SVG serialization and
+are not ESP32 timings. The parent integration owns native frame/memory timing,
+firmware builds, flashing and actual device captures.

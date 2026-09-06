@@ -29,7 +29,7 @@ implementation is `src/BotUx.cpp`.
 ## Visual invariants
 
 - Neutral defines the face's proportions. Keep the other expressions close to
-  its eye spacing and upper-right placement; avoid extreme angles and size asymmetry.
+  its eye spacing and calm proportions; avoid extreme angles and size asymmetry.
 - Joy/Wink/Alarmed morph continuously through eased scalar geometry. Do not
   restore abrupt per-expression glyph replacement for ordinary facial expressions.
 - Default ellipse and capsule boundaries use explicit RGB565 coverage. Preserve
@@ -42,3 +42,10 @@ implementation is `src/BotUx.cpp`.
 - Explicit Neutral must restore the baseline face even under Sleepy/Waiting;
   Auto keeps the mood's face. Keep tiny toolbar expressions on the same eased
   geometry path, rather than masking them with fixed generic eye glyphs.
+
+- Joy eyes rasterize the union of a swept quadratic once per pixel, with fixed
+  stack geometry; avoid overlapping blended segment fringes and visible bumps.
+- Names are bounded ASCII with Milo fallback. Bilingual descriptions use UTF-8-safe
+  truncation. Keep the consuming Cjk18 corpus current when changing Chinese copy.
+- Presets, temporary gaze and combination enumeration are shared semantics. Device
+  preview instances must remain separate from persistent/host-driven state.

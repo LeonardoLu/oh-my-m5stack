@@ -1,8 +1,8 @@
 # StopWatch round-edge controls
 
-Status: Done and battery implementation, host validation, firmware upload and
-device framebuffer review complete. Liquid physical-button feedback is undergoing
-its final integration pass. Finger-on-glass behavior remains separate evidence.
+Status: Done, battery and liquid physical-button feedback implementation, host
+validation, firmware upload and device framebuffer review are complete. Finger-on-glass
+and physical-button behavior remain separate human acceptance evidence.
 
 ## Completion footer
 
@@ -77,7 +77,10 @@ not as a precision mechanical measurement. While a button is physically held,
 its matching colored liquid edge shape expands over 160 ms. Its outer edge
 follows the physical display circle; its inner edge uses a smooth central bulge
 whose depth and tangent both converge at the pointed ends. A brief expansion
-overshoot settles to the held shape without becoming an equal-width line. Each
+overshoot settles to the held shape without becoming an equal-width line. The
+settled A and B shapes each span 56 degrees; power spans 48 degrees. Analytic
+single-pixel coverage antialiases both contours against the actual underlying
+RGB565 page pixel. Each
 button owns its press timestamp, so a later button in an A+B chord starts its own
 animation. Releasing a button removes its shape on the next rendered frame. The
 overlay is visual feedback only and does not replace or synthesize the existing
@@ -94,13 +97,24 @@ shape stuck on screen. The patching hook accepts only the pinned revision and ex
 original or patched file hashes, and a second build verifies the patched hashes
 without changing them.
 
-Face rendering clears and invalidates its partial-update background whenever a
-button edge changes. Static settings and editor pages force a full redraw rather
-than a list-band update. In each path the liquid shapes render last and the
-underlying content returns without residual pixels on release. Serial-only `keys`
-and battery percentage
-overrides support framebuffer geometry captures. These overrides do not prove the
-physical button signals and must be disabled after capture.
+The 27 expansion masks are computed once at startup, so production frames blend
+cached coverage with integer RGB565 operations and do not run per-pixel trigonometry.
+Typed `lgfx::rgb565_t` scratch pixels keep `readRect`, blending and `pushImage` in
+native color order; the raw `uint16_t` overload uses transport byte order and is
+not used for this composition. One 59,840-byte PSRAM scratch block holds the largest
+fixed dirty rectangle. The masks occupy 754,785 bytes of PSRAM.
+
+Face feedback keeps a clean canonical canvas. A transition submits one fully
+composited frame; normal animation refreshes the bot coherently, and HUD bands are
+submitted at most every 200 ms through the same compositing path. Static full pages
+and list bands are copied through scratch tiles no taller than 64 rows, blended,
+then submitted, so the panel never receives a clean intermediate frame and the
+canonical canvas remains unmodified. A partial list update additionally restores
+the complete prior/current button dirty rectangles outside the band. Release,
+button changes and disabling the effect therefore restore the underlying pixels.
+Serial-only `keys` and battery percentage overrides support framebuffer geometry
+captures. These overrides do not prove physical button signals and must be disabled
+after capture.
 
 Display & Sound has a fifth `BUTTON FX` / `按下效果` row. Its persisted
 `buttonFx` preference defaults on. Turning it off suppresses and clears the
@@ -110,7 +124,9 @@ their existing input paths. The five shared visible/hit rows use centers
 beginning at `y=406`.
 
 `test_watch_button_feedback.cpp` covers held/released transitions, independent
-expansion clocks, simultaneous buttons and invalid power samples. The clean
+expansion clocks, simultaneous buttons, invalid power samples, analytic coverage
+at every expansion step, fixed dirty bounds and separation of actual liquid pixels
+from the bot region. The clean
 dependency build applied the PMIC patch from its original hashes; an immediate
 second build reported both M5GFX and M5Unified patches already verified. The
 intermediate source build used 48,888 bytes RAM and 1,023,653 bytes flash.
@@ -141,3 +157,40 @@ serial port released. Battery values and key masks in these captures are diagnos
 render overrides. They exercise production framebuffer geometry and redraw paths,
 but do not claim actual battery measurements, optical panel output, physical held
 button recognition or a finger tap on the smaller Done control.
+
+## Final liquid integration evidence
+
+The final Watch source is commit `52493f6`. Its incremental build passed with
+48,920 bytes RAM and 1,026,401 bytes flash. The 1,026,768-byte firmware image has
+SHA-256 `084efaaccaf7f300e1b881717bfc0000e8d76fc566604f8196b5fc42602ad174`.
+The upload log reports hash verification for every written segment. Startup
+allocated both feedback buffers and generated all 754,785 mask bytes in 805 ms.
+
+The corrected device framebuffer captures under
+`tmp/watch-edge-buttons/liquid-aa-optimized-device/` show yellow A, blue B and red
+lower-left power liquid shapes with the intended antialiased edges; the compact
+100 percent green battery tooth with its dark charging bolt; the `BUTTON FX` /
+`按下效果` setting in both states; the power overlay on Settings; and a clean page
+after release. These captures use the typed RGB565 optimized source. Final commit
+`52493f6` keeps that color and coverage path and only avoids a redundant HUD band
+submission when the panel already has a recent HUD; the final upload did not repeat
+the framebuffer gallery. The charging flag was live in the capture telemetry, while
+the displayed 100 percent value was a diagnostic override and is not a battery
+measurement.
+
+The same device session toggled `buttonFx` off through the editor, rebooted with
+`button_fx=0`, toggled it on, and rebooted with `button_fx=1`, confirming NVS
+persistence on hardware through the diagnostic pointer path. This does not claim a
+physical touch on that row. Final render telemetry measured a single-A Face state
+frame at 111,716 submitted pixels and 64.351 ms; a three-button frame coincident
+with the 200 ms HUD refresh at 249,541 pixels and 109.255 ms; the corresponding
+release/HUD frame at 92.199 ms; and Settings power apply/release at 11.672/8.303 ms.
+The 80--110 ms multi-region Face cases are a known update-time limit; no claim is
+made that every feedback frame meets a 16 ms cadence.
+
+The final live state was Face, Chinese, manual preview off, `button_fx=1`, diagnostic
+keys off, PMIC status readable with power not held, and the identity unstored touch
+profile. The serial port was closed and no process retained it. The `keys` captures
+exercise the production rendering and restoration paths only. Physical held/release
+recognition and optical absence of flicker still require human interaction with the
+device.

@@ -42,7 +42,7 @@ Use `textWidth` to align/center and `lineHeight` to budget vertical space.
 | Latin18 | 18 / 23 px | 5,981 | 95 |
 | Latin24 | 24 / 29 px | 10,919 | 95 |
 | Clock36 | 36 / 41 px | 4,145 | 17 |
-| Cjk18 | 18 / 23 px | 31,811 | 265 |
+| Cjk18 | 18 / 23 px | 32,432 | 269 |
 
 Glyph records also consume approximately 16 bytes each depending on target ABI.
 Clock36 includes digits, colon, slash, space, AM/PM and fallback question mark.
@@ -118,3 +118,11 @@ strokes, span operation counts, continuous scroll/inertia/tap suppression, all
 These are host correctness and operation-count checks, not device FPS claims.
 Measure target steady frame timing and memory in the consuming app; serial image
 transfer time must be excluded from frame-time measurements.
+
+## Sound product
+
+[UxSound / UxSoundM5 / optional UxSoundPcm](SOUND.md) provide enveloped, harmonic
+UI cues, musical notes/scales, and signed/unsigned 8-bit PCM playback. The synth
+owns no hardware and uses no heap. The M5 output adapter uses three fixed buffers,
+handles the speaker's borrowed-buffer contract and tolerates 100 ms host frames.
+Sound is independently linked and has no font or graphics dependency.

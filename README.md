@@ -18,6 +18,7 @@ lib/ux-components/          reusable native UI products and subset fonts
 stopwatch/bot-ux-watch/      watch app (PlatformIO project)
 core2/bot-ux-codex-core2/    core2 app (PlatformIO project)
 specs/                       task specs
+wiki/bot-ux/                 searchable bilingual native animation catalog
 tmp/                         scratch / research notes (gitignored)
 ```
 
@@ -47,46 +48,62 @@ uses the M5PM1/M5IOE1 drivers and OPI PSRAM configuration.
 
 ## Watch controls
 
-Press A to choose a random companion preset. B advances to the next preset;
-double-click B within 320 ms to return to idle. While idle, tapping the screen
-briefly moves the bot's gaze toward the tap. Hold A+B together for three seconds
-to open settings; long-press the bot for personalization. Hold B to dim the face;
+Press A to choose a non-repeating random mood from the complete shared set. B
+advances to the next mood; double-click B within 320 ms to return to automatic
+Idle. A face touch temporarily looks straight ahead when inside the bot and
+toward the contact when outside it, then returns to the selected mood. Hold A+B
+together for three seconds to open settings; hold the bot for three seconds for
+personalization. Hold B to dim the face;
 the next touch/button press wakes it without activating a control.
 
 The watch samples raw display contacts every 8 ms and derives its own press/release
 edges. A captured control activates on release inside its original target within
 one second; 20 px of vertical list travel instead begins scrolling, and stationary
-face holds become long presses after two seconds. Lists follow the finger with
+face holds become long presses after three seconds. Button and non-face holds
+retain the two-second threshold. Lists follow the finger with
 continuous pixel scrolling and inertia, while a scroll gesture never also clicks a
 row.
 
 Swipe down from the top edge for the compact battery/charging panel. Double-tap
 the visible time to open settings. Settings, Bot Personality and every editor keep
-fixed Back/Done controls outside the scrolling content, with native antialiased
-text, pressed feedback and a live HSV body-color picker. The M5PM1 power button
+a single fixed Done control outside the scrolling content, with native antialiased
+text, rounded touch targets and a live HSV body-color picker. Settings and
+Personality show four rows; preview editors show two rows and scroll additional
+choices. A touch clears persistent button selection and shows only the captured
+control’s pressed fill. The M5PM1 power button
 returns directly to the face and cancels unsaved editor changes. Its green status
 LED is an independent persisted display option, off by default.
 Time and `yyyy/mm/dd {weekday}` share one region. A hideable Bot description
 occupies the opposite region; Layout swaps the two. Time/date use the RTC;
-preferences use NVS. Auto expression slowly shuffles calm moods, while interaction
+preferences use NVS. Auto rotates through Idle, Listening, Thinking, Happy,
+Working, Waiting and Done, while interaction
 delays the next change. Filtered wrist motion adds subtle movement with a cooldown
 on shake reactions.
 
 The companion is **Milo** by default. Both devices support a 16-character name,
 English/Chinese UI and descriptions, and independent live selectors for all
-12 moods × 10 expressions × 8 animations (960 combinations). Preview choices do
+13 moods × 10 expressions × 8 animations (1,040 combinations). Preview choices do
 not overwrite the persistent expression/action or Core2 host state. Gaze offers
 Auto plus nine explicit directions: Center, Left, Right, Up, Down and the four
 diagonals. Temporary screen-directed gaze returns to that preference; normal
 presets retain continuous motion. Watch contact and gaze validation is tracked in
-[the current validation record](specs/touch-gaze-validation.md).
+[the Watch settings specification](specs/watch-settings-iteration.md) and
+[the combined acceptance record](specs/companion-catalog-validation.md).
 
 ## The bot
 
 `bot-ux` renders into a caller-provided `M5Canvas` sprite and never owns the
 display. Hosts control mood, talking, interaction, and appearance. Animation uses
 elapsed time and fixed state rather than frame-count timing. See
-[the component guide](lib/bot-ux/README.md).
+[the component guide](lib/bot-ux/README.md),
+[the searchable illustrated catalog](wiki/bot-ux/intro.html), or its
+[Markdown edition](wiki/bot-ux/intro.md). The catalog has bilingual explanations
+and actual native-rendered animations for all 31 enumeration entries.
+
+Waiting keeps an alert, patient face; Asleep closes its eyes and breathes deeply
+with drifting z marks. Thinking dots have larger visible travel. All ordinary
+faces retain Idle’s baseline proportions; selected gaze changes mirrored
+perspective, with downward travel closer to center.
 
 ## Core2 controller
 
@@ -107,6 +124,9 @@ battery number inside its icon. Agent cards use the exact host color, a corner
 number and the corresponding lighting status. The selected Bot follows that
 slot. Blue means Working, orange Needs input, green New reply, red Error and
 white Idle. Green does not establish completion; unknown signals stay Unknown.
+A fresh Working → New reply transition adds an attention highlight for up to
+30 seconds. Screen or button interaction dismisses it; persistent green does
+not restart the window. Authoritative host colors and states remain intact.
 Meaningful transitions trigger a bounded highlight and optional sound, with silent
 initial/reconnect baselines. See [the signal contract](specs/agent-signal-contract.md). End-to-end connection
 validation is tracked in [the iteration record](specs/interaction-validation.md).
@@ -139,9 +159,9 @@ These checks require a C++11 compiler, without an attached device:
 sh tools/check_host.sh
 ```
 
-The suite runs 18 standalone C++ contracts plus the real BotUx renderer checks.
+The suite runs 20 standalone C++ contracts plus the real BotUx renderer checks.
 It covers input timing, continuous scrolling, native font/shape coverage, naming,
-960 combinations at multiple late time windows, gaze and dot antialiasing, HID
+1,040 combinations at multiple late time windows, gaze and dot antialiasing, HID
 framing, exact host status projection, LED envelopes, sound waveforms/PCM and
 playback-thread stalls.
 Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
@@ -156,11 +176,14 @@ Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
 [HID validation](specs/interaction-validation.md),
 [previous UX validation](specs/ux-polish-validation.md),
 [previous shared UX requirements](specs/ux-components-iteration.md),
-[current requirements](specs/interaction-dynamics.md),
+[earlier interaction requirements](specs/interaction-dynamics.md),
+[current Watch settings requirements](specs/watch-settings-iteration.md),
+[current Bot vocabulary and catalog](specs/bot-vocabulary-iteration.md),
+[current combined validation](specs/companion-catalog-validation.md),
 [shared UX library](specs/ux-components-library.md),
 [previous shared UX validation](specs/ux-components-validation.md),
 [interaction dynamics validation](specs/interaction-dynamics-validation.md),
-[current Watch touch/gaze validation](specs/touch-gaze-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
+[previous Watch touch/gaze validation](specs/touch-gaze-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
 research, generated previews and validation logs.
 
 ## License

@@ -16,6 +16,7 @@ lib/ux-components/               selective native text, shapes, pointer, keyboar
 stopwatch/bot-ux-watch/      watch app (PlatformIO project)
 core2/bot-ux-codex-core2/    core2 app (PlatformIO project)
 specs/                       task specs (source of truth)
+wiki/bot-ux/                 bilingual illustrated catalog with native animation captures
 tmp/                         scratch / research notes (gitignored)
 ```
 
@@ -29,9 +30,11 @@ tmp/                         scratch / research notes (gitignored)
 
 - `begin(M5Canvas*)` — bind a sprite, never owns the display.
 - `setStyle(Style)` — personalization (colors, eye/body style, sizes).
-- `setMood(Mood)` — persistent mood; use header enum/count helpers for the complete current set.
+- `setMood(Mood)` — persistent mood; 13 current values including append-only Asleep.
+  Use header counts/names: 13 moods × 10 expressions × 8 animations = 1,040 combinations.
 - `setTalking(bool)`, `setBattery(pct)`, `setSignal(bars)`, `setTime(h,m,s,pm)`, `setLabel(text)`.
-- `setGazeDirection(GazeDirection)` — Auto/Center/Left/Right/Up/Down, temporary `gazeAt` overrides expire.
+- `setGazeDirection(GazeDirection)` — Auto plus nine explicit directions (Center, L/R/U/D, four diagonals);
+  temporary `gazeAt` overrides expire.
 - `poke()` — transient surprise→happy reaction.
 - Naming, bilingual `describe`, curated presets and temporary `gazeAt` are additive APIs.
   Counts/name helpers drive independent device combination previews.
@@ -40,9 +43,13 @@ tmp/                         scratch / research notes (gitignored)
 ## Working rules
 
 - Match existing code style; keep comments purposeful.
-- The user's current goal and `specs/touch-gaze-iteration.md` supersede older
+- The user's current goal, `specs/watch-settings-iteration.md` and
+  `specs/bot-vocabulary-iteration.md` supersede older touch/gaze and
   app notes. Core2 now targets a real Codex Micro-compatible Bluetooth HID link;
   distinguish pairing, app handshake, host feedback, and local animation previews.
+- Keep the bilingual `wiki/bot-ux/intro.md` and standalone `intro.html` catalog
+  current when changing moods, expressions or animation semantics; regenerate
+  examples through the native host renderer rather than substituting CSS motion.
 - Keep durable implementation and validation notes in `specs/`; `tmp/` is scratch,
   never the sole source of an implementation contract.
 - Do not over-engineer edge cases (see `specs/start-up.md`).

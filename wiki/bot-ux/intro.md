@@ -196,6 +196,12 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 `Animation::Sparkle` — 三个小光点围绕正在呼吸的角色运动。 Three small accent lights circulate around the breathing bot.
 
+## 九方向眼神 · Gaze perspective
+
+![九方向原生视线图](../../lib/bot-ux/docs/nine-directions-raster.png)
+
+上排：左上 / 上 / 右上。中排：左 / 正面 / 右。下排：左下 / 下 / 右下。下看的极限位置更接近中心；Auto 是额外的自主视线模式。
+
 ## Composition and controls
 
 Auto follows the effective mood. Thinking and Blocked replace the silhouette; Happy and Surprised prioritize their mood expression. Explicit Neutral restores baseline eyes under Sleepy, Waiting and Asleep, while Asleep retains z marks. All eye shapes use eased scalar geometry. Nine explicit directions include center, four cardinal and four diagonal poses, with mirrored yaw and pitch. Downward movement is limited to 0.16 body radius. Thinking has 0.42-radius vertical dot amplitude before amount/reduced-motion scaling.

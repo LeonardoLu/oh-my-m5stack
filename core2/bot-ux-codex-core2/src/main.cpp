@@ -7,6 +7,7 @@
 #include "BottomLeds.h"
 #include "CodexLink.h"
 #include "FeedbackLevel.h"
+#include "FreshReplyAttention.h"
 #include "Settings.h"
 #include "AgentSignal.h"
 #include <UxText.h>
@@ -53,8 +54,10 @@ BottomLeds bottomLeds;
 CodexLink codexLink;
 BatteryDoubleTap batteryDoubleTap;
 agentsignal::Model agentSignals;
+freshreply::Attention freshReplyAttention;
 uint32_t agentRevision = 0;
 uint32_t alertUntil[6]{};
+uint8_t freshReplyMask = 0;
 Page page = Page::Agents;
 Target pressed;
 bool touching = false;
@@ -193,14 +196,30 @@ void syncSettings()
 {
     const Settings::Data& data = settings.data();
     if (memcmp(&data, &appliedSettings, sizeof(data)) == 0) return;
+    const bool volumeChanged = data.volume != appliedSettings.volume;
     settings.apply(bot);
     audio.setVolume(corefeedback::synthVolume(data.volume));
     audio.setEnabled(data.audio != 0);
     bottomLeds.setBrightness(data.ledBrightness);
     bottomLeds.setMode(data.ledMode);
-    if (!data.notifications) { for (auto& until : alertUntil) until = 0; bottomLeds.notify(0, nowMs); }
+    if (!data.notifications) {
+        for (auto& until : alertUntil) until = 0;
+        freshReplyAttention.dismiss();
+        bottomLeds.notify(0, nowMs);
+    }
+    // Apply both gain stages and mute first, then audition the newly selected
+    // nonzero level. Muted and level-zero settings remain silent.
+    if (volumeChanged && data.audio && data.volume) audio.select();
     setBotMood();
     appliedSettings = data;
+    uiDirty = true;
+}
+
+void dismissFreshReplies()
+{
+    if (!freshReplyAttention.mask(nowMs)) return;
+    freshReplyAttention.dismiss();
+    freshReplyMask = 0;
     uiDirty = true;
 }
 
@@ -267,6 +286,7 @@ void touchBegin(int16_t x, int16_t y)
 {
     touching = true;
     screenTouchGesture = x >= 0 && x < kScreenW && y >= 0 && y < kScreenH;
+    if (screenTouchGesture) dismissFreshReplies();
     if (settings.isOpen())
     {
         batteryDoubleTap.cancel();
@@ -389,9 +409,13 @@ bool handleTouch()
 void handleButtons(bool screenTouchEvent)
 {
     if (screenTouchEvent || touching) return;
+    const bool buttonA = M5.BtnA.wasClicked();
+    const bool buttonB = M5.BtnB.wasClicked();
+    const bool buttonC = M5.BtnC.wasClicked();
+    if (buttonA || buttonB || buttonC) dismissFreshReplies();
     if (settings.isOpen())
     {
-        if (M5.BtnB.wasClicked())
+        if (buttonB)
         {
             batteryDoubleTap.cancel();
             settings.close();
@@ -400,7 +424,7 @@ void handleButtons(bool screenTouchEvent)
         }
         return;
     }
-    if (M5.BtnA.wasClicked())
+    if (buttonA)
     {
         batteryDoubleTap.cancel();
         selectedAgent = (selectedAgent + 5) % 6;
@@ -408,14 +432,14 @@ void handleButtons(bool screenTouchEvent)
         audio.select();
         uiDirty = true;
     }
-    else if (M5.BtnB.wasClicked())
+    else if (buttonB)
     {
         batteryDoubleTap.cancel();
         page = page == Page::Agents ? Page::Control : Page::Agents;
         audio.select();
         uiDirty = true;
     }
-    else if (M5.BtnC.wasClicked())
+    else if (buttonC)
     {
         batteryDoubleTap.cancel();
         selectedAgent = (selectedAgent + 1) % 6;
@@ -465,12 +489,15 @@ void drawAgentCard(uint8_t index)
     uint16_t fill = rgb24to565(rgb), ink = contrastingInk(rgb);
     bool down = pressed.type == TargetType::Agent && pressed.index == index;
     if (down) fill = ux::blend565(fill, ink, 48);
+    const bool freshReply = freshReplyMask & (1u << index);
+    if (freshReply) fill = ux::blend565(fill, kWhite, 42);
     if (alertUntil[index] && (int32_t)(alertUntil[index] - nowMs) > 0 && !settings.data().reducedMotion) {
         float t = (1600 - (alertUntil[index] - nowMs)) / 1600.0f;
         float envelope = sinf(3.14159265f * t);
         fill = ux::blend565(fill, ink, (uint8_t)(envelope * 60));
     }
     ux::roundRect(canvas, x, y, 100, 60, 9, fill);
+    if (freshReply) ux::strokeRoundRect(canvas, x, y, 100, 60, 9, ink, 2.8f);
     if (index == selectedAgent) ux::strokeRoundRect(canvas, x+2, y+2, 96, 56, 7, ink, 1.7f);
     ux::circle(canvas, x+85, y+13, 9, ux::blend565(fill, ink, 26));
     char badge[2] = {(char)('1'+index),0};
@@ -594,9 +621,10 @@ void handleSerial()
                 }
                 if (sscanf(serialCommand,"ui-tap %d %d",&settingsX,&settingsY)==2) {
                     if(settings.isOpen()) {
+                        dismissFreshReplies();
                         settings.touchBegin(settingsX,settingsY); settings.touchEnd(settingsX,settingsY); syncSettings(); uiDirty=true;
                     }
-                    Serial.printf("[settings] open=%u theme=%u volume=%u gain=%u audio=%u\n",settings.isOpen(),settings.data().theme,settings.data().volume,audio.volume(),settings.data().audio);
+                    Serial.printf("[settings] open=%u theme=%u volume=%u gain=%u speaker=%u audio=%u busy=%u failures=%lu\n",settings.isOpen(),settings.data().theme,settings.data().volume,audio.volume(),audio.speakerVolume(),settings.data().audio,audio.busy(),static_cast<unsigned long>(audio.failures()));
                     serialLength=0; return;
                 }
 
@@ -709,12 +737,14 @@ void loop()
     codexLink.update(battery, charging, nowMs);
     uint8_t alerts = agentSignals.update(codexLink.lighting(),
         codexLink.controlReady() && codexLink.threadLightingFresh(), nowMs);
+    freshReplyAttention.retain(freshreply::current(agentSignals));
     if (agentSignals.revision() != agentRevision) {
         agentRevision = agentSignals.revision(); setBotMood(); uiDirty = true;
     }
     for (auto& until : alertUntil) if (until && (int32_t)(nowMs - until) >= 0) { until = 0; uiDirty = true; }
     if (alerts && settings.data().notifications) {
         for (uint8_t i = 0; i < 6; ++i) if (alerts & (1u << i)) alertUntil[i] = nowMs + 1600;
+        freshReplyAttention.start(freshreply::fromNotifications(alerts, agentSignals), nowMs);
         bottomLeds.notify(alerts, nowMs);
         bool error = false;
         for (uint8_t i = 0; i < 6; ++i) if ((alerts & (1u << i)) && agentSignals.slot(i).signal == agentsignal::Signal::Error) error = true;
@@ -722,6 +752,11 @@ void loop()
     }
     const bool screenTouchEvent = handleTouch();
     handleButtons(screenTouchEvent);
+    const uint8_t activeFreshReplies = freshReplyAttention.mask(nowMs);
+    if (activeFreshReplies != freshReplyMask) {
+        freshReplyMask = activeFreshReplies;
+        uiDirty = true;
+    }
     audio.update();
     if (codexLink.state() != lastLinkState || codexLink.controlReady() != lastControlReady)
     {
@@ -742,13 +777,15 @@ void loop()
     syncSettings();
     const bool animatePreview = settings.animate(nowMs);
     if (!settings.isOpen() && page == Page::Agents && !settings.data().reducedMotion)
+    {
         for (uint8_t i = 0; i < 6; ++i) if (alertUntil[i] && (int32_t)(alertUntil[i]-nowMs)>0) uiDirty = true;
+    }
     updateMotion();
     bot.update(nowMs);
     const uint32_t drawStarted = micros();
     bot.draw();
     bottomLeds.update(codexLink.lighting(), nowMs, settings.data().reducedMotion != 0,
-                      codexLink.controlReady(), selectedAgent);
+                      codexLink.controlReady(), selectedAgent, freshReplyMask);
     const bool fullFrame = uiDirty;
     const bool partialPreview = !fullFrame && animatePreview;
     if (fullFrame)

@@ -42,12 +42,16 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   separate approval/response reason; preserve those limits.
 - Cards show host color/status and corner index; selected Bot follows its slot.
   Notifications are bounded and deduplicated, with silent reconnect baselines.
+  A Working → NewReply event starts a complete-like fresh-reply attraction for
+  up to 30 seconds; it never renames green to Done and interaction dismisses it.
   Clear cached lighting on connection changes and await fresh thread lighting.
 - The top bar uses separate Bluetooth and app-ready icons. The battery is the
   settings entry: two valid taps within 420 ms open settings; one tap is inert.
 - Settings provide independent audio enable and six-step volume controls; mute
-  preserves the selected volume. Settings also provide continuous RGB editing
-  for the bot body, eyes, and accent,
+  preserves the selected volume. A changed nonzero volume previews Select only
+  after its new software gain is applied. The app raises Core2's hardware master
+  to 128 with bounded single-channel mixer headroom. Settings also provide
+  continuous RGB editing for the bot body, eyes, and accent,
   plus style, English naming, English/Chinese descriptions and independent
   12×10×8 previews in a separate checked 112 px canvas. Motion also selects
   Auto plus nine explicit gaze directions: Center/Left/Right/Up/Down and the
@@ -57,7 +61,7 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   that requests a toggle; the protocol does not report its on/off value. Only a
   successfully sent PTT press shows MIC ACTIVE until release.
 - Paper/Warm/Dark use Settings::themePalette across deck and settings, with
-  readable muted text and vivid accents on each palette's surfaces.
+  high-contrast surfaces, outlines and vivid accents on each palette.
 - Reject bootloader/firmware operations; incompatible hardware firmware must
   never be accepted by the Core2 emulator.
 
@@ -87,8 +91,9 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   selectors every preview frame (native cost drops from full-page ~88 ms).
 - Shared UX fonts/shapes use RGB565 coverage on canvases. Active status glyphs
   have color without tiles; the battery number is inside its icon.
-- Bottom2 offers Off/Host/Alive. Alive preserves status hue with gentle breathing,
-  traveling emphasis and bounded interaction. Reduced Motion is static. Both
+- Bottom2 offers Off/Host/Alive. Alive preserves status hue with vivid breathing,
+  traveling emphasis and bounded interaction. Fresh NewReply can animate its
+  known green hue without claiming task completion. Reduced Motion is static. Both
   mode Off and brightness zero immediately clear LEDs; notify(0) cancels notices.
 - Current contracts: specs/touch-gaze-iteration.md, specs/agent-signal-contract.md
   and specs/core2-alive-lighting.md. Validate with tools/check_host.sh and native

@@ -213,10 +213,11 @@ void BottomLeds::hold(uint32_t color, bool active, uint32_t nowMs)
 }
 
 void BottomLeds::update(const LightingState& lighting, uint32_t nowMs, bool reducedMotion,
-                        bool connected, uint8_t selectedAgent)
+                        bool connected, uint8_t selectedAgent, uint8_t freshReplyMask)
 {
     if (!_available || nowMs - _lastFrameMs < 50) return;
     _lastFrameMs = nowMs;
+    _events.freshReplyMask = freshReplyMask & 0x3Fu;
 
     bottomled::Color generated[kCount]{};
     bottomled::frame(lighting, _events, nowMs, reducedMotion, connected,

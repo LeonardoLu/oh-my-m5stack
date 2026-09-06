@@ -141,18 +141,18 @@ const char* Settings::themeName(uint8_t value)
 Settings::ThemePalette Settings::themePalette(uint8_t value)
 {
     static constexpr ThemePalette palettes[kThemeCount] = {
-        {botux::rgb565(243, 239, 229), botux::rgb565(255, 253, 247),
-         botux::rgb565(230, 225, 213), botux::rgb565(170, 166, 156),
-         botux::rgb565(23, 29, 38), botux::rgb565(88, 91, 96),
-         botux::rgb565(36, 95, 224)},
-        {botux::rgb565(249, 231, 206), botux::rgb565(255, 246, 231),
-         botux::rgb565(242, 204, 157), botux::rgb565(189, 143, 101),
-         botux::rgb565(59, 39, 30), botux::rgb565(128, 86, 62),
-         botux::rgb565(184, 55, 13)},
-        {botux::rgb565(21, 25, 35), botux::rgb565(40, 46, 60),
-         botux::rgb565(57, 68, 90), botux::rgb565(104, 118, 144),
-         botux::rgb565(250, 248, 242), botux::rgb565(187, 195, 208),
-         botux::rgb565(115, 167, 255)},
+        {botux::rgb565(234, 240, 249), botux::rgb565(255, 255, 252),
+         botux::rgb565(207, 219, 238), botux::rgb565(102, 119, 147),
+         botux::rgb565(12, 24, 42), botux::rgb565(64, 79, 102),
+         botux::rgb565(0, 92, 232)},
+        {botux::rgb565(255, 222, 177), botux::rgb565(255, 247, 229),
+         botux::rgb565(242, 179, 103), botux::rgb565(151, 79, 34),
+         botux::rgb565(55, 27, 16), botux::rgb565(112, 57, 31),
+         botux::rgb565(211, 49, 0)},
+        {botux::rgb565(7, 12, 24), botux::rgb565(22, 31, 50),
+         botux::rgb565(43, 59, 91), botux::rgb565(116, 143, 187),
+         botux::rgb565(255, 252, 242), botux::rgb565(190, 205, 229),
+         botux::rgb565(54, 165, 255)},
     };
     return palettes[value < kThemeCount ? value : 0];
 }

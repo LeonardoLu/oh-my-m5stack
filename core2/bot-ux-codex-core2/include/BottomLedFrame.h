@@ -22,6 +22,7 @@ struct Events {
     uint32_t controlAt = 0;
     uint32_t controlColor = 0;
     uint32_t holdColor = 0;
+    uint8_t freshReplyMask = 0;
     bool hasControl = false;
     bool controlHeld = false;
 };
@@ -148,6 +149,13 @@ inline void frame(const LightingState& lighting, const Events& events,
     const bool controlPulse = !reduced && events.hasControl && controlAge < 900u;
     const float controlPhase = controlAge / 900.0f;
     const float controlHead = -2.0f + 13.0f * controlPhase;
+    uint32_t freshReplyColor = 0;
+    for (uint8_t i = 0; i < LightingState::kSlotCount; ++i)
+        if ((events.freshReplyMask & (1u << i)) && lighting.slots[i].active())
+        {
+            freshReplyColor = lighting.slots[i].color;
+            break;
+        }
     for (uint8_t i = 0; i < kCount; ++i)
     {
         int8_t slot = -1;
@@ -157,20 +165,25 @@ inline void frame(const LightingState& lighting, const Events& events,
         if (slot >= 0 && !zone.active()) continue;
         // Empty ambient LEDs may show quiet device presence; empty agent LEDs
         // stay black so Alive never invents a per-slot status color.
+        const bool replySlot = slot >= 0 && (events.freshReplyMask & (1u << slot));
+        const bool replyAmbient = slot < 0 && !zone.active() && freshReplyColor;
         const bool localAmbient = slot < 0 && !zone.active()
-            && (events.controlHeld || controlPulse);
+            && (events.controlHeld || controlPulse || replyAmbient);
         const uint32_t color = zone.active() ? zone.color
-            : (localAmbient ? (events.controlHeld ? events.holdColor : events.controlColor)
+            : (localAmbient ? (events.controlHeld ? events.holdColor
+                            : (replyAmbient ? freshReplyColor : events.controlColor))
                             : 0x84909C);
         const uint8_t hostLevel = zone.active() ? zone.brightness
-            : (localAmbient ? 150 : 52);
-        float gain = 96.0f + 64.0f * breath;
-        if (slot == selected) gain += 34.0f;
+            : (replyAmbient ? 230 : (localAmbient ? 170 : 60));
+        // Active host state is the dominant light source. The broad travel and
+        // breathing stay in the host hue, with enough range to read on Bottom2.
+        float gain = 150.0f + 68.0f * breath;
+        if (slot == selected) gain += 28.0f;
         if (!reduced)
         {
             const float angle = (nowMs % 8000u) * (6.2831853f / 8000.0f) - i * 0.62831853f;
             const float wave = 0.5f + 0.5f * cosf(angle);
-            gain += 45.0f * wave * wave;
+            gain += 42.0f * wave * wave;
         }
         if (interacting)
         {
@@ -179,6 +192,13 @@ inline void frame(const LightingState& lighting, const Events& events,
                 gain += 64.0f * (1.0f - distance / 2.5f) * hump(interactionPhase);
         }
         if (slot >= 0 && (events.notificationMask & (1u << slot))) gain += 92.0f * notice;
+        if (replySlot || replyAmbient)
+        {
+            const float angle = (nowMs % 1200u) * (6.2831853f / 1200.0f)
+                              - i * 0.78539816f;
+            const float attention = reduced ? 0.72f : 0.5f + 0.5f * cosf(angle);
+            gain += (replyAmbient ? 92.0f : 74.0f) * attention;
+        }
         if (events.controlHeld)
         {
             const float heldBreath = reduced ? 0.55f

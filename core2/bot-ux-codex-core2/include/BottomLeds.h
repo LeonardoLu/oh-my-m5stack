@@ -17,7 +17,8 @@ public:
     void control(uint32_t color, uint32_t nowMs);
     void hold(uint32_t color, bool active, uint32_t nowMs);
     void update(const LightingState& lighting, uint32_t nowMs, bool reducedMotion,
-                bool connected, uint8_t selectedAgent = 0);
+                bool connected, uint8_t selectedAgent = 0,
+                uint8_t freshReplyMask = 0);
     bool available() const { return _available; }
 
 private:

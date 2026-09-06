@@ -55,9 +55,9 @@ static void aliveAndReducedMotion()
     bottomled::frame(lighting, events, 3700, false, true, 0, 2, true, later);
     assert(!equal(first, later));
     for (uint8_t i : bottomled::kAgentLed)
-        assert(first[i].r > 0 && first[i].g == 0 && first[i].b == 0);
+        assert(first[i].r >= 150 && first[i].g == 0 && first[i].b == 0);
     for (uint8_t i = 3; i <= 6; ++i)
-        assert(first[i].g > 0 && first[i].r == 0 && first[i].b == 0);
+        assert(first[i].g >= 75 && first[i].r == 0 && first[i].b == 0);
     bottomled::frame(lighting, events, 1000, true, true, 0, 2, true, first);
     bottomled::frame(lighting, events, 3700, true, true, 0, 2, true, later);
     assert(equal(first, later));
@@ -160,6 +160,33 @@ static void heldControlIsKnownAndReducedMotionIsStatic()
     assert(equal(first, later));
 }
 
+static void freshReplyIsProminentWithoutInventingSlotState()
+{
+    LightingState lighting = sample();
+    lighting.ambient = LightingZone{};
+    bottomled::Events attention, empty;
+    attention.freshReplyMask = 0x02;
+    bottomled::Color vivid[10], baseline[10], later[10];
+    bottomled::frame(lighting, attention, 300, false, true, 0, 2, true, vivid);
+    bottomled::frame(lighting, empty, 300, false, true, 0, 2, true, baseline);
+    assert(energy(vivid[1]) > energy(baseline[1]));
+    assert(energy(vivid[3]) > energy(baseline[3]));
+    assert(vivid[3].r > 0 && vivid[3].g == 0 && vivid[3].b == 0);
+    bottomled::frame(lighting, attention, 600, false, true, 0, 2, true, later);
+    assert(!equal(vivid, later));
+
+    bottomled::frame(lighting, attention, 300, true, true, 0, 2, true, vivid);
+    bottomled::frame(lighting, attention, 600, true, true, 0, 2, true, later);
+    assert(equal(vivid, later));
+    assert(energy(vivid[1]) > energy(baseline[1]));
+
+    // A mask without an active host zone cannot create an agent state or hue.
+    lighting.slots[1] = LightingZone{};
+    bottomled::frame(lighting, attention, 300, false, true, 0, 2, true, vivid);
+    assert(energy(vivid[1]) == 0);
+    for (uint8_t i = 3; i <= 6; ++i) assert(energy(vivid[i]) == energy(baseline[i]));
+}
+
 static void boundedFrameChanges()
 {
     LightingState lighting = sample();
@@ -188,5 +215,6 @@ int main()
     transientFeedbackEnds();
     controlFeedbackPreservesHostHue();
     heldControlIsKnownAndReducedMotionIsStatic();
+    freshReplyIsProminentWithoutInventingSlotState();
     boundedFrameChanges();
 }

@@ -646,11 +646,11 @@ void Settings::draw(M5Canvas& cv, M5Canvas& botSprite)
     else if (_page == 5) _drawPreview(cv, fg, rowBg, line);
     else if (_page == 6)
     {
-        static const char* modes[] = {"OFF", "HOST", "ALIVE"};
+        static const char* modes[] = {"OFF", "STATUS", "ALIVE"};
         drawRow(cv, kRowY[0], "LED MODE", modes[_data.ledMode], _pressed == 1, rowBg, fg, accent, line);
         drawRow(cv, kRowY[1], "NOTIFICATIONS", onOff(_data.notifications), _pressed == 2, rowBg, fg, accent, line);
         drawRow(cv, kRowY[2], "LED BRIGHTNESS", ledName(_data.ledBrightness), _pressed == 3, rowBg, fg, accent, line);
-        const char* notes[] = {"Bottom lights stay off", "Follow desktop lighting", "Idle glow + desktop feedback"};
+        const char* notes[] = {"Bottom lights stay off", "Agent colors + state rhythm", "State rhythm + interactions"};
         text(cv, notes[_data.ledMode], 16, 171, fg, ux::Latin14);
     }
     drawPager(cv, _page, _pressed, rowBg, fg, accent);

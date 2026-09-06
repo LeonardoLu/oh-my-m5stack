@@ -14,12 +14,15 @@ strip immediately instead of waiting for the next scheduled animation frame.
 ## Modes and API
 
 - `setMode(0)`: **Off**, all ten LEDs black in every connection/motion state.
-- `setMode(1)`: **Host**, retains the existing per-zone host lighting renderer.
-  Slots map to physical LEDs 0,1,2,7,8,9; ambient maps to 3–6. Disconnected is black.
-  Host solid, breath, shallow breath, snake and rainbow handling is preserved.
-  Local interaction/notification effects never alter Host mode.
-- `setMode(2)`: **Alive**, the default. Retains each active zone's host RGB hue,
-  adds gentle brightness variation, and distinguishes the selected slot.
+- `setMode(1)`: **Status**. Slots map to physical LEDs 0,1,2,7,8,9 and use
+  the same fixed identity RGB24 as their six cards. The host's exact status color
+  is decoded but not copied to the strip; status is represented by the rhythm
+  table below. Ambient LEDs 3–6 stay black, and local interaction events do not
+  alter this mode.
+- `setMode(2)`: **Alive**, the default. It starts with the same identity colors
+  and status rhythms, then adds selected-agent, accepted-interaction,
+  notification and fresh-reply emphasis. Ambient LEDs 3–6 use the selected or
+  fresh-reply agent's identity color, so they remain attributable to a real slot.
 - `setBrightness(level)`: independent global strip limit: 0/1/2/3 maps to the
   linear output caps near 0/16/38/72 of 255. M5Unified applies the squared gain
   `(brightness+1)^2/65536`, so the adapter uses driver values 0/64/98/135.
@@ -44,44 +47,48 @@ strip immediately instead of waiting for the next scheduled animation frame.
   infer it from RGB values. The card uses a static brightened fill and strong
   outline while active; only the 20 FPS LED renderer animates for the full window,
   avoiding a 30-second full-screen redraw loop.
-- `control(color, nowMs)`: one 900 ms traveling response to a locally sent
-  control. The supplied semantic control color may fill otherwise unused ambient
-  pixels in Alive; active host zones retain their own hue.
-- `hold(color, active, nowMs)`: a breathing ambient response while a real local
+- `control(nowMs)`: one 900 ms traveling response to a locally sent control.
+  It modulates the focused agent identity color and does not introduce an action
+  color unrelated to that agent.
+- `hold(active, nowMs)`: a breathing ambient response while a real local
   press is held. Releasing the hold finishes with the same bounded control flow.
   It describes only the known press lifecycle and does not infer a host toggle.
-- `update(lighting, nowMs, reducedMotion, connected, selectedAgent = 0)` remains
-  source-compatible with old callers. The connection argument should represent
-  the app-ready connection used for the UI's lighting mirror.
+- `update(lighting, nowMs, reducedMotion, ready, selectedAgent, freshReplyMask,
+  theme)` receives full app readiness and the current theme. Main gates `ready`
+  on both the control-plane handshake and a fresh thread-lighting snapshot, so
+  reconnect cannot illuminate stale slots.
 
 ## Motion language
 
-Alive uses a cosine breathing envelope over 5.4 seconds and a broad traveling
-brightness highlight over 8 seconds. Active host zones now occupy roughly
-150–255 of the per-zone gain range before the global strip cap, instead of the
-former 96–239 range, so known colors remain prominent through Bottom2's squared
-brightness curve. The disconnected cool blue-violet presence
-flows over 6.8 seconds so it remains visible at the default hardware brightness
-without resembling an agent status. Selection adds a small steady emphasis;
-interaction and notification feedback have smooth sine-squared envelopes.
-Colors are scaled by a single brightness factor per pixel, so a working blue,
-input-needed orange, or unread green stays the host's hue. Local effects do not
-turn status colors white or invent a completion color. Values never exceed the
-zone's host brightness before the existing global user brightness cap is applied.
-During fresh-reply attraction, the green slot receives a quicker 1.2 second
-breathing emphasis and unused ambient pixels carry a traveling copy of that
-known host hue. Idle remains the host's steady white state, visually distinct
-from this bounded NewReply notification.
+The projected host signal selects a fixed motion vocabulary. Values below are
+per-zone software levels before host brightness and the global strip cap:
 
-Inactive agent slots stay black. If the connected host has no active ambient
-zone, only the four ambient LEDs can show a quiet neutral device presence or a
-known local control response. Disconnected Alive uses a bounded cool blue-violet
-breath and flow on the strip; this
-indicates a powered controller waiting for a link, not an active agent. Thus
-Alive is an explicit local presence mode and may glow while host lighting is off;
-Host mode is available when the user wants only the existing host mirror.
+| Signal | Normal motion | Reduced Motion level |
+| --- | --- | --- |
+| Idle | steady 76 | 76 |
+| Working | smooth 2.6 s breath, 104–220 | 156 |
+| Needs input | peaked 1.25 s pulse, 112–255 | 196 |
+| New reply | quick 0.85 s pulse, 130–255 | 220 |
+| Error | paired beats over 1.7 s, 82–255 | 242 |
+| Unknown / Off | black | black |
 
-Reduced Motion fixes the breathing/highlight level, keeps a static selected-slot
+Each recognized slot's level is multiplied by its host zone brightness. A host
+brightness of zero therefore keeps that slot and any ambient focus derived from
+it black even though its status color can still decode successfully. The Core2
+LED brightness setting then supplies the independent device-wide cap. Alive adds
+a small selected-slot emphasis, a broad 8 second spatial variation, and smooth
+bounded event envelopes. The 30 second fresh-reply window strengthens the quick
+NewReply rhythm and carries that slot's identity RGB through ambient LEDs; it
+does not turn the LEDs host-green or claim semantic completion. The input
+`LightingState` is never modified or sent back to the desktop.
+
+Unknown, Off, zero-host-brightness and pre-fresh-handshake agent positions stay
+black. Disconnected Alive may show a bounded cool blue-violet breath only on
+ambient LEDs 3–6; all six agent positions remain black so controller presence
+cannot resemble an active agent. Status mode is entirely black until fresh
+app-ready lighting exists.
+
+Reduced Motion fixes each status at the table's level, keeps a static selected-slot
 emphasis, and suppresses the moving interaction and notification envelopes. A
 fresh reply keeps a stronger static emphasis so it remains perceivable without
 motion.
@@ -102,12 +109,13 @@ c++ -std=c++11 -Wall -Wextra -Werror \
 /tmp/bottom-led-frame-test
 ```
 
-Checks cover Off and brightness-zero black output, Host solid color preservation,
-Host disconnection and ignoring local events, Alive time variation while retaining
-host hue, static Reduced Motion and selection emphasis, inactive-slot blackness,
-visible bounded disconnected presence and spatial flow, local hold emphasis,
-notification/sweep expiry, time wrap, and bounded changes between 50 ms samples
-(including simultaneous feedback).
+Checks cover Off and device-brightness-zero black output, all six physical slot
+positions, all three theme identity palettes, exact RGB scaling, every projected
+state rhythm, host-brightness-zero and Unknown/Off darkness, Status ignoring local
+events, Alive identity-preserving feedback, fresh-reply focus, static Reduced
+Motion, disconnected ambient-only presence, time wrap, and bounded changes
+between 50 ms Working samples. They also verify that frame generation leaves the
+authoritative `LightingState` byte-for-byte unchanged.
 `test/fresh_reply_attention_test.cpp` checks event-only start, exact 30 second
 expiry, wraparound, interaction dismissal, current-state invalidation, filtering
 of NeedsInput, and silent reconnect baselines.

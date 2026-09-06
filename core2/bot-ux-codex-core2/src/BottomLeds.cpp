@@ -161,6 +161,7 @@ void BottomLeds::setBrightness(uint8_t level)
         M5.Led.setBrightness(kBrightness[_brightness]);
         if (_brightness == 0)
         {
+            for (auto& color : _output) color = bottomled::Color{};
             M5.Led.setAllColor(0, 0, 0);
             M5.Led.display();
         }
@@ -174,6 +175,7 @@ void BottomLeds::setMode(uint8_t mode)
     _mode = normalized;
     if (_mode == 0 && _available)
     {
+        for (auto& color : _output) color = bottomled::Color{};
         M5.Led.setAllColor(0, 0, 0);
         M5.Led.display();
     }
@@ -192,39 +194,41 @@ void BottomLeds::notify(uint8_t mask, uint32_t nowMs)
     _events.notificationAt = nowMs;
 }
 
-void BottomLeds::control(uint32_t color, uint32_t nowMs)
+void BottomLeds::control(uint32_t nowMs)
 {
-    _events.controlColor = color & 0xFFFFFFu;
     _events.controlAt = nowMs;
-    _events.hasControl = color != 0;
+    _events.hasControl = true;
 }
 
-void BottomLeds::hold(uint32_t color, bool active, uint32_t nowMs)
+void BottomLeds::hold(bool active, uint32_t nowMs)
 {
     if (active)
     {
-        _events.holdColor = color & 0xFFFFFFu;
-        _events.controlHeld = color != 0;
+        _events.controlHeld = true;
         return;
     }
     if (!_events.controlHeld) return;
     _events.controlHeld = false;
-    control(_events.holdColor, nowMs);
+    control(nowMs);
 }
 
 void BottomLeds::update(const LightingState& lighting, uint32_t nowMs, bool reducedMotion,
-                        bool connected, uint8_t selectedAgent, uint8_t freshReplyMask)
+                        bool ready, uint8_t selectedAgent, uint8_t freshReplyMask,
+                        uint8_t theme)
 {
     if (!_available || nowMs - _lastFrameMs < 50) return;
     _lastFrameMs = nowMs;
     _events.freshReplyMask = freshReplyMask & 0x3Fu;
 
     bottomled::Color generated[kCount]{};
-    bottomled::frame(lighting, _events, nowMs, reducedMotion, connected,
-                     selectedAgent, _mode, _brightness != 0, generated);
+    bottomled::frame(lighting, _events, nowMs, reducedMotion, ready,
+                     selectedAgent, theme, _mode, _brightness != 0, generated);
     RGBColor colors[kCount]{};
     for (uint8_t i = 0; i < kCount; ++i)
+    {
+        _output[i] = generated[i];
         colors[i] = RGBColor{generated[i].r, generated[i].g, generated[i].b};
+    }
     M5.Led.setColors(colors, 0, kCount);
     M5.Led.display();
 }

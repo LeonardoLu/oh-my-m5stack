@@ -229,7 +229,7 @@ bool sendTap(const char* key, uint32_t feedbackColor = 0)
     if (!codexLink.tapKey(key, selectedAgent)) { audio.error(); return false; }
     audio.action();
     bot.poke();
-    if (feedbackColor) bottomLeds.control(feedbackColor, nowMs);
+    if (feedbackColor) bottomLeds.control(nowMs);
     return true;
 }
 
@@ -277,7 +277,7 @@ void activate(const Target& target)
 void finishPtt()
 {
     if (pttSent) codexLink.releaseKey("ACT10", selectedAgent);
-    bottomLeds.hold(kControlColor[4], false, nowMs);
+    bottomLeds.hold(false, nowMs);
     pttSent = false;
     listening = false;
     setBotMood();
@@ -306,7 +306,7 @@ void touchBegin(int16_t x, int16_t y)
         listening = pttSent;
         if (pttSent)
         {
-            bottomLeds.hold(kControlColor[4], true, nowMs);
+            bottomLeds.hold(true, nowMs);
             audio.select();
         }
         else audio.error();
@@ -608,6 +608,30 @@ void updateMotion()
     lastAx = ax; lastAy = ay; lastAz = az;
 }
 
+void writeLedFrame()
+{
+    const bool ready = codexLink.controlReady() && codexLink.threadLightingFresh();
+    Serial.printf("[ledframe] ready=%u theme=%u mode=%u brightness=%u fresh=0x%02X\n",
+                  ready, settings.data().theme, settings.data().ledMode,
+                  settings.data().ledBrightness, freshReplyMask);
+    for (uint8_t slot = 0; slot < LightingState::kSlotCount; ++slot)
+    {
+        const auto color = bottomLeds.output(bottomled::kAgentLed[slot]);
+        const auto signal = agentsignal::decode(codexLink.lighting().slots[slot], ready);
+        Serial.printf("[ledframe] slot=%u signal=%s host_brightness=%u led=%u rgb=%02X%02X%02X\n",
+                      slot + 1, agentsignal::name(signal),
+                      codexLink.lighting().slots[slot].brightness,
+                      bottomled::kAgentLed[slot], color.r, color.g, color.b);
+    }
+    Serial.print("[ledframe] ambient=");
+    for (uint8_t led = 3; led <= 6; ++led)
+    {
+        const auto color = bottomLeds.output(led);
+        Serial.printf("%s%02X%02X%02X", led == 3 ? "" : ",", color.r, color.g, color.b);
+    }
+    Serial.println();
+}
+
 void handleSerial()
 {
     while (Serial.available())
@@ -624,6 +648,10 @@ void handleSerial()
                     audio.confirm(); audio.update();
                     Serial.printf("[sound] preview=confirm ready=%u busy=%u failures=%lu\n",audio.available(),audio.busy(),static_cast<unsigned long>(audio.failures()));
                     serialLength=0; return;
+                }
+                if (strcmp(serialCommand, "leds") == 0) {
+                    writeLedFrame();
+                    serialLength = 0; return;
                 }
                 if (sscanf(serialCommand,"ui-tap %d %d",&settingsX,&settingsY)==2) {
                     if(settings.isOpen()) {
@@ -791,7 +819,8 @@ void loop()
     const uint32_t drawStarted = micros();
     bot.draw();
     bottomLeds.update(codexLink.lighting(), nowMs, settings.data().reducedMotion != 0,
-                      codexLink.controlReady(), selectedAgent, freshReplyMask);
+                      codexLink.controlReady() && codexLink.threadLightingFresh(),
+                      selectedAgent, freshReplyMask, settings.data().theme);
     const bool fullFrame = uiDirty;
     const bool partialPreview = !fullFrame && animatePreview;
     if (fullFrame)

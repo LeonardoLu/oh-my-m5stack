@@ -16,7 +16,7 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
     core2/bot-ux-codex-core2/
       include/AudioFeedback.h    short speaker feedback
       include/BatteryDoubleTap.h battery settings-entry gesture state
-      include/BottomLeds.h       Bottom2 Off/Host/Alive lighting
+      include/BottomLeds.h       Bottom2 Off/Status/Alive lighting
       include/CodexLink.h        BLE HID identity, RPC, and native events
       include/HidFraming.h       fixed-buffer report 6 framing
       include/Settings.h         NVS settings and seven-page personalization UI
@@ -91,9 +91,9 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   selectors every preview frame (native cost drops from full-page ~88 ms).
 - Shared UX fonts/shapes use RGB565 coverage on canvases. Active status glyphs
   have color without tiles; the battery number is inside its icon.
-- Bottom2 offers Off/Host/Alive. Alive preserves status hue with vivid breathing,
-  traveling emphasis and bounded interaction. Fresh NewReply can animate its
-  known green hue without claiming task completion. Reduced Motion is static. Both
+- Bottom2 offers Off/Status/Alive. Both active modes keep the six card identity
+  colors and encode known host states through distinct rhythms; Alive adds
+  traveling interaction and fresh-reply emphasis. Reduced Motion is static. Both
   mode Off and brightness zero immediately clear LEDs; notify(0) cancels notices.
 - Current contracts: specs/touch-gaze-iteration.md, specs/agent-signal-contract.md
   and specs/core2-alive-lighting.md. Validate with tools/check_host.sh and native

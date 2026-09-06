@@ -3,26 +3,42 @@
 #include <assert.h>
 #include <string.h>
 
-static LightingState sample()
+using agentsignal::Signal;
+
+static LightingZone zone(Signal signal, uint8_t brightness = 255)
 {
-    LightingState state;
-    for (uint8_t i = 0; i < LightingState::kSlotCount; ++i)
+    LightingZone result;
+    result.brightness = brightness;
+    result.effect = 1;
+    switch (signal)
     {
-        state.slots[i].color = 0xFF0000;
-        state.slots[i].brightness = 255;
-        state.slots[i].effect = 1;
+        case Signal::Idle: result.color = 0xFFFFFF; break;
+        case Signal::Working: result.color = 0x304FFE; break;
+        case Signal::NeedsInput: result.color = 0xFF6D00; break;
+        case Signal::NewReply: result.color = 0x00FF4C; break;
+        case Signal::Error: result.color = 0xFF0033; break;
+        case Signal::Unknown: result.color = 0x123456; break;
+        case Signal::Off: result = LightingZone{}; break;
     }
-    state.ambient.color = 0x008000;
-    state.ambient.brightness = 255;
-    state.ambient.effect = 1;
-    return state;
+    return result;
+}
+
+static LightingState working()
+{
+    LightingState result;
+    for (uint8_t i = 0; i < LightingState::kSlotCount; ++i)
+        result.slots[i] = zone(Signal::Working);
+    return result;
 }
 
 static bool equal(const bottomled::Color (&a)[10], const bottomled::Color (&b)[10])
 {
-    for (int i = 0; i < 10; ++i)
-        if (a[i].r != b[i].r || a[i].g != b[i].g || a[i].b != b[i].b) return false;
-    return true;
+    return memcmp(a, b, sizeof(a)) == 0;
+}
+
+static bool black(const bottomled::Color& color)
+{
+    return color.r == 0 && color.g == 0 && color.b == 0;
 }
 
 static uint16_t energy(const bottomled::Color& color)
@@ -30,179 +46,196 @@ static uint16_t energy(const bottomled::Color& color)
     return color.r + color.g + color.b;
 }
 
-static void offAndHost()
+static bool scaledIdentity(const bottomled::Color& actual, uint8_t theme, uint8_t slot)
 {
-    LightingState lighting = sample();
-    bottomled::Events events;
-    bottomled::Color colors[10], black[10]{};
-    bottomled::frame(lighting, events, 1000, false, true, 0, 0, true, colors);
-    assert(equal(colors, black));
-    bottomled::frame(lighting, events, 1000, false, true, 0, 2, false, colors);
-    assert(equal(colors, black));
-    bottomled::frame(lighting, events, 1000, false, false, 0, 1, true, colors);
-    assert(equal(colors, black));
-    bottomled::frame(lighting, events, 1000, false, true, 0, 1, true, colors);
-    assert(colors[0].r == 255 && colors[0].g == 0 && colors[0].b == 0);
-    assert(colors[3].g == 128 && colors[3].r == 0 && colors[3].b == 0);
-}
-
-static void aliveAndReducedMotion()
-{
-    LightingState lighting = sample();
-    bottomled::Events events;
-    bottomled::Color first[10], later[10];
-    bottomled::frame(lighting, events, 1000, false, true, 0, 2, true, first);
-    bottomled::frame(lighting, events, 3700, false, true, 0, 2, true, later);
-    assert(!equal(first, later));
-    for (uint8_t i : bottomled::kAgentLed)
-        assert(first[i].r >= 150 && first[i].g == 0 && first[i].b == 0);
-    for (uint8_t i = 3; i <= 6; ++i)
-        assert(first[i].g >= 75 && first[i].r == 0 && first[i].b == 0);
-    bottomled::frame(lighting, events, 1000, true, true, 0, 2, true, first);
-    bottomled::frame(lighting, events, 3700, true, true, 0, 2, true, later);
-    assert(equal(first, later));
-    assert(first[0].r > first[1].r); // selected slot emphasis is static
-    lighting.slots[0] = LightingZone{};
-    bottomled::frame(lighting, events, 1000, false, true, 0, 2, true, first);
-    assert(first[0].r == 0 && first[0].g == 0 && first[0].b == 0);
-    bottomled::frame(lighting, events, 1000, false, false, 0, 2, true, first);
-    assert(first[0].r > 0 && first[0].g > 0 && first[0].b > 0);
-    assert(first[0].r < 80 && first[0].b < 80); // visible but bounded presence
-    uint16_t minimum = energy(first[0]), maximum = minimum;
-    for (uint8_t i = 1; i < bottomled::kCount; ++i)
+    const uint32_t identity = agentcard::colors(theme, slot).fill;
+    for (uint16_t scale = 1; scale <= 255; ++scale)
     {
-        if (energy(first[i]) < minimum) minimum = energy(first[i]);
-        if (energy(first[i]) > maximum) maximum = energy(first[i]);
+        const auto expected = bottomled::scaleColor(identity, static_cast<uint8_t>(scale));
+        if (actual.r == expected.r && actual.g == expected.g && actual.b == expected.b) return true;
     }
-    assert(maximum > minimum); // the cool presence travels across the strip
-    bottomled::frame(lighting, events, 3700, false, false, 0, 2, true, later);
-    assert(!equal(first, later));
-    bottomled::frame(lighting, events, 1000, true, false, 0, 2, true, first);
-    bottomled::frame(lighting, events, 3700, true, false, 0, 2, true, later);
-    assert(equal(first, later));
+    return false;
 }
 
-static void transientFeedbackEnds()
+static void offBrightnessAndReadiness()
 {
-    LightingState lighting = sample();
-    bottomled::Events events, empty;
+    LightingState lighting = working();
+    bottomled::Events events;
+    bottomled::Color colors[10], allBlack[10]{};
+    bottomled::frame(lighting, events, 1000, false, true, 0, 0, 0, true, colors);
+    assert(equal(colors, allBlack));
+    bottomled::frame(lighting, events, 1000, false, true, 0, 0, 2, false, colors);
+    assert(equal(colors, allBlack));
+    bottomled::frame(lighting, events, 1000, false, false, 0, 0, 1, true, colors);
+    assert(equal(colors, allBlack));
+
+    bottomled::frame(lighting, events, 1000, false, false, 0, 0, 2, true, colors);
+    for (uint8_t led : bottomled::kAgentLed) assert(black(colors[led]));
+    for (uint8_t led = 3; led <= 6; ++led) assert(!black(colors[led]));
+
+    bottomled::frame(lighting, events, 1000, true, false, 0, 0, 2, true, colors);
+    bottomled::Color later[10];
+    bottomled::frame(lighting, events, 3700, true, false, 0, 0, 2, true, later);
+    assert(equal(colors, later));
+}
+
+static void statusMapsEverySlotToIdentity()
+{
+    LightingState lighting = working();
+    const LightingState original = lighting;
+    bottomled::Events events;
+    bottomled::Color colors[10];
+    for (uint8_t theme = 0; theme < 3; ++theme)
+    {
+        bottomled::frame(lighting, events, 650, false, true, 0, theme, 1, true, colors);
+        for (uint8_t slot = 0; slot < LightingState::kSlotCount; ++slot)
+        {
+            const uint8_t led = bottomled::kAgentLed[slot];
+            const uint8_t level = bottomled::zoneLevel(lighting.slots[slot], Signal::Working,
+                                                        slot, 650, false);
+            const auto expected = bottomled::scaleColor(agentcard::colors(theme, slot).fill, level);
+            assert(memcmp(&colors[led], &expected, sizeof(expected)) == 0);
+            assert(scaledIdentity(colors[led], theme, slot));
+        }
+        for (uint8_t led = 3; led <= 6; ++led) assert(black(colors[led]));
+    }
+    assert(memcmp(&lighting, &original, sizeof(lighting)) == 0);
+
+    lighting.slots[1].brightness = 0;
+    lighting.slots[2] = zone(Signal::Unknown);
+    lighting.slots[3] = zone(Signal::Off);
+    bottomled::frame(lighting, events, 650, false, true, 0, 0, 1, true, colors);
+    assert(black(colors[bottomled::kAgentLed[1]]));
+    assert(black(colors[bottomled::kAgentLed[2]]));
+    assert(black(colors[bottomled::kAgentLed[3]]));
+
+    lighting.slots[0] = zone(Signal::Working, 128);
+    bottomled::frame(lighting, events, 650, false, true, 0, 0, 1, true, colors);
+    const auto half = colors[bottomled::kAgentLed[0]];
+    lighting.slots[0] = zone(Signal::Working, 255);
+    bottomled::frame(lighting, events, 650, false, true, 0, 0, 1, true, colors);
+    assert(energy(colors[bottomled::kAgentLed[0]]) > energy(half));
+}
+
+static void eachStateHasItsOwnRhythm()
+{
+    const Signal signals[] = {Signal::Idle, Signal::Working, Signal::NeedsInput,
+                              Signal::NewReply, Signal::Error};
+    uint16_t reducedEnergy[5]{};
+    for (uint8_t i = 0; i < 5; ++i)
+    {
+        LightingState lighting;
+        lighting.slots[0] = zone(signals[i]);
+        bottomled::Events events;
+        bottomled::Color first[10], later[10];
+        bottomled::frame(lighting, events, 0, false, true, 0, 2, 1, true, first);
+        bottomled::frame(lighting, events, 425, false, true, 0, 2, 1, true, later);
+        if (signals[i] == Signal::Idle) assert(equal(first, later));
+        else assert(!equal(first, later));
+
+        bottomled::frame(lighting, events, 0, true, true, 0, 2, 1, true, first);
+        bottomled::frame(lighting, events, 425, true, true, 0, 2, 1, true, later);
+        assert(equal(first, later));
+        reducedEnergy[i] = energy(first[0]);
+    }
+    for (uint8_t i = 1; i < 5; ++i) assert(reducedEnergy[i] > reducedEnergy[i - 1]);
+}
+
+static void statusIgnoresLocalEvents()
+{
+    LightingState lighting = working();
+    bottomled::Events events, none;
+    events.hasInteraction = true;
+    events.interactionAt = 1000;
+    events.interactionSlot = 2;
+    events.notificationAt = 1000;
+    events.notificationMask = 0x3F;
+    events.freshReplyMask = 0x3F;
+    events.hasControl = true;
+    events.controlAt = 1000;
+    events.controlHeld = true;
+    bottomled::Color actual[10], baseline[10];
+    bottomled::frame(lighting, events, 1450, false, true, 2, 1, 1, true, actual);
+    bottomled::frame(lighting, none, 1450, false, true, 2, 1, 1, true, baseline);
+    assert(equal(actual, baseline));
+}
+
+static void aliveAddsIdentityPreservingFeedback()
+{
+    LightingState lighting = working();
+    bottomled::Events events, none;
+    bottomled::Color feedback[10], baseline[10];
+    bottomled::frame(lighting, none, 1450, false, true, 1, 0, 2, true, baseline);
+    assert(scaledIdentity(baseline[1], 0, 1));
+    for (uint8_t led = 3; led <= 6; ++led) assert(scaledIdentity(baseline[led], 0, 1));
+
     events.hasInteraction = true;
     events.interactionAt = 1000;
     events.interactionSlot = 1;
     events.notificationAt = 1000;
-    events.notificationMask = 2;
-    bottomled::Color feedback[10], baseline[10];
-    bottomled::frame(lighting, events, 1450, false, true, 1, 2, true, feedback);
-    bottomled::frame(lighting, empty, 1450, false, true, 1, 2, true, baseline);
+    events.notificationMask = 0x02;
+    bottomled::frame(lighting, events, 1450, false, true, 1, 0, 2, true, feedback);
     assert(!equal(feedback, baseline));
-    assert(feedback[1].r > baseline[1].r);
-    bottomled::frame(lighting, events, 3000, false, true, 1, 2, true, feedback);
-    bottomled::frame(lighting, empty, 3000, false, true, 1, 2, true, baseline);
+    for (uint8_t slot = 0; slot < LightingState::kSlotCount; ++slot)
+        assert(scaledIdentity(feedback[bottomled::kAgentLed[slot]], 0, slot));
+
+    bottomled::frame(lighting, events, 3000, false, true, 1, 0, 2, true, feedback);
+    bottomled::frame(lighting, none, 3000, false, true, 1, 0, 2, true, baseline);
     assert(equal(feedback, baseline));
-    bottomled::frame(lighting, events, 1450, true, true, 1, 2, true, feedback);
-    bottomled::frame(lighting, empty, 1450, true, true, 1, 2, true, baseline);
-    assert(equal(feedback, baseline));
-    bottomled::frame(lighting, events, 1450, false, true, 1, 1, true, feedback);
-    bottomled::frame(lighting, empty, 1450, false, true, 1, 1, true, baseline);
-    assert(equal(feedback, baseline)); // Host mode ignores all local events
+
     events.interactionAt = 0xFFFFFF00u;
     events.notificationAt = 0xFFFFFF00u;
-    bottomled::frame(lighting, events, 0x100u, false, true, 1, 2, true, feedback);
-    bottomled::frame(lighting, empty, 0x100u, false, true, 1, 2, true, baseline);
-    assert(!equal(feedback, baseline)); // duration remains valid across wrap
-}
-
-static void controlFeedbackPreservesHostHue()
-{
-    LightingState lighting = sample();
-    bottomled::Events events, empty;
-    events.hasControl = true;
-    events.controlAt = 1000;
-    events.controlColor = 0xF59E32;
-    bottomled::Color feedback[10], baseline[10];
-    bottomled::frame(lighting, events, 1450, false, true, 0, 2, true, feedback);
-    bottomled::frame(lighting, empty, 1450, false, true, 0, 2, true, baseline);
+    bottomled::frame(lighting, events, 0x100u, false, true, 1, 0, 2, true, feedback);
+    bottomled::frame(lighting, none, 0x100u, false, true, 1, 0, 2, true, baseline);
     assert(!equal(feedback, baseline));
-    for (uint8_t i : bottomled::kAgentLed)
-        assert(feedback[i].r > 0 && feedback[i].g == 0 && feedback[i].b == 0);
-    for (uint8_t i = 3; i <= 6; ++i)
-        assert(feedback[i].g > 0 && feedback[i].r == 0 && feedback[i].b == 0);
-
-    lighting.ambient = LightingZone{};
-    bottomled::frame(lighting, events, 1450, false, true, 0, 2, true, feedback);
-    assert(feedback[4].r > feedback[4].g && feedback[4].g > feedback[4].b);
-    bottomled::frame(lighting, events, 2000, false, true, 0, 2, true, feedback);
-    bottomled::frame(lighting, empty, 2000, false, true, 0, 2, true, baseline);
-    assert(equal(feedback, baseline));
-    bottomled::frame(lighting, events, 1450, false, true, 0, 1, true, feedback);
-    bottomled::frame(lighting, empty, 1450, false, true, 0, 1, true, baseline);
-    assert(equal(feedback, baseline));
 }
 
-static void heldControlIsKnownAndReducedMotionIsStatic()
+static void freshReplyUsesReplyIdentityAndCannotActivateMutedSlots()
 {
-    LightingState lighting = sample();
-    lighting.ambient = LightingZone{};
-    bottomled::Events held;
-    held.controlHeld = true;
-    held.holdColor = 0xF59E32;
-    bottomled::Color first[10], later[10];
-    bottomled::Events empty;
-    bottomled::Color idle[10];
-    bottomled::frame(lighting, held, 1000, false, true, 0, 2, true, first);
-    bottomled::frame(lighting, empty, 1000, false, true, 0, 2, true, idle);
-    bottomled::frame(lighting, held, 1500, false, true, 0, 2, true, later);
-    assert(!equal(first, later));
-    assert(first[3].r > first[3].g && first[3].g > first[3].b);
-    assert(energy(first[3]) > energy(idle[3]));
-    bottomled::frame(lighting, held, 1000, true, true, 0, 2, true, first);
-    bottomled::frame(lighting, held, 3700, true, true, 0, 2, true, later);
-    assert(equal(first, later));
-}
-
-static void freshReplyIsProminentWithoutInventingSlotState()
-{
-    LightingState lighting = sample();
-    lighting.ambient = LightingZone{};
-    bottomled::Events attention, empty;
-    attention.freshReplyMask = 0x02;
+    LightingState lighting = working();
+    lighting.slots[2] = zone(Signal::NewReply);
+    bottomled::Events attention, none;
+    attention.freshReplyMask = 0x04;
     bottomled::Color vivid[10], baseline[10], later[10];
-    bottomled::frame(lighting, attention, 300, false, true, 0, 2, true, vivid);
-    bottomled::frame(lighting, empty, 300, false, true, 0, 2, true, baseline);
-    assert(energy(vivid[1]) > energy(baseline[1]));
-    assert(energy(vivid[3]) > energy(baseline[3]));
-    assert(vivid[3].r > 0 && vivid[3].g == 0 && vivid[3].b == 0);
-    bottomled::frame(lighting, attention, 600, false, true, 0, 2, true, later);
+    bottomled::frame(lighting, attention, 300, false, true, 0, 1, 2, true, vivid);
+    bottomled::frame(lighting, none, 300, false, true, 0, 1, 2, true, baseline);
+    assert(energy(vivid[2]) > energy(baseline[2]));
+    for (uint8_t led = 3; led <= 6; ++led) assert(scaledIdentity(vivid[led], 1, 2));
+    bottomled::frame(lighting, attention, 600, false, true, 0, 1, 2, true, later);
     assert(!equal(vivid, later));
 
-    bottomled::frame(lighting, attention, 300, true, true, 0, 2, true, vivid);
-    bottomled::frame(lighting, attention, 600, true, true, 0, 2, true, later);
+    bottomled::frame(lighting, attention, 300, true, true, 0, 1, 2, true, vivid);
+    bottomled::frame(lighting, attention, 600, true, true, 0, 1, 2, true, later);
     assert(equal(vivid, later));
-    assert(energy(vivid[1]) > energy(baseline[1]));
 
-    // A mask without an active host zone cannot create an agent state or hue.
-    lighting.slots[1] = LightingZone{};
-    bottomled::frame(lighting, attention, 300, false, true, 0, 2, true, vivid);
-    assert(energy(vivid[1]) == 0);
-    for (uint8_t i = 3; i <= 6; ++i) assert(energy(vivid[i]) == energy(baseline[i]));
+    lighting.slots[2].brightness = 0;
+    bottomled::frame(lighting, attention, 300, false, true, 2, 1, 2, true, vivid);
+    assert(black(vivid[2]));
+    for (uint8_t led = 3; led <= 6; ++led) assert(black(vivid[led]));
+
+    lighting.slots[2] = zone(Signal::Unknown);
+    bottomled::frame(lighting, attention, 300, false, true, 2, 1, 2, true, vivid);
+    assert(black(vivid[2]));
+    for (uint8_t led = 3; led <= 6; ++led) assert(black(vivid[led]));
 }
 
-static void boundedFrameChanges()
+static void boundedWorkingChanges()
 {
-    LightingState lighting = sample();
+    LightingState lighting = working();
     bottomled::Events events;
-    events.hasInteraction = true;
-    events.interactionSlot = 2;
-    events.notificationMask = 0x3F;
     bottomled::Color previous[10], next[10];
-    bottomled::frame(lighting, events, 0, false, true, 2, 2, true, previous);
+    bottomled::frame(lighting, events, 0, false, true, 2, 2, 2, true, previous);
     for (uint32_t now = 50; now <= 8000; now += 50)
     {
-        bottomled::frame(lighting, events, now, false, true, 2, 2, true, next);
-        for (int i = 0; i < 10; ++i)
+        bottomled::frame(lighting, events, now, false, true, 2, 2, 2, true, next);
+        for (uint8_t i = 0; i < 10; ++i)
         {
-            int delta = static_cast<int>(next[i].r) - previous[i].r;
-            assert(delta >= -35 && delta <= 35);
+            const int deltaR = static_cast<int>(next[i].r) - previous[i].r;
+            const int deltaG = static_cast<int>(next[i].g) - previous[i].g;
+            const int deltaB = static_cast<int>(next[i].b) - previous[i].b;
+            assert(deltaR >= -35 && deltaR <= 35);
+            assert(deltaG >= -35 && deltaG <= 35);
+            assert(deltaB >= -35 && deltaB <= 35);
             previous[i] = next[i];
         }
     }
@@ -210,11 +243,11 @@ static void boundedFrameChanges()
 
 int main()
 {
-    offAndHost();
-    aliveAndReducedMotion();
-    transientFeedbackEnds();
-    controlFeedbackPreservesHostHue();
-    heldControlIsKnownAndReducedMotionIsStatic();
-    freshReplyIsProminentWithoutInventingSlotState();
-    boundedFrameChanges();
+    offBrightnessAndReadiness();
+    statusMapsEverySlotToIdentity();
+    eachStateHasItsOwnRhythm();
+    statusIgnoresLocalEvents();
+    aliveAddsIdentityPreservingFeedback();
+    freshReplyUsesReplyIdentityAndCannotActivateMutedSlots();
+    boundedWorkingChanges();
 }

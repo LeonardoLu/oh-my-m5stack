@@ -7,6 +7,7 @@
 #include "CompanionPresets.h"
 #include "InputSemantics.h"
 #include "TouchContact.h"
+#include "TouchAffine.h"
 #include "TouchTraceBuffer.h"
 #include "Power.h"
 #include "Settings.h"
@@ -20,6 +21,7 @@
 #include <UxSoundM5.h>
 #include <UxInput.h>
 #include <UxKeyboard.h>
+#include <Preferences.h>
 
 #include <esp_heap_caps.h>
 #include <math.h>
@@ -161,14 +163,23 @@ struct TouchCalibrationResult {
     int16_t targetX, targetY;
     int16_t firstX, firstY, stableX, stableY;
     int16_t firstRawX, firstRawY, stableRawX, stableRawY;
+    int16_t minRawX, minRawY, maxRawX, maxRawY;
     uint16_t samples, heldMs;
+    float predictedX, predictedY, error;
 };
 constexpr uint8_t kTouchCalibrationCount = 5;
 const int16_t kTouchCalibrationTargets[kTouchCalibrationCount][2] = {
     {233,233}, {233,100}, {100,233}, {366,233}, {233,399}
 };
+const int16_t kTouchValidationTargets[kTouchCalibrationCount][2] = {
+    {145,145}, {321,145}, {145,321}, {321,321}, {233,410}
+};
+enum class TouchCalibrationMode : uint8_t { Probe, Train, Verify, Passed, Failed };
 TouchCalibrationResult _touchCalibrationResults[kTouchCalibrationCount];
+TouchCalibrationResult _touchValidationResults[kTouchCalibrationCount];
+TouchCalibrationMode _touchCalibrationMode=TouchCalibrationMode::Probe;
 bool _touchCalibration = false, _touchCalibrationTracking = false, _touchCalibrationAwaitRelease = false;
+bool _touchCalibrationRetry=false;
 uint8_t _touchCalibrationIndex = 0, _touchCalibrationReleaseSamples = 0;
 int16_t _touchRawX = 0, _touchRawY = 0;
 int32_t _touchCalibrationSumX = 0, _touchCalibrationSumY = 0;
@@ -176,6 +187,23 @@ int32_t _touchCalibrationRawSumX = 0, _touchCalibrationRawSumY = 0;
 uint32_t _touchCalibrationStartedMs = 0;
 uint32_t _touchCalibrationLastContactMs = 0;
 Screen _touchCalibrationPriorScreen = Screen::Face;
+watchinput::TouchAffineResult _touchCalibrationCandidate{};
+watchinput::TouchAffineError _touchValidationError{};
+constexpr float kIdentityTouchAffine[6]={1,0,0,0,1,0};
+float _touchAffineActive[6]={1,0,0,0,1,0};
+float _touchAffineBaseline[6]={1,0,0,0,1,0};
+bool _touchAffineStored=false, _touchCalibrationCandidateVerified=false;
+constexpr uint32_t kTouchAffineMagic=0x57414631;
+constexpr uint16_t kTouchAffineVersion=1;
+constexpr int16_t kTouchCalibrationMaxSpan=16;
+constexpr float kTouchCalibrationMaxError=10.0f;
+constexpr float kTouchCalibrationMaxRms=7.0f;
+struct TouchAffineBlob {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t bytes;
+    float coefficients[6];
+};
 
 uint8_t _editHour = 0;
 uint8_t _editMinute = 0;
@@ -387,16 +415,98 @@ static void resetUiPointer() {
     _capturedTarget=watchcontrols::None; _namePressedKey = -1; _colorDrag = 0;
 }
 
-static void startTouchCalibration() {
+static bool validTouchAffine(const float coefficients[6]) {
+    if(!coefficients) return false;
+    for(uint8_t i=0;i<6;++i) if(!isfinite(coefficients[i])) return false;
+    float determinant=coefficients[0]*coefficients[4]-coefficients[1]*coefficients[3];
+    return fabsf(determinant)>=0.01f
+        && fabsf(coefficients[0])<=4&&fabsf(coefficients[1])<=4
+        && fabsf(coefficients[3])<=4&&fabsf(coefficients[4])<=4
+        && fabsf(coefficients[2])<=1000&&fabsf(coefficients[5])<=1000;
+}
+
+static void applyTouchAffine(const float coefficients[6]) {
+    float copy[6];
+    memcpy(copy,coefficients,sizeof(copy));
+    M5.Display.panel()->setCalibrateAffine(copy);
+}
+
+static bool loadTouchAffine() {
+    memcpy(_touchAffineActive,kIdentityTouchAffine,sizeof(_touchAffineActive));
+    _touchAffineStored=false;
+    Preferences preferences;
+    if(preferences.begin("watch-touch",true)) {
+        TouchAffineBlob blob{};
+        bool complete=preferences.getBytesLength("affine")==sizeof(blob)
+            &&preferences.getBytes("affine",&blob,sizeof(blob))==sizeof(blob);
+        preferences.end();
+        if(complete&&blob.magic==kTouchAffineMagic&&blob.version==kTouchAffineVersion
+           &&blob.bytes==sizeof(blob)&&validTouchAffine(blob.coefficients)) {
+            memcpy(_touchAffineActive,blob.coefficients,sizeof(_touchAffineActive));
+            _touchAffineStored=true;
+        }
+    }
+    applyTouchAffine(_touchAffineActive);
+    return _touchAffineStored;
+}
+
+static bool saveTouchAffine() {
+    if(!_touchCalibrationCandidateVerified||!validTouchAffine(_touchCalibrationCandidate.coefficients)) return false;
+    TouchAffineBlob blob{kTouchAffineMagic,kTouchAffineVersion,sizeof(TouchAffineBlob),{}};
+    memcpy(blob.coefficients,_touchCalibrationCandidate.coefficients,sizeof(blob.coefficients));
+    Preferences preferences;
+    bool ok=preferences.begin("watch-touch",false);
+    if(ok) {
+        ok=preferences.putBytes("affine",&blob,sizeof(blob))==sizeof(blob);
+        preferences.end();
+    }
+    if(ok) {
+        memcpy(_touchAffineActive,blob.coefficients,sizeof(_touchAffineActive));
+        _touchAffineStored=true;
+    }
+    return ok;
+}
+
+static bool resetTouchAffine() {
+    Preferences preferences;
+    bool ok=preferences.begin("watch-touch",false);
+    if(ok) { ok=preferences.clear(); preferences.end(); }
+    memcpy(_touchAffineActive,kIdentityTouchAffine,sizeof(_touchAffineActive));
+    _touchAffineStored=false;
+    _touchCalibrationCandidateVerified=false;
+    _touchCalibrationMode=TouchCalibrationMode::Probe;
+    applyTouchAffine(_touchAffineActive);
+    return ok;
+}
+
+static const int16_t (*touchCalibrationTargets())[2] {
+    return _touchCalibrationMode==TouchCalibrationMode::Verify
+        ?kTouchValidationTargets:kTouchCalibrationTargets;
+}
+
+static TouchCalibrationResult* touchCalibrationResults() {
+    return _touchCalibrationMode==TouchCalibrationMode::Verify
+        ?_touchValidationResults:_touchCalibrationResults;
+}
+
+static void startTouchCalibration(TouchCalibrationMode mode=TouchCalibrationMode::Probe) {
     resetUiPointer();
     _diagnosticContact=false;
     _touchCalibrationPriorScreen=_screen;
+    memcpy(_touchAffineBaseline,_touchAffineActive,sizeof(_touchAffineBaseline));
+    applyTouchAffine(_touchAffineBaseline);
     _touchCalibration=true;
+    _touchCalibrationMode=mode;
     _touchCalibrationTracking=false;
     _touchCalibrationAwaitRelease=true;
+    _touchCalibrationRetry=false;
     _touchCalibrationReleaseSamples=0;
     _touchCalibrationIndex=0;
     memset(_touchCalibrationResults,0,sizeof(_touchCalibrationResults));
+    memset(_touchValidationResults,0,sizeof(_touchValidationResults));
+    _touchCalibrationCandidate={};
+    _touchValidationError={};
+    _touchCalibrationCandidateVerified=false;
     _touchCalibrationLastContactMs=millis();
     _contact.sample(false,0,0);
     setTouchTraceEnabled(true);
@@ -406,9 +516,13 @@ static void startTouchCalibration() {
 
 static void stopTouchCalibration() {
     if(!_touchCalibration) return;
+    if(_touchCalibrationMode!=TouchCalibrationMode::Passed) {
+        applyTouchAffine(_touchAffineBaseline);
+    }
     _touchCalibration=false;
     _touchCalibrationTracking=false;
     _touchCalibrationAwaitRelease=false;
+    _touchCalibrationRetry=false;
     _touchCalibrationReleaseSamples=0;
     stopTouchTrace();
     _contact.sample(false,0,0);
@@ -421,6 +535,8 @@ static void stopTouchCalibration() {
 
 static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16_t y,
                                    uint32_t now) {
+    if(_touchCalibrationMode==TouchCalibrationMode::Passed
+       ||_touchCalibrationMode==TouchCalibrationMode::Failed) return;
     if(!acquired||_touchCalibrationIndex>=kTouchCalibrationCount) return;
     if(_touchCalibrationAwaitRelease) {
         if(contact) {
@@ -433,12 +549,13 @@ static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16
         }
         return;
     }
-    auto& result=_touchCalibrationResults[_touchCalibrationIndex];
+    auto& result=touchCalibrationResults()[_touchCalibrationIndex];
     if(!_touchCalibrationTracking&&contact) {
-        result={kTouchCalibrationTargets[_touchCalibrationIndex][0],
-                kTouchCalibrationTargets[_touchCalibrationIndex][1],
+        const auto* targets=touchCalibrationTargets();
+        result={targets[_touchCalibrationIndex][0],targets[_touchCalibrationIndex][1],
                 x,y,x,y,
-                _touchRawX,_touchRawY,_touchRawX,_touchRawY,1,0};
+                _touchRawX,_touchRawY,_touchRawX,_touchRawY,
+                _touchRawX,_touchRawY,_touchRawX,_touchRawY,1,0,0,0,0};
         _touchCalibrationSumX=x;
         _touchCalibrationSumY=y;
         _touchCalibrationRawSumX=_touchRawX;
@@ -447,6 +564,7 @@ static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16
         _touchCalibrationLastContactMs=now;
         _touchCalibrationReleaseSamples=0;
         _touchCalibrationTracking=true;
+        _touchCalibrationRetry=false;
         return;
     }
     if(contact&&_touchCalibrationTracking) {
@@ -454,6 +572,10 @@ static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16
         _touchCalibrationSumY+=y;
         _touchCalibrationRawSumX+=_touchRawX;
         _touchCalibrationRawSumY+=_touchRawY;
+        if(_touchRawX<result.minRawX) result.minRawX=_touchRawX;
+        if(_touchRawY<result.minRawY) result.minRawY=_touchRawY;
+        if(_touchRawX>result.maxRawX) result.maxRawX=_touchRawX;
+        if(_touchRawY>result.maxRawY) result.maxRawY=_touchRawY;
         if(result.samples<65535) ++result.samples;
         _touchCalibrationLastContactMs=now;
         _touchCalibrationReleaseSamples=0;
@@ -470,7 +592,62 @@ static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16
         result.heldMs=traceClamp16(now-_touchCalibrationStartedMs);
         _touchCalibrationTracking=false;
         _touchCalibrationReleaseSamples=0;
+        int16_t spanX=result.maxRawX-result.minRawX;
+        int16_t spanY=result.maxRawY-result.minRawY;
+        if(result.samples<2||spanX>kTouchCalibrationMaxSpan||spanY>kTouchCalibrationMaxSpan) {
+            memset(&result,0,sizeof(result));
+            _touchCalibrationRetry=true;
+            _uiDirty=true;
+            _listBandOnly=false;
+            return;
+        }
         ++_touchCalibrationIndex;
+        if(_touchCalibrationIndex==kTouchCalibrationCount
+           &&_touchCalibrationMode==TouchCalibrationMode::Train) {
+            watchinput::TouchAffinePoint points[kTouchCalibrationCount];
+            for(uint8_t i=0;i<kTouchCalibrationCount;++i) {
+                const auto& r=_touchCalibrationResults[i];
+                points[i]={(float)r.stableRawX,(float)r.stableRawY,
+                           (float)r.targetX,(float)r.targetY};
+            }
+            bool solved=watchinput::solveTouchAffine(points,kTouchCalibrationCount,
+                                                     &_touchCalibrationCandidate);
+            if(!solved||!validTouchAffine(_touchCalibrationCandidate.coefficients)
+               ||_touchCalibrationCandidate.trainingError.maximum>kTouchCalibrationMaxError) {
+                _touchCalibrationMode=TouchCalibrationMode::Failed;
+                applyTouchAffine(_touchAffineBaseline);
+            } else {
+                applyTouchAffine(_touchCalibrationCandidate.coefficients);
+                _touchCalibrationMode=TouchCalibrationMode::Verify;
+                _touchCalibrationIndex=0;
+                _touchCalibrationAwaitRelease=true;
+                _touchCalibrationReleaseSamples=0;
+                _touchCalibrationLastContactMs=now;
+            }
+        } else if(_touchCalibrationIndex==kTouchCalibrationCount
+                  &&_touchCalibrationMode==TouchCalibrationMode::Verify) {
+            double squared=0;
+            float maximum=0;
+            for(uint8_t i=0;i<kTouchCalibrationCount;++i) {
+                auto& r=_touchValidationResults[i];
+                r.predictedX=_touchCalibrationCandidate.coefficients[0]*r.stableRawX
+                    +_touchCalibrationCandidate.coefficients[1]*r.stableRawY
+                    +_touchCalibrationCandidate.coefficients[2];
+                r.predictedY=_touchCalibrationCandidate.coefficients[3]*r.stableRawX
+                    +_touchCalibrationCandidate.coefficients[4]*r.stableRawY
+                    +_touchCalibrationCandidate.coefficients[5];
+                float dx=r.stableX-r.targetX,dy=r.stableY-r.targetY;
+                r.error=sqrtf(dx*dx+dy*dy);
+                squared+=r.error*r.error;
+                if(r.error>maximum) maximum=r.error;
+            }
+            _touchValidationError={(float)sqrt(squared/kTouchCalibrationCount),maximum};
+            _touchCalibrationCandidateVerified=maximum<=kTouchCalibrationMaxError
+                &&_touchValidationError.rms<=kTouchCalibrationMaxRms;
+            _touchCalibrationMode=_touchCalibrationCandidateVerified
+                ?TouchCalibrationMode::Passed:TouchCalibrationMode::Failed;
+            if(!_touchCalibrationCandidateVerified) applyTouchAffine(_touchAffineBaseline);
+        }
         _uiDirty=true;
         _listBandOnly=false;
     }
@@ -478,13 +655,33 @@ static void sampleTouchCalibration(bool contact, bool acquired, int16_t x, int16
 
 static void dumpTouchCalibration() {
     dumpTouchTrace();
-    Serial.printf("CAL begin completed=%u total=%u\n",_touchCalibrationIndex,kTouchCalibrationCount);
-    for(uint8_t i=0;i<_touchCalibrationIndex&&i<kTouchCalibrationCount;++i) {
+    Serial.printf("CAL begin mode=%u index=%u verified=%u stored=%u\n",
+                  (unsigned)_touchCalibrationMode,_touchCalibrationIndex,
+                  _touchCalibrationCandidateVerified,_touchAffineStored);
+    for(uint8_t i=0;i<kTouchCalibrationCount&&_touchCalibrationResults[i].samples;++i) {
         const auto& r=_touchCalibrationResults[i];
-        Serial.printf("CAL point=%u target=%d,%d first=%d,%d stable=%d,%d raw_first=%d,%d raw_stable=%d,%d samples=%u held=%u\n",
-                      i+1,r.targetX,r.targetY,r.firstX,r.firstY,r.stableX,r.stableY,
-                      r.firstRawX,r.firstRawY,r.stableRawX,r.stableRawY,r.samples,r.heldMs);
+        Serial.printf("CAL train=%u target=%d,%d logical=%d,%d sensor=%d,%d range=%d,%d..%d,%d samples=%u held=%u\n",
+                      i+1,r.targetX,r.targetY,r.stableX,r.stableY,r.stableRawX,r.stableRawY,
+                      r.minRawX,r.minRawY,r.maxRawX,r.maxRawY,r.samples,r.heldMs);
     }
+    if(validTouchAffine(_touchCalibrationCandidate.coefficients)) {
+        Serial.printf("CAL candidate=%.8f,%.8f,%.8f,%.8f,%.8f,%.8f train_rms=%.3f train_max=%.3f\n",
+                      _touchCalibrationCandidate.coefficients[0],_touchCalibrationCandidate.coefficients[1],
+                      _touchCalibrationCandidate.coefficients[2],_touchCalibrationCandidate.coefficients[3],
+                      _touchCalibrationCandidate.coefficients[4],_touchCalibrationCandidate.coefficients[5],
+                      _touchCalibrationCandidate.trainingError.rms,
+                      _touchCalibrationCandidate.trainingError.maximum);
+    }
+    for(uint8_t i=0;i<kTouchCalibrationCount&&_touchValidationResults[i].samples;++i) {
+        const auto& r=_touchValidationResults[i];
+        Serial.printf("CAL verify=%u target=%d,%d sensor=%d,%d converted=%d,%d predicted=%.2f,%.2f error=%.3f range=%d,%d..%d,%d samples=%u held=%u\n",
+                      i+1,r.targetX,r.targetY,r.stableRawX,r.stableRawY,r.stableX,r.stableY,
+                      r.predictedX,r.predictedY,r.error,r.minRawX,r.minRawY,r.maxRawX,r.maxRawY,
+                      r.samples,r.heldMs);
+    }
+    Serial.printf("CAL verify_rms=%.3f verify_max=%.3f thresholds=%.1f,%.1f\n",
+                  _touchValidationError.rms,_touchValidationError.maximum,
+                  kTouchCalibrationMaxRms,kTouchCalibrationMaxError);
     Serial.println("CAL end");
     Serial.flush();
 }
@@ -503,6 +700,17 @@ static void dumpTouchMapping() {
         M5.Display.convertRawXY(&logical,1);
         Serial.printf("CALMAP raw=%d,%d logical=%d,%d\n",raw.x,raw.y,logical.x,logical.y);
     }
+    Serial.flush();
+}
+
+static void printTouchAffineProfile() {
+    bool candidateApplied=(_touchCalibration&&_touchCalibrationMode==TouchCalibrationMode::Verify)
+        ||(_touchCalibrationMode==TouchCalibrationMode::Passed&&_touchCalibrationCandidateVerified);
+    const float* current=candidateApplied
+        ?_touchCalibrationCandidate.coefficients:_touchAffineActive;
+    Serial.printf("CALPROFILE stored=%u candidate_applied=%u verified=%u current=%.8f,%.8f,%.8f,%.8f,%.8f,%.8f\n",
+                  _touchAffineStored,candidateApplied,_touchCalibrationCandidateVerified,current[0],current[1],current[2],
+                  current[3],current[4],current[5]);
     Serial.flush();
 }
 
@@ -1611,16 +1819,36 @@ static void drawTouchCalibration() {
     canvas.setFont(&fonts::FreeSansBold12pt7b);
     canvas.setTextColor(settings.ink());
     char progress[24];
+    if(_touchCalibrationMode==TouchCalibrationMode::Passed) {
+        canvas.setTextColor(TFT_GREEN);
+        snprintf(progress,sizeof(progress),"5 / 5  VERIFY PASS");
+        watchText(canvas,progress,kW/2,kH/2,false);
+        return;
+    }
+    if(_touchCalibrationMode==TouchCalibrationMode::Failed) {
+        canvas.setTextColor(TFT_RED);
+        snprintf(progress,sizeof(progress),"CALIBRATION FAIL");
+        watchText(canvas,progress,kW/2,kH/2,false);
+        return;
+    }
     if(_touchCalibrationIndex>=kTouchCalibrationCount) {
         snprintf(progress,sizeof(progress),"5 / 5  COMPLETE");
         watchText(canvas,progress,kW/2,kH/2,false);
         return;
     }
-    snprintf(progress,sizeof(progress),"TOUCH TEST  %u / 5",_touchCalibrationIndex+1);
+    const char* label=_touchCalibrationMode==TouchCalibrationMode::Train?"TRAIN"
+        :_touchCalibrationMode==TouchCalibrationMode::Verify?"VERIFY":"TOUCH TEST";
+    snprintf(progress,sizeof(progress),"%s  %u / 5",label,_touchCalibrationIndex+1);
     watchText(canvas,progress,kW/2,44,false);
-    int16_t x=kTouchCalibrationTargets[_touchCalibrationIndex][0];
-    int16_t y=kTouchCalibrationTargets[_touchCalibrationIndex][1];
-    uint16_t accent=settings.style().accentColor;
+    const auto* targets=touchCalibrationTargets();
+    int16_t x=targets[_touchCalibrationIndex][0];
+    int16_t y=targets[_touchCalibrationIndex][1];
+    if(_touchCalibrationRetry) {
+        canvas.setTextColor(TFT_RED);
+        watchText(canvas,"HOLD STEADY - RETRY",kW/2,y<180?350:76,false);
+    }
+    uint16_t accent=_touchCalibrationRetry?TFT_RED
+        :_touchCalibrationMode==TouchCalibrationMode::Verify?TFT_YELLOW:TFT_CYAN;
     canvas.drawCircle(x,y,28,accent);
     canvas.drawCircle(x,y,27,accent);
     canvas.drawFastHLine(x-20,y,41,accent);
@@ -1843,9 +2071,16 @@ static void handleSerialCommands() {
             _diagnosticX=x; _diagnosticY=y; _contactReplyPending=true;
         } else if(!strcmp(line,"physical")) { _diagnosticContact=false; printUiState(); }
         else if(!strcmp(line,"cal on")) { _diagnosticContact=false; startTouchCalibration(); Serial.println("CAL armed 1/5"); Serial.flush(); }
+        else if(!strcmp(line,"cal start")) { _diagnosticContact=false; startTouchCalibration(TouchCalibrationMode::Train); Serial.println("CAL training 1/5"); Serial.flush(); }
         else if(!strcmp(line,"cal off")) { stopTouchCalibration(); Serial.println("CAL disarmed"); Serial.flush(); }
         else if(!strcmp(line,"cal dump")) dumpTouchCalibration();
         else if(!strcmp(line,"cal map")) dumpTouchMapping();
+        else if(!strcmp(line,"cal profile")) printTouchAffineProfile();
+        else if(!strcmp(line,"cal save")) { Serial.printf("CAL save=%u\n",saveTouchAffine()); Serial.flush(); }
+        else if(!strcmp(line,"cal reset")) {
+            if(_touchCalibration) stopTouchCalibration();
+            Serial.printf("CAL reset=%u\n",resetTouchAffine()); Serial.flush();
+        }
         else if(!strcmp(line,"trace on")) { setTouchTraceEnabled(true); Serial.println("TRACE armed"); Serial.flush(); }
         else if(!strcmp(line,"trace off")) { stopTouchTrace(); Serial.println("TRACE disarmed"); Serial.flush(); }
         else if(!strcmp(line,"trace clear")) { bool enabled=_touchTraceEnabled; setTouchTraceEnabled(enabled); Serial.println("TRACE cleared"); Serial.flush(); }
@@ -1883,6 +2118,7 @@ void setup() {
     cfg.pmic_button = true;
     M5.begin(cfg);
     M5.Touch.end(); // Raw contacts have one host gesture owner; SDK flick state is unused.
+    loadTouchAffine();
     _soundReady=_soundOutput.begin(M5.Speaker, _sounds, 6);
     Serial.begin(115200);
 
@@ -1918,7 +2154,7 @@ void setup() {
     _personalList.configure(kPersonalCount, kVisibleRows);
     _ambientCycle.begin(millis());
     showStatusPanel(millis(), 1800);
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, trace on/off/clear/dump, cal on/off/dump, sound N\n",
+    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, trace on/off/clear/dump, cal start/on/off/dump/profile/save/reset, sound N\n",
                   M5.Imu.isEnabled());
 }
 

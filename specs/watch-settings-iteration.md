@@ -138,4 +138,50 @@ axes and pixel identity: `(0,0)->(0,0)`, `(0,467)->(0,467)`, `(467,0)->(467,0)`,
 previous lower probe `(228,427)->(228,427)`. M5GFX's floating affine calculation truncates
 some Y results down by one pixel (`(233,233)->(233,232)`, `(467,467)->(467,466)`), which
 is the bounded numeric effect of the identity transform rather than measured fitting.
-Physical Done acceptance after this library fix remains pending.
+
+The first physical Done trial after this library fix remained intermittent. The user
+reported that the seventh press succeeded, then reopened Settings, pressed slightly
+higher, and succeeded after another two or three attempts. The final trace dump is
+preserved in `tmp/done-debug/library-fix-final-session.log` and its trial slice in
+`tmp/done-debug/library-fix-trial-session.log`. Its 160-entry ring had overwritten
+1,209 entries during the wait, so it does not preserve the first seven coordinates.
+The retained tail has four Settings contacts: `(275,424)` ended `no_target`;
+`(234,392)` began on Done but moved to `(263,441)` and ended `target_changed`;
+`(232,440)` ended `no_target`; and `(230,416)` was accepted and immediately changed
+Settings to Face. These are post-conversion coordinates; that trace version did not
+retain the same-read sensor coordinates, so none are inferred after the fact. The
+trial confirms that the deterministic stale-scale bug was fixed and that physical
+acceptance still needs device-specific mapping evidence.
+
+The factory CST820 driver provides no additional offset, scale or rotation constants:
+it decodes the 12-bit register coordinates and passes them directly to LVGL. The
+factory display is configured as 468 by 466 with panel-memory x offset 6, while this
+application uses the linked M5GFX framebuffer and a 466 by 466 canvas at `(0,0)`; no
+second hidden application translation exists. The linked high-10 ms, low-8 ms,
+high-2 ms reset sequence satisfies the CST820B table's
+0.1 ms low-pulse and 5 ms pre-release requirements, and the subsequent 150 ms OLED
+startup delay exceeds the 100 ms reset-to-operation requirement.
+These checks do not yield a further physical touch affine, so a remaining per-device
+transform cannot be justified as a universal constant.
+
+The trace recorder now keeps contact samples separately from a 128-entry critical
+Down/End/Screen ring. Idle acquisitions update counters without consuming either
+ring; a bounded sequence of at least twenty trials therefore survives an arbitrarily
+long idle wait. When tracing is enabled, one `getTouchRaw` result supplies the sensor
+coordinate and the same point is passed once through `convertRawXY`; zero-result reads
+report no sensor coordinate, and End explicitly identifies its coordinate as the last
+valid contact sample. Acquisition and IRQ totals are snapshotted with key events.
+
+The command-gated standard calibration uses new measurements after the CST820 library
+fix. `cal start` collects five fixed training targets, rejects a sample whose raw span
+exceeds 16 px, solves M5GFX's six-coefficient affine, and requires training maximum
+error at most 10 px. A RAM candidate is installed once through
+`Panel_Device::setCalibrateAffine`. Five distinct holdout targets are then measured
+without refitting: `(145,145)`, `(321,145)`, `(145,321)`, `(321,321)`, and `(233,410)`.
+Acceptance uses the actual integer `convertRawXY` results, with every point at most
+10 px away and RMS at most 7 px; float predictions are diagnostic only. Failure or
+abort restores the loaded baseline. A passing candidate remains RAM-only for a normal
+Done trial. Only a later explicit `cal save`, after that independent trial succeeds,
+writes one versioned coefficient blob in the dedicated `watch-touch` namespace;
+`cal reset` clears it and restores identity. No coefficient from the earlier probe is
+reused or compiled as a default.

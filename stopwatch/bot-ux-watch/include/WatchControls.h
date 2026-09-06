@@ -11,10 +11,20 @@ namespace watchcontrols {
 enum Id { None=-1, Done=1, First=10, NameKey=40, MenuRow=100, PersonalRow=200, ColorPad=300, HueBar=301 };
 struct Target { int id; ux::Rect bounds; int16_t radius; };
 struct ListLayout { int16_t x,y,w,h,step,rowHeight,radius; uint8_t visibleRows; };
-constexpr ListLayout mainList() { return {62,76,342,288,72,58,25,4}; }
-constexpr ListLayout previewList() { return {58,244,350,120,60,44,17,2}; }
-constexpr ux::Rect doneBounds() { return {154,376,158,46}; }
-constexpr int16_t doneRadius() { return 23; }
+constexpr ListLayout mainList() { return {62,76,342,264,66,58,25,4}; }
+constexpr ListLayout previewList() { return {58,242,350,96,48,44,17,2}; }
+constexpr ux::Rect doneBounds() { return {154,351,158,96}; }
+constexpr int16_t doneRadius() { return 48; }
+constexpr ux::Rect nameKeyboardBounds() { return {78,126,310,214}; }
+constexpr ux::Rect useThemeBounds() { return {163,207,140,32}; }
+constexpr ux::Rect colorPadBounds() { return {66,242,260,96}; }
+constexpr ux::Rect hueBarBounds() { return {344,242,56,96}; }
+constexpr int16_t displayRowCenter(uint8_t index) {
+    return index==0?130:index==1?194:index==2?258:322;
+}
+constexpr ux::Rect displayRowBounds(uint8_t index) {
+    return {58,(int16_t)(displayRowCenter(index)-22),350,44};
+}
 
 inline bool roundedContains(ux::Rect r, int16_t radius, int x, int y) {
     if (!r.contains(x,y)) return false;
@@ -76,9 +86,10 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
             if(roundedContains(bounds,layout.radius,x,y)) return {First+i,bounds,layout.radius};
         }
     } else if (editor==Editor::Name) {
-        int key=ux::nameKeyAt({78,170,310,205},x,y);
+        const auto area=nameKeyboardBounds();
+        int key=ux::nameKeyAt(area,x,y);
         if (key>=0) {
-            const auto rect=ux::nameKeyRect({78,170,310,205},key);
+            const auto rect=ux::nameKeyRect(area,key);
             match(NameKey+key,rect,6);
         }
     } else if (editor==Editor::Language) {
@@ -87,7 +98,7 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
         const int rows[]={170,250};
         for(int i=0;i<2;++i) match(First+i,{58,rows[i]-22,350,44},17);
     } else if (editor==Editor::Color) {
-        match(First,{163,207,140,32},16); match(ColorPad,{66,246,260,108}); match(HueBar,{344,246,56,108});
+        match(First,useThemeBounds(),16); match(ColorPad,colorPadBounds()); match(HueBar,hueBarBounds());
     } else if (editor==Editor::Time || editor==Editor::Date) {
         const int timeCenters[]={157,309}, dateCenters[]={108,233,358};
         const int* centers=editor==Editor::Time?timeCenters:dateCenters;
@@ -102,8 +113,7 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
     } else if (editor==Editor::Expression) {
         match(First,{48,126,76,96},38); match(First+1,{342,126,76,96},38); match(First+2,{144,62,178,178},89);
     } else if (editor==Editor::Display) {
-        const int rows[]={170,230,290,350};
-        for(int i=0;i<4;++i) match(First+i,{58,rows[i]-22,350,44},17);
+        for(uint8_t i=0;i<4;++i) match(First+i,displayRowBounds(i),17);
     }
     return result;
 }

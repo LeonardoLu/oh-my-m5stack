@@ -95,7 +95,11 @@ converted coordinates from the same CST820 read. Stable `(target, raw, converted
 results were `(233,233; 249,251; 255,257)`, `(233,100; 240,104; 246,106)`,
 `(100,233; 95,253; 97,259)`, `(366,233; 380,248; 389,254)`, and
 `(233,399; 228,427; 233,437)`. The error grows toward the lower edge and is present in
-the conversion rather than in the UI target.
+the raw contact and the library conversion rather than in the UI target. At the bottom
+probe, the stale transform adds 10 px to raw y=427; it does not by itself explain the
+full 38 px difference between the requested target and converted contact. Whether the
+remaining raw-coordinate difference was affected by the CST816-specific initialization
+or contact centroid is not established by this probe.
 
 The static StopWatch board configuration declares touch maxima 233 and a 468 px panel;
 that describes an intended transform, not the transform running on this firmware. The
@@ -106,7 +110,8 @@ scale. It later copies the 468 px panel configuration without recomputing that t
 transform. The measured mappings, such as raw `(249,251)` becoming `(255,257)` and raw
 `(228,427)` becoming `(233,437)`, match the stale 240 px transform. Sensor raw values
 already use the physical display's pixel domain. Changing only the 233 range while
-leaving framebuffer initialization unchanged would incorrectly double coordinates;
+leaving framebuffer initialization unchanged would instead apply approximately
+`239/467` and shrink coordinates to about half size;
 the range and framebuffer calibration order must be corrected together.
 
 An isolated per-device independent X/Y linear-profile prototype was used to check the

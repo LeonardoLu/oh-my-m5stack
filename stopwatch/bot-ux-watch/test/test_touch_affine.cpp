@@ -81,6 +81,43 @@ int main() {
         assert(error.maximum<0.001f);
     }
     {
+        // An overdetermined calibration remains close under bounded measurement noise.
+        const float expected[6]={1.012f,-0.018f,3.5f,0.009f,0.991f,-4.25f};
+        TouchAffinePoint points[]={mapped(8,12,expected),mapped(455,7,expected),
+                                   mapped(4,459,expected),mapped(462,452,expected),
+                                   mapped(112,318,expected),mapped(371,155,expected),
+                                   mapped(228,241,expected),mapped(61,189,expected)};
+        const float noise[][2]={{0.25f,-0.20f},{-0.30f,0.15f},{0.10f,0.30f},{-0.15f,-0.25f},
+                                {0.35f,0.05f},{-0.20f,-0.10f},{0.05f,0.25f},{-0.10f,-0.15f}};
+        for(size_t i=0;i<sizeof(points)/sizeof(points[0]);++i) {
+            points[i].targetX+=noise[i][0];
+            points[i].targetY+=noise[i][1];
+        }
+        auto result=solve(points);
+        assert(near(result.coefficients[0],expected[0],0.002f));
+        assert(near(result.coefficients[1],expected[1],0.002f));
+        assert(near(result.coefficients[2],expected[2],0.25f));
+        assert(near(result.coefficients[3],expected[3],0.002f));
+        assert(near(result.coefficients[4],expected[4],0.002f));
+        assert(near(result.coefficients[5],expected[5],0.25f));
+        assert(result.trainingError.rms<0.4f&&result.trainingError.maximum<0.5f);
+    }
+    {
+        // Holdout evaluation reports a different geometry and never refits coefficients.
+        const float expected[6]={0.98f,0.03f,7,-0.02f,1.01f,-5};
+        TouchAffinePoint training[]={mapped(0,0,expected),mapped(467,0,expected),
+                                     mapped(0,467,expected),mapped(467,467,expected)};
+        auto result=solve(training);
+        float before[6];
+        for(size_t i=0;i<6;++i) before[i]=result.coefficients[i];
+        TouchAffinePoint holdout[]={mapped(233,233,expected),mapped(120,350,expected)};
+        for(auto& point:holdout) { point.targetX+=8; point.targetY-=6; }
+        TouchAffineError error{};
+        assert(watchinput::touchAffineError(result.coefficients,holdout,2,&error));
+        assert(near(error.rms,10)&&near(error.maximum,10));
+        for(size_t i=0;i<6;++i) assert(result.coefficients[i]==before[i]);
+    }
+    {
         float identity[6]={1,0,0,0,1,0};
         TouchAffinePoint points[]={{10,20,13,24},{100,200,103,204}};
         TouchAffineError error{};

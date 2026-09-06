@@ -283,3 +283,17 @@ framebuffer push and diagnostic pages consume the same WatchControls geometry. H
 interaction clamps to each half-open rectangle's last pixel and divides by `w-1` or
 `h-1`, allowing both endpoints. Natural physical Done acceptance on this enlarged
 control requires a new trace and is not inferred from the earlier experiments.
+
+The enlarged-control source at `efe9af5`, together with shared geometry commit
+`9b53171`, passed all 24 products reported by the final host runner. The Watch build
+used 48,840 B RAM and 1,018,569 B flash. Its 1,018,928 B image has SHA-256
+`aca384a7fb6bccdaddf8035ee8b7f2c3ac8071d5283d4ab9aef230e36a7405ef`; upload to
+`/dev/cu.usbmodem214201` completed with hash verification while preserving NVS.
+Runtime readback reported `stored=0`, no candidate applied, and the identity matrix.
+Native 466 by 466 framebuffer captures of Settings top and bottom, Name, Color,
+Display, and Combinations are preserved under `tmp/done-debug/large-done-pages/`.
+Visual review passed the enlarged Done shape, round-edge safety, keyboard and selector
+clearance, four-row Display layout, preview clipping, and enlarged text. These are
+firmware-rendered framebuffers rather than optical photographs. A fresh physical trace
+is armed on ordinary Settings, but the five-click natural flat-finger result is still
+pending and is not claimed by the build or screenshot evidence.

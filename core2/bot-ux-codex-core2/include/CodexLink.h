@@ -31,6 +31,7 @@ public:
     uint32_t receivedRpcCount() const { return _receivedRpcCount; }
     uint32_t sentEventCount() const { return _sentEventCount; }
     uint32_t lightingRevision() const { return _lightingRevision; }
+    bool threadLightingFresh() const { return _threadLightingFresh; }
 
     // BLE callback entry points.
     void handleConnection(bool connected);
@@ -69,4 +70,5 @@ private:
     uint32_t _receivedRpcCount = 0;
     uint32_t _sentEventCount = 0;
     uint32_t _lightingRevision = 0;
+    bool _threadLightingFresh = false;
 };

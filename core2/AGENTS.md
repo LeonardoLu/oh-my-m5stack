@@ -16,10 +16,10 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
     core2/bot-ux-codex-core2/
       include/AudioFeedback.h    short speaker feedback
       include/BatteryDoubleTap.h battery settings-entry gesture state
-      include/BottomLeds.h       Bottom2 host-lighting mirror
+      include/BottomLeds.h       Bottom2 Off/Host/Alive lighting
       include/CodexLink.h        BLE HID identity, RPC, and native events
       include/HidFraming.h       fixed-buffer report 6 framing
-      include/Settings.h         NVS settings and four-page personalization UI
+      include/Settings.h         NVS settings and seven-page personalization UI
       src/main.cpp               touch dispatch, rendering, and diagnostics
       test/                      platform-independent framing/input checks
 
@@ -36,12 +36,19 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   does not capture or transmit microphone audio. Dragging off releases.
 - A BLE connection is not enough to show Codex-ready. Require a valid app RPC,
   notification subscription, and a negotiated MTU large enough for report 6.
-- The app supplies agent/key/ambient colors and effects. Do not invent task
-  titles, agent statuses, or successful host actions.
+- The app supplies agent/key/ambient colors and effects. AgentSignal projects
+  exact RGB24 status colors for solid/breath effects; unknown stays Unknown. Green
+  means New reply, never Done. The transport carries no task identity/title or
+  separate approval/response reason; preserve those limits.
+- Cards show host color/status and corner index; selected Bot follows its slot.
+  Notifications are bounded and deduplicated, with silent reconnect baselines.
+  Clear cached lighting on connection changes and await fresh thread lighting.
 - The top bar uses separate Bluetooth and app-ready icons. The battery is the
   settings entry: two valid taps within 420 ms open settings; one tap is inert.
 - Settings provide continuous RGB editing for the bot body, eyes, and accent,
-  plus style, expression, and animation previews. Save valid edits in NVS.
+  plus style, English naming, English/Chinese descriptions and independent
+  12×10×8 previews in a separate checked 112 px canvas. Preview selector values
+  do not change NVS or overwrite the actual host Bot. Save valid edits in NVS.
 - Reject bootloader/firmware operations; incompatible hardware firmware must
   never be accepted by the Core2 emulator.
 
@@ -50,7 +57,8 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
 - Controls activate on a valid release in the original target. All primary touch
   targets are at least 40 px high. Push-to-talk also releases on drag-off.
 - Bottom pagers use their full left and right halves as touch targets. Serial
-  capture selectors are 0 Agents, 1 Control, 2 General, 3 Bot, 4 Color, 5 Motion.
+  capture selectors are 0 Agents, 1 Control, 2 General, 3 Bot, 4 Color, 5 Motion,
+  6 Identity, 7 Preview, 8 Lights, 9 naming keyboard.
 - Avoid allocation in update/draw and BLE framing paths. Cache static UI and
   bound frame pacing so BLE callbacks stay responsive.
 - BLE callbacks only latch connection/MTU state. The main loop owns reconnect,
@@ -62,3 +70,16 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   eyes are intentionally dark.
 - Prefer host tests, PlatformIO builds, serial metrics/capture, hidapi
   enumeration, and Codex logs over manual-only acceptance.
+
+- `Settings::animate()` requests only the private Bot preview region; use
+  `drawAnimatedPreview()` and `previewRect()` for partial frames. First entry,
+  interaction and capture still draw the whole page. Do not redraw static AA
+  selectors every preview frame (native cost drops from full-page ~88 ms).
+- Shared UX fonts/shapes use RGB565 coverage on canvases. Active status glyphs
+  have color without tiles; the battery number is inside its icon.
+- Bottom2 offers Off/Host/Alive. Alive preserves status hue with gentle breathing,
+  traveling emphasis and bounded interaction. Reduced Motion is static. Both
+  mode Off and brightness zero immediately clear LEDs; notify(0) cancels notices.
+- Current contracts: specs/ux-components-iteration.md, specs/agent-signal-contract.md
+  and specs/core2-alive-lighting.md. Validate with tools/check_host.sh and native
+  capture/telemetry; never confuse serial transfer FPS with steady animation.

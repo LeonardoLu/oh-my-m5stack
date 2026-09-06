@@ -7,6 +7,9 @@
 #include "BottomLeds.h"
 #include "CodexLink.h"
 #include "Settings.h"
+#include "AgentSignal.h"
+#include <UxText.h>
+#include <UxRender.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -44,6 +47,9 @@ AudioFeedback audio;
 BottomLeds bottomLeds;
 CodexLink codexLink;
 BatteryDoubleTap batteryDoubleTap;
+agentsignal::Model agentSignals;
+uint32_t agentRevision = 0;
+uint32_t alertUntil[6]{};
 Page page = Page::Agents;
 Target pressed;
 bool touching = false;
@@ -77,6 +83,26 @@ float joystickAngle = 0.0f;
 uint32_t lastJoystickMs = 0;
 bool captureRequested = false;
 
+void coreText(const char* text, int x, int y, const ux::Font& font = ux::Latin14)
+{
+    unsigned datum = (unsigned)canvas.getTextDatum();
+    int width = ux::textWidth(text, font);
+    if ((datum & 3) == 1) x -= width / 2;
+    else if ((datum & 3) == 2) x -= width;
+    if ((datum & 12) == 4) y -= ux::lineHeight(font) / 2;
+    else if ((datum & 12) == 8) y -= ux::lineHeight(font);
+    uint32_t rgb = canvas.getTextStyle().fore_rgb888;
+    ux::drawText(canvas, text, x, y, ((rgb >> 8) & 0xF800) | ((rgb >> 5) & 0x7E0) | ((rgb >> 3) & 31), font);
+}
+
+uint16_t contrastingInk(uint32_t rgb)
+{
+    float values[3] = { ((rgb >> 16) & 255) / 255.0f, ((rgb >> 8) & 255) / 255.0f, (rgb & 255) / 255.0f };
+    for (auto& value : values) value = value <= 0.04045f ? value / 12.92f : powf((value + 0.055f) / 1.055f, 2.4f);
+    float luminance = values[0]*0.2126f + values[1]*0.7152f + values[2]*0.0722f;
+    return luminance > 0.195f ? botux::rgb565(17, 22, 29) : kWhite;
+}
+
 bool sameTarget(const Target& a, const Target& b)
 {
     return a.type == b.type && a.index == b.index;
@@ -85,14 +111,16 @@ bool sameTarget(const Target& a, const Target& b)
 Target hitTarget(int16_t x, int16_t y)
 {
     if (x < 0 || x >= kScreenW || y < 0 || y >= kScreenH) return {};
-    if (y < 40 && x >= 224) return {TargetType::Battery, 0};
+    if (y < 40 && x >= 262) return {TargetType::Battery, 0};
     if (y >= 200) return {x < 160 ? TargetType::PageAgents : TargetType::PageControl, 0};
     if (page == Page::Agents && y >= 44 && y < 174)
     {
         const int8_t col = x / 106;
         const int8_t row = (y - 44) / 65;
         const int8_t index = row * 3 + col;
-        if (col < 3 && index < LightingState::kSlotCount) return {TargetType::Agent, index};
+        if (col < 3 && index < LightingState::kSlotCount
+            && x >= 4 + col*106 && x < 104 + col*106
+            && y >= 44 + row*65 && y < 104 + row*65) return {TargetType::Agent, index};
     }
     if (page == Page::Control)
     {
@@ -125,10 +153,28 @@ uint16_t rgb24to565(uint32_t color)
 
 void setBotMood()
 {
-    if (listening) bot.setMood(botux::BotUx::Mood::Listening);
-    else if (codexLink.controlReady()) bot.setMood(botux::BotUx::Mood::Idle);
-    else if (codexLink.connected()) bot.setMood(botux::BotUx::Mood::Waiting);
-    else bot.setMood(botux::BotUx::Mood::Sleepy);
+    auto style = settings.botStyle();
+    const auto& signal = agentSignals.slot(selectedAgent);
+    if (codexLink.controlReady() && codexLink.threadLightingFresh() && signal.zone.color) {
+        style.bodyColor = rgb24to565(signal.zone.color);
+        style.eyeColor = contrastingInk(signal.zone.color);
+        style.pupilColor = style.eyeColor == kWhite ? kInk : kWhite;
+    }
+    bot.setStyle(style);
+    bot.setName(settings.data().botName);
+    using Mood = botux::BotUx::Mood;
+    Mood mood = Mood::Idle;
+    if (listening) mood = Mood::Listening;
+    else if (!codexLink.connected()) mood = Mood::Sleepy;
+    else if (!codexLink.controlReady()) mood = Mood::Waiting;
+    else switch (signal.signal) {
+        case agentsignal::Signal::Working: mood = Mood::Working; break;
+        case agentsignal::Signal::NeedsInput: mood = Mood::Waiting; break;
+        case agentsignal::Signal::NewReply: mood = Mood::Happy; break;
+        case agentsignal::Signal::Error: mood = Mood::Blocked; break;
+        default: break;
+    }
+    bot.setMood(mood, 650);
 }
 
 void syncSettings()
@@ -138,6 +184,9 @@ void syncSettings()
     settings.apply(bot);
     audio.setEnabled(data.audio != 0);
     bottomLeds.setBrightness(data.ledBrightness);
+    bottomLeds.setMode(data.ledMode);
+    if (!data.notifications) { for (auto& until : alertUntil) until = 0; bottomLeds.notify(0, nowMs); }
+    setBotMood();
     appliedSettings = data;
     uiDirty = true;
 }
@@ -163,6 +212,7 @@ void activate(const Target& target)
         case TargetType::Agent:
         {
             selectedAgent = static_cast<uint8_t>(target.index);
+            bottomLeds.interact(selectedAgent, nowMs);
             char key[] = "AG00";
             key[3] = static_cast<char>('0' + selectedAgent);
             sendTap(key);
@@ -333,6 +383,7 @@ void handleButtons(bool screenTouchEvent)
     {
         batteryDoubleTap.cancel();
         selectedAgent = (selectedAgent + 5) % 6;
+        setBotMood(); bottomLeds.interact(selectedAgent, nowMs);
         audio.select();
         uiDirty = true;
     }
@@ -347,6 +398,7 @@ void handleButtons(bool screenTouchEvent)
     {
         batteryDoubleTap.cancel();
         selectedAgent = (selectedAgent + 1) % 6;
+        setBotMood(); bottomLeds.interact(selectedAgent, nowMs);
         audio.select();
         uiDirty = true;
     }
@@ -354,73 +406,62 @@ void handleButtons(bool screenTouchEvent)
 
 void drawHeader()
 {
-    const botux::BotUx::Style style = Settings::themeStyle(settings.data().theme);
     botSprite.pushSprite(&canvas, 0, 0);
-    const bool ble = codexLink.connected();
-    const bool ready = codexLink.controlReady();
-    const uint16_t bleColor = ble ? style.accentColor : mutedText();
-    canvas.fillRoundRect(47, 5, 30, 30, 8, ble ? bleColor : surface());
-    if (!ble) canvas.drawRoundRect(47, 5, 30, 30, 8, kLine);
-    const uint16_t bleInk = ble ? kWhite : bleColor;
-    canvas.drawFastVLine(62, 10, 20, bleInk);
-    canvas.drawLine(62, 10, 70, 17, bleInk);
-    canvas.drawLine(70, 17, 55, 27, bleInk);
-    canvas.drawLine(62, 30, 70, 23, bleInk);
-    canvas.drawLine(70, 23, 55, 13, bleInk);
-
-    canvas.fillRoundRect(84, 7, 32, 25, 6, ready ? kGreen : surface());
-    canvas.drawRoundRect(84, 7, 32, 25, 6, ready ? kGreen : kLine);
-    const uint16_t appInk = ready ? kWhite : mutedText();
-    canvas.drawRoundRect(91, 12, 18, 12, 3, appInk);
-    canvas.drawFastVLine(100, 24, 4, appInk);
-    canvas.drawFastHLine(95, 28, 10, appInk);
-
-    const bool down = pressed.type == TargetType::Battery;
-    if (down) canvas.fillRoundRect(224, 4, 92, 32, 8, surface());
-    char power[5];
-    if (battery >= 0) snprintf(power, sizeof(power), "%d", battery);
-    else snprintf(power, sizeof(power), "--");
-    canvas.setTextDatum(middle_right);
-    canvas.setTextColor(down ? foreground() : mutedText());
-    canvas.drawString(power, 272, 20);
-    const uint16_t powerColor = charging ? style.accentColor : foreground();
-    canvas.drawRoundRect(279, 12, 28, 16, 3, powerColor);
-    canvas.fillRect(307, 17, 3, 6, powerColor);
-    if (battery > 0)
-    {
-        const int16_t width = static_cast<int16_t>((static_cast<int32_t>(battery) * 22) / 100);
-        canvas.fillRect(282, 15, width, 10, powerColor);
-    }
-    if (charging)
-    {
-        canvas.drawLine(293, 13, 289, 21, kWhite);
-        canvas.drawLine(289, 21, 295, 19, kWhite);
-        canvas.drawLine(295, 19, 292, 27, kWhite);
-    }
+    const auto style = Settings::themeStyle(settings.data().theme);
+    const uint16_t ble = codexLink.connected() ? style.accentColor : mutedText();
+    const uint16_t app = codexLink.controlReady() ? kGreen : mutedText();
+    canvas.setTextDatum(middle_left);
+    canvas.setTextColor(foreground());
+    // Keep the group at the right edge; long names are fitted in the remaining space.
+    char name[18]; snprintf(name, sizeof(name), "%s", settings.data().botName);
+    while (strlen(name) > 1 && ux::textWidth(name, ux::Latin14) > 141) name[strlen(name)-1] = 0;
+    coreText(name, 46, 20);
+    ux::line(canvas, 207, 9, 207, 30, 1.8f, ble);
+    ux::line(canvas, 207, 9, 215, 16, 1.8f, ble);
+    ux::line(canvas, 215, 16, 200, 27, 1.8f, ble);
+    ux::line(canvas, 207, 30, 215, 23, 1.8f, ble);
+    ux::line(canvas, 215, 23, 200, 12, 1.8f, ble);
+    ux::strokeRoundRect(canvas, 229, 11, 24, 17, 3, app, 1.8f);
+    ux::line(canvas, 241, 28, 241, 31, 1.8f, app);
+    ux::line(canvas, 235, 32, 247, 32, 1.8f, app);
+    uint16_t power = charging ? kGreen : foreground();
+    if (pressed.type == TargetType::Battery) power = style.accentColor;
+    ux::strokeRoundRect(canvas, 270, 9, 41, 24, 4, power, 1.5f);
+    ux::roundRect(canvas, 312, 16, 3, 10, 1, power);
+    char value[5];
+    if (battery < 0) snprintf(value, sizeof(value), "--");
+    else snprintf(value, sizeof(value), "%d", battery);
+    canvas.setTextDatum(middle_center); canvas.setTextColor(power);
+    coreText(value, 291, 21);
 }
 
 void drawAgentCard(uint8_t index)
 {
-    const int16_t x = 4 + (index % 3) * 106;
-    const int16_t y = 44 + (index / 3) * 65;
-    const bool selected = index == selectedAgent;
-    const bool down = pressed.type == TargetType::Agent && pressed.index == index;
-    const LightingZone& zone = codexLink.lighting().slots[index];
-    const uint16_t color = zone.active() ? rgb24to565(zone.color) : mutedText();
-    const uint16_t fill = down ? (settings.data().theme == 2 ? botux::rgb565(78, 82, 91)
-                                                            : botux::rgb565(220, 225, 231)) : surface();
-    canvas.fillRoundRect(x, y, 100, 60, 9, fill);
-    canvas.drawRoundRect(x, y, 100, 60, 9,
-                         selected ? Settings::themeStyle(settings.data().theme).accentColor : kLine);
-    if (selected) canvas.drawRoundRect(x + 2, y + 2, 96, 56, 7, foreground());
-    canvas.fillCircle(x + 16, y + 18, 6, color);
-    char title[12];
-    snprintf(title, sizeof(title), "AGENT %u", static_cast<unsigned>(index + 1));
-    canvas.setTextDatum(middle_left);
-    canvas.setTextColor(foreground());
-    canvas.drawString(title, x + 28, y + 18);
-    canvas.setTextColor(mutedText());
-    canvas.drawString(zone.active() ? "HOST COLOR" : "NO COLOR", x + 12, y + 43);
+    const int16_t x = 4 + (index % 3) * 106, y = 44 + (index / 3) * 65;
+    const auto& state = agentSignals.slot(index);
+    const bool known = codexLink.controlReady() && codexLink.threadLightingFresh() && state.zone.color;
+    const uint32_t rgb = known ? state.zone.color : 0x626A76;
+    uint16_t fill = rgb24to565(rgb), ink = contrastingInk(rgb);
+    bool down = pressed.type == TargetType::Agent && pressed.index == index;
+    if (down) fill = ux::blend565(fill, ink, 48);
+    if (alertUntil[index] && (int32_t)(alertUntil[index] - nowMs) > 0 && !settings.data().reducedMotion) {
+        float t = (1600 - (alertUntil[index] - nowMs)) / 1600.0f;
+        float envelope = sinf(3.14159265f * t);
+        fill = ux::blend565(fill, ink, (uint8_t)(envelope * 60));
+    }
+    ux::roundRect(canvas, x, y, 100, 60, 9, fill);
+    if (index == selectedAgent) ux::strokeRoundRect(canvas, x+2, y+2, 96, 56, 7, ink, 1.7f);
+    ux::circle(canvas, x+85, y+13, 9, ux::blend565(fill, ink, 26));
+    char badge[2] = {(char)('1'+index),0};
+    canvas.setTextDatum(middle_center); canvas.setTextColor(ink);
+    coreText(badge, x+85, y+13);
+    const char* first = agentsignal::name(state.signal);
+    const char* second = nullptr;
+    if (state.signal == agentsignal::Signal::NeedsInput) { first = "Needs"; second = "input"; }
+    if (state.signal == agentsignal::Signal::NewReply) { first = "New"; second = "reply"; }
+    if (state.signal == agentsignal::Signal::Off) { first = "Lights"; second = "off"; }
+    coreText(first, x+50, y+(second ? 28 : 37));
+    if (second) coreText(second, x+50, y+46);
 }
 
 void drawTabs()
@@ -431,32 +472,38 @@ void drawTabs()
     canvas.drawFastHLine(0, 200, 320, accent);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(foreground());
-    canvas.drawString("<", 34, 220);
-    canvas.drawString(page == Page::Agents ? "1 / 2" : "2 / 2", 160, 220);
-    canvas.drawString(">", 286, 220);
+    coreText("<", 34, 220);
+    coreText(page == Page::Agents ? "1 / 2" : "2 / 2", 160, 220);
+    coreText(">", 286, 220);
 }
 
 void drawAgentsPage()
 {
     for (uint8_t i = 0; i < LightingState::kSlotCount; ++i) drawAgentCard(i);
-    char detail[16];
-    snprintf(detail, sizeof(detail), "SLOT %u / 6", static_cast<unsigned>(selectedAgent + 1));
-    canvas.setTextDatum(middle_center);
-    canvas.setTextColor(mutedText());
-    canvas.drawString(detail, 160, 183);
+    char detail[160];
+    bot.describe(detail, sizeof(detail), settings.data().language ? botux::BotUx::Language::Chinese : botux::BotUx::Language::English);
+    const ux::Font& font = settings.data().language ? ux::Cjk18 : ux::Latin14;
+    // UTF-8-safe fitting; one-line caption fits between cards and pager.
+    while (ux::textWidth(detail, font) > 306 && strlen(detail)) {
+        size_t len = strlen(detail) - 1;
+        while (len && ((unsigned char)detail[len] & 0xC0) == 0x80) --len;
+        detail[len] = 0;
+    }
+    canvas.setTextDatum(middle_center); canvas.setTextColor(mutedText());
+    coreText(detail, 160, 184, font);
     drawTabs();
 }
 
 void drawKey(int16_t x, int16_t y, int16_t w, const char* label, const char* code,
              bool down, uint16_t accent)
 {
-    canvas.fillRoundRect(x, y, w, 40, 8, down ? accent : surface());
-    canvas.drawRoundRect(x, y, w, 40, 8, kLine);
+    ux::roundRect(canvas, x, y, w, 40, 8, down ? accent : surface());
+    ux::strokeRoundRect(canvas, x, y, w, 40, 8, kLine);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(down ? kWhite : foreground());
-    canvas.drawString(label, x + w / 2, y + 12);
+    coreText(label, x + w / 2, y + 12);
     canvas.setTextColor(down ? kWhite : mutedText());
-    canvas.drawString(code, x + w / 2, y + 29);
+    coreText(code, x + w / 2, y + 29);
 }
 
 void drawControlPage()
@@ -477,11 +524,11 @@ void drawControlPage()
     const bool lessDown = pressed.type == TargetType::Reasoning && pressed.index == 0;
     const bool moreDown = pressed.type == TargetType::Reasoning && pressed.index == 1;
     drawKey(4, 143, 58, "LESS", "TURN", lessDown, styleAccent);
-    canvas.fillRoundRect(66, 143, 188, 40, 8, surface());
-    canvas.drawRoundRect(66, 143, 188, 40, 8, kLine);
+    ux::roundRect(canvas, 66, 143, 188, 40, 8, surface());
+    ux::strokeRoundRect(canvas, 66, 143, 188, 40, 8, kLine);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(foreground());
-    canvas.drawString("TAP KNOB / DRAG STICK", 160, 163);
+    coreText("TAP KNOB / DRAG STICK", 160, 163);
     drawKey(258, 143, 58, "MORE", "TURN", moreDown, styleAccent);
     drawTabs();
 }
@@ -524,7 +571,7 @@ void handleSerial()
                     serialLength = 0;
                     return;
                 }
-                else if (serialLength == 1 && serialCommand[0] >= '0' && serialCommand[0] <= '5')
+                else if (serialLength == 1 && serialCommand[0] >= '0' && serialCommand[0] <= '9')
                 {
                     if (serialCommand[0] == '0') { settings.close(); page = Page::Agents; }
                     else if (serialCommand[0] == '1') { settings.close(); page = Page::Control; }
@@ -569,12 +616,12 @@ void reportPerformance()
     if (elapsed < 5000) return;
     const float fps = elapsed ? frameCount * 1000.0f / elapsed : 0.0f;
     Serial.printf("[perf] fps=%.2f draw_max_us=%lu push_max_us=%lu full=%lu frames=%lu "
-                  "heap=%u psram=%u ble=%u ready=%u mtu=%u rpc=%lu events=%lu\n",
+                  "heap=%u psram=%u ble=%u ready=%u mtu=%u rpc=%lu events=%lu led=%u mode=%u\n",
                   fps, static_cast<unsigned long>(drawMaxUs), static_cast<unsigned long>(pushMaxUs),
                   static_cast<unsigned long>(fullPushCount), static_cast<unsigned long>(frameCount),
                   ESP.getFreeHeap(), ESP.getFreePsram(), codexLink.connected(), codexLink.controlReady(),
                   codexLink.peerMtu(), static_cast<unsigned long>(codexLink.receivedRpcCount()),
-                  static_cast<unsigned long>(codexLink.sentEventCount()));
+                  static_cast<unsigned long>(codexLink.sentEventCount()), bottomLeds.available(), settings.data().ledMode);
     statsStartedMs = nowMs;
     frameCount = fullPushCount = drawMaxUs = pushMaxUs = 0;
 }
@@ -603,6 +650,7 @@ void setup()
     audio.setEnabled(settings.data().audio != 0);
     bottomLeds.begin();
     bottomLeds.setBrightness(settings.data().ledBrightness);
+    bottomLeds.setMode(settings.data().ledMode);
     appliedSettings = settings.data();
     readPower();
     const bool started = codexLink.begin();
@@ -618,6 +666,19 @@ void loop()
     M5.update();
     handleSerial();
     codexLink.update(battery, charging, nowMs);
+    uint8_t alerts = agentSignals.update(codexLink.lighting(),
+        codexLink.controlReady() && codexLink.threadLightingFresh(), nowMs);
+    if (agentSignals.revision() != agentRevision) {
+        agentRevision = agentSignals.revision(); setBotMood(); uiDirty = true;
+    }
+    for (auto& until : alertUntil) if (until && (int32_t)(nowMs - until) >= 0) { until = 0; uiDirty = true; }
+    if (alerts && settings.data().notifications) {
+        for (uint8_t i = 0; i < 6; ++i) if (alerts & (1u << i)) alertUntil[i] = nowMs + 1600;
+        bottomLeds.notify(alerts, nowMs);
+        bool error = false;
+        for (uint8_t i = 0; i < 6; ++i) if ((alerts & (1u << i)) && agentSignals.slot(i).signal == agentsignal::Signal::Error) error = true;
+        if (error) audio.error(); else audio.confirm();
+    }
     const bool screenTouchEvent = handleTouch();
     handleButtons(screenTouchEvent);
     if (codexLink.state() != lastLinkState || codexLink.controlReady() != lastControlReady)
@@ -637,18 +698,26 @@ void loop()
     lastFrameMs = nowMs;
     if (nowMs - lastPowerMs >= 5000) { lastPowerMs = nowMs; readPower(); }
     syncSettings();
+    const bool animatePreview = settings.animate(nowMs);
+    if (!settings.isOpen() && page == Page::Agents && !settings.data().reducedMotion)
+        for (uint8_t i = 0; i < 6; ++i) if (alertUntil[i] && (int32_t)(alertUntil[i]-nowMs)>0) uiDirty = true;
     updateMotion();
     bot.update(nowMs);
     const uint32_t drawStarted = micros();
     bot.draw();
     bottomLeds.update(codexLink.lighting(), nowMs, settings.data().reducedMotion != 0,
-                      codexLink.controlReady());
+                      codexLink.controlReady(), selectedAgent);
     const bool fullFrame = uiDirty;
+    const bool partialPreview = !fullFrame && animatePreview;
     if (fullFrame)
     {
         canvas.fillSprite(Settings::themeStyle(settings.data().theme).bgColor);
         if (settings.isOpen()) settings.draw(canvas, botSprite);
         else { drawHeader(); if (page == Page::Agents) drawAgentsPage(); else drawControlPage(); }
+    }
+    else if (partialPreview)
+    {
+        settings.drawAnimatedPreview(canvas);
     }
     else if (!settings.isOpen())
     {
@@ -664,8 +733,14 @@ void loop()
         ++fullPushCount;
         uiDirty = false;
     }
-    else if (settings.isOpen()) botSprite.pushSprite(2, 0);
-    else
+    else if (partialPreview)
+    {
+        const auto bounds = Settings::previewRect();
+        M5.Display.setClipRect(bounds.x, bounds.y, bounds.w, bounds.h);
+        canvas.pushSprite(0, 0);
+        M5.Display.clearClipRect();
+    }
+    else if (!settings.isOpen())
     {
         M5.Display.pushImage(0, 0, kScreenW, 40, static_cast<uint16_t*>(canvas.getBuffer()));
     }

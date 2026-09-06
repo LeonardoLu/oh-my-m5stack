@@ -227,6 +227,9 @@ void CodexLink::update(int8_t batteryPercent, bool charging, uint32_t nowMs)
     if (hasConnectionEvent)
     {
         _state = eventConnected ? State::Connected : State::Advertising;
+        _threadLightingFresh = false;
+        _lighting = LightingState{};
+        ++_lightingRevision;
         _peerMtu = 23;
         if (!eventConnected)
         {
@@ -420,6 +423,7 @@ void CodexLink::_processLine(const char* line, int8_t batteryPercent, bool charg
             if (slot >= 0 && slot < LightingState::kSlotCount)
                 updateZone(_lighting.slots[slot], item);
         }
+        _threadLightingFresh = true;
         ++_lightingRevision;
         _sendRpcResult(idJson, "null");
     }

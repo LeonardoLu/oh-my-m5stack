@@ -28,13 +28,23 @@ width of the three visible dots. No fixed settings label or value falls back to
 CJK faces and checks title, row pair, pill, stepper, help and keyboard bounds. It
 also writes `tmp/host-checks/watch-typography.ppm`, a direct RGB565 render using
 the generated coverage. Run it through `sh tools/check_host.sh`, or compile the
-focused test using the font sources listed beside it in that script. Device
-captures and runtime timing remain the Watch integration owner's acceptance;
-the host artifact proves source coverage and measured layout, not AMOLED optics.
+focused test using the font sources listed beside it in that script.
 
 The first compile-only integration build succeeds with 42,464 B static RAM and
 1,005,313 B flash. ELF symbol inspection includes Cjk18/22/24/28,
 Latin18/24/28 and Clock36, while unused Latin14 remains absent. This confirms the
-new faces retain the library's per-object selective linkage. Runtime and capture
-numbers are recorded only after the integration owner uploads the same frozen
-sources.
+new faces retain the library's per-object selective linkage.
+
+Device acceptance used the uploaded firmware containing typography commit
+`0a4894c`. The serial session recorded a device boot at 21:31, followed by native
+466 x 466 framebuffer captures at 21:38–21:39 in
+`tmp/done-debug/final-font/`: English and Chinese Personality, Name keyboard and
+Format screens. `tmp/done-debug/settings.png` records the same typography on the
+Chinese Settings screen. Visual review passed both languages without round-edge
+clipping, title collisions, label/value overlap, hint overflow or clipped
+keyboard actions. These framebuffer captures validate the firmware's raster and
+layout; they are not optical photographs of the AMOLED. The later deterministic
+touch-library fix in `6bbb413` did not change the frozen font or Watch layout
+sources, so the captures remain representative of the current typography.
+Physical Done-button acceptance remains tracked separately and does not leave
+the typography acceptance pending.

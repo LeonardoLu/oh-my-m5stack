@@ -68,14 +68,21 @@ botux::BotUx previewBot;
 Settings settings;
 Power power;
 watchbuttons::Feedback _buttonFeedback;
-uint16_t* _buttonFeedbackScratch = nullptr;
+lgfx::rgb565_t* _buttonFeedbackScratch = nullptr;
+uint8_t* _buttonFeedbackMasks = nullptr;
 uint8_t _buttonFeedbackDrawnMask = 0;
 bool _buttonFeedbackDirty = false;
+bool _buttonFeedbackFaceBaseValid = false;
 uint32_t _buttonFeedbackRenderUs = 0;
 uint32_t _buttonFeedbackRenderMaxUs = 0;
 uint32_t _buttonFeedbackPixels = 0;
 uint32_t _buttonFeedbackHudMs = 0;
 constexpr size_t kButtonScratchPixels = 160u * 187u;
+constexpr size_t kButtonSideMaskPixels = 160u * 187u;
+constexpr size_t kButtonPowerMaskPixels = 155u * 155u;
+constexpr size_t kButtonMaskBytes = watchbuttons::Feedback::ExpandSteps + 1;
+constexpr size_t kButtonMasksTotal = kButtonMaskBytes
+    * (kButtonSideMaskPixels * 2 + kButtonPowerMaskPixels);
 
 Screen _screen = Screen::Face;
 Editor _editor = Editor::None;
@@ -2059,22 +2066,59 @@ static watchbuttons::Bounds intersectBounds(const watchbuttons::Bounds& a,
             (int16_t)(bottom > y ? bottom - y : 0)};
 }
 
-static void blendButtonBlob(uint16_t* pixels, int16_t width,
+static size_t buttonMaskPixels(watchbuttons::Button button) {
+    auto bounds = watchbuttons::dirtyBounds(button);
+    return (size_t)bounds.w * bounds.h;
+}
+
+static uint8_t* buttonMask(watchbuttons::Button button, uint8_t step) {
+    size_t offset = button == watchbuttons::A ? 0
+                  : button == watchbuttons::B
+                      ? kButtonMaskBytes * kButtonSideMaskPixels
+                      : kButtonMaskBytes * kButtonSideMaskPixels * 2;
+    return _buttonFeedbackMasks + offset + buttonMaskPixels(button) * step;
+}
+
+static uint32_t buildButtonFeedbackMasks() {
+    uint32_t started = millis();
+    const watchbuttons::Button buttons[] = {
+        watchbuttons::A, watchbuttons::B, watchbuttons::Power
+    };
+    for (auto button : buttons) {
+        auto bounds = watchbuttons::dirtyBounds(button);
+        for (uint8_t step = 0; step <= watchbuttons::Feedback::ExpandSteps; ++step) {
+            auto blob = watchbuttons::expandedBlob(button, step);
+            uint8_t* mask = buttonMask(button, step);
+            for (int16_t y = 0; y < bounds.h; ++y)
+                for (int16_t x = 0; x < bounds.w; ++x)
+                    mask[(size_t)y * bounds.w + x] = watchbuttons::blobCoverage(
+                        blob, bounds.x + x + 0.5f, bounds.y + y + 0.5f);
+        }
+    }
+    return millis() - started;
+}
+
+static void blendButtonBlob(lgfx::rgb565_t* pixels, int16_t width,
                             int16_t bufferX, int16_t bufferY,
                             const watchbuttons::Bounds& bounds,
                             watchbuttons::Button button) {
     uint8_t step = _diagnosticButtons ? watchbuttons::Feedback::ExpandSteps
                                       : _buttonFeedback.expandStep(button);
-    const auto blob = watchbuttons::expandedBlob(button, step);
+    const auto full = watchbuttons::dirtyBounds(button);
+    const uint8_t* mask = buttonMask(button, step);
+    uint16_t color = watchbuttons::restingBlob(button).color;
     for (int16_t y = 0; y < bounds.h; ++y) {
         for (int16_t x = 0; x < bounds.w; ++x) {
-            uint8_t coverage = watchbuttons::blobCoverage(
-                blob, bounds.x + x + 0.5f, bounds.y + y + 0.5f);
+            size_t maskIndex = (size_t)(bounds.y + y - full.y) * full.w
+                             + (bounds.x + x - full.x);
+            uint8_t coverage = mask[maskIndex];
             if (!coverage) continue;
             size_t index = (size_t)(bounds.y + y - bufferY) * width
                          + (bounds.x + x - bufferX);
-            pixels[index] = coverage == 255 ? blob.color
-                : ux::blend565(pixels[index], blob.color, coverage);
+            // Typed M5GFX pixels keep read, blend and push in native RGB565;
+            // the uint16_t overload instead uses transport byte order.
+            pixels[index] = coverage == 255 ? color
+                : ux::blend565(pixels[index].raw, color, coverage);
         }
     }
 }
@@ -2158,32 +2202,37 @@ static void pushFaceWithButtonFeedback(uint32_t now) {
     uint8_t dirty = (uint8_t)(_buttonFeedbackDrawnMask | held);
     uint32_t started = micros(), pixels = 0;
 
-    // Compose one coherent face in PSRAM first. Nothing is cleared on the
-    // panel: top HUD, bot, bottom HUD and the edge overlays all come from this
-    // same finished frame.
-    canvas.fillSprite(settings.style().bgColor);
-    botSprite.pushSprite(&canvas, kBotX, kBotY);
-    face.invalidate();
-    face.draw(&canvas, settings.style().bgColor, settings.ink(), settings.muted(),
-              settings.style().accentColor, settings.panel(), settings.warning(),
-              statusPanelProgress(now));
-    compositeButtonFeedbackIntoCanvas(canvas);
-
-    const uint16_t* buffer = (const uint16_t*)canvas.getBuffer();
+    // Keep a clean face base in PSRAM while feedback is visible. Animation
+    // steps reuse it; only the bot and the infrequently-changing HUD are
+    // refreshed, and liquid is always blended in the separate scratch buffer.
     bool fullFrame = _faceNeedsClear;
+    bool refreshHud = !_buttonFeedbackFaceBaseValid || fullFrame
+        || !_buttonFeedbackHudMs || now - _buttonFeedbackHudMs >= 200;
+    if (!_buttonFeedbackFaceBaseValid || fullFrame) {
+        canvas.fillSprite(settings.style().bgColor);
+        _buttonFeedbackFaceBaseValid = true;
+    }
+    botSprite.pushSprite(&canvas, kBotX, kBotY);
+    if (refreshHud) {
+        face.invalidate();
+        face.draw(&canvas, settings.style().bgColor, settings.ink(), settings.muted(),
+                  settings.style().accentColor, settings.panel(), settings.warning(),
+                  statusPanelProgress(now));
+        _buttonFeedbackHudMs = now;
+    }
+
     if (fullFrame) {
         // A screen transition needs every old settings pixel replaced, but the
         // finished frame is transferred once; there is no visible blank pass.
-        canvas.pushSprite(0, 0);
+        pixels = pushCanvasRegionWithButtonFeedback(
+            canvas, watchbuttons::Bounds{0, 0, kW, kH}, held);
         _faceNeedsClear = false;
-        pixels = (uint32_t)kW * kH;
     } else {
-        bool refreshHud = !_buttonFeedbackHudMs || now - _buttonFeedbackHudMs >= 200;
         if (refreshHud) {
-            M5.Display.pushImage(0, 0, kW, 90, buffer);
-            M5.Display.pushImage(0, 376, kW, 90, buffer + (size_t)kW * 376);
-            pixels += (uint32_t)kW * 180;
-            _buttonFeedbackHudMs = now;
+            pixels += pushCanvasRegionWithButtonFeedback(
+                canvas, watchbuttons::Bounds{0, 0, kW, 90}, held);
+            pixels += pushCanvasRegionWithButtonFeedback(
+                canvas, watchbuttons::Bounds{0, 376, kW, 90}, held);
         }
         botSprite.pushSprite(&M5.Display, kBotX, kBotY);
         pixels += (uint32_t)kBotSize * kBotSize;
@@ -2201,6 +2250,9 @@ static void pushFaceWithButtonFeedback(uint32_t now) {
         auto bounds = watchbuttons::dirtyBounds(button);
         canvas.readRect(bounds.x, bounds.y, bounds.w, bounds.h,
                         _buttonFeedbackScratch);
+        if (held & button)
+            blendButtonBlob(_buttonFeedbackScratch, bounds.w, bounds.x, bounds.y,
+                            bounds, button);
         M5.Display.pushImage(bounds.x, bounds.y, bounds.w, bounds.h,
                              _buttonFeedbackScratch);
         pixels += (uint32_t)bounds.w * bounds.h;
@@ -2293,6 +2345,7 @@ static void render(uint32_t now) {
         face.draw(&M5.Display, settings.style().bgColor, settings.ink(), settings.muted(),
                   settings.style().accentColor, settings.panel(), settings.warning(),
                   statusPanelProgress(now));
+        _buttonFeedbackFaceBaseValid = false;
         M5.Display.waitDisplay();
         uint32_t t3 = micros();
         recordFrame(now, t1 - t0, t2 - t1, t3 - t2);
@@ -2376,6 +2429,7 @@ static void emitFrameCapture() {
     }
     Serial.print("\nFRAME_END\n");
     Serial.flush();
+    _buttonFeedbackFaceBaseValid = false;
     // Frame capture temporarily composites diagnostics into the shared canvas.
     // Rebuild the normal page before it is reused as an overlay base.
     if (_screen != Screen::Face && !_touchCalibration) {
@@ -2563,18 +2617,23 @@ void setup() {
     bool canvasOk = canvas.createSprite(kW, kH) != nullptr;
     bool botOk = botSprite.createSprite(kBotSize, kBotSize) != nullptr;
     bool previewOk = previewSprite.createSprite(kPreviewSize, kPreviewSize) != nullptr;
-    _buttonFeedbackScratch = (uint16_t*)heap_caps_malloc(
+    _buttonFeedbackScratch = (lgfx::rgb565_t*)heap_caps_malloc(
         kButtonScratchPixels * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    _renderReady = canvasOk && botOk && previewOk && _buttonFeedbackScratch;
+    _buttonFeedbackMasks = (uint8_t*)heap_caps_malloc(
+        kButtonMasksTotal, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    _renderReady = canvasOk && botOk && previewOk
+        && _buttonFeedbackScratch && _buttonFeedbackMasks;
     if (!_renderReady) {
-        Serial.printf("sprite allocation failed: canvas=%d bot=%d preview=%d keys=%d\n",
-                      canvasOk, botOk, previewOk, _buttonFeedbackScratch != nullptr);
+        Serial.printf("sprite allocation failed: canvas=%d bot=%d preview=%d keys=%d masks=%d\n",
+                      canvasOk, botOk, previewOk, _buttonFeedbackScratch != nullptr,
+                      _buttonFeedbackMasks != nullptr);
         M5.Display.fillScreen(TFT_BLACK);
         M5.Display.setTextDatum(middle_center);
         M5.Display.setTextColor(TFT_WHITE);
         M5.Display.drawString("DISPLAY MEMORY ERROR", kW / 2, kH / 2);
         return;
     }
+    uint32_t buttonMaskMs = buildButtonFeedbackMasks();
 
     _renderReady = face.begin(&botSprite);
     if (!_renderReady) { Serial.println("HUD allocation failed"); return; }
@@ -2585,8 +2644,9 @@ void setup() {
     _personalList.configure(kPersonalCount, kVisibleRows);
     _ambientCycle.begin(millis());
     showStatusPanel(millis(), 1800);
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, keys 0..7/off, battery 0..100/off, trace on/off/clear/dump, cal start/repeat/direction/on/off/dump/profile/save/reset, sound N\n",
-                  M5.Imu.isEnabled());
+    Serial.printf("bot-ux-watch ready; IMU=%d keys_mask_ms=%lu keys_mask_bytes=%lu. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, keys 0..7/off, battery 0..100/off, trace on/off/clear/dump, cal start/repeat/direction/on/off/dump/profile/save/reset, sound N\n",
+                  M5.Imu.isEnabled(), (unsigned long)buttonMaskMs,
+                  (unsigned long)kButtonMasksTotal);
 }
 
 void loop() {

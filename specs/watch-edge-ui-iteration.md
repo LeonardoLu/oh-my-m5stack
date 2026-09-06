@@ -66,9 +66,12 @@ integration and upload.
 The enclosure mapping follows the official StopWatch pin map and product layout:
 A is the yellow upper-left button on GPIO 2, B is the blue upper-right button on
 GPIO 1, and the red power button is at the bottom. While a button is physically
-held, its matching colored arc expands over 120 ms at that display edge. Each
+held, its matching colored liquid edge shape expands over 160 ms. Its outer edge
+follows the physical display circle; its inner edge uses a smooth central bulge
+whose depth and tangent both converge at the pointed ends. A brief expansion
+overshoot settles to the held shape without becoming an equal-width line. Each
 button owns its press timestamp, so a later button in an A+B chord starts its own
-animation. Releasing a button removes its arc on the next rendered frame. The
+animation. Releasing a button removes its shape on the next rendered frame. The
 overlay is visual feedback only and does not replace or synthesize the existing
 button gesture events. See the [official StopWatch documentation and pin
 map](https://docs.m5stack.com/en/core/StopWatch).
@@ -79,14 +82,14 @@ M5Unified source receives a verified, fail-closed patch that reads PM1 button
 status register `0x48` bit 0 through the same initialized PMIC object. The added
 read does not replace `getPekPress()` or the normal `M5.update()` event path. A
 failed PMIC read makes power feedback unknown and hidden; it cannot leave a red
-arc stuck on screen. The patching hook accepts only the pinned revision and exact
+shape stuck on screen. The patching hook accepts only the pinned revision and exact
 original or patched file hashes, and a second build verifies the patched hashes
 without changing them.
 
 Face rendering clears and invalidates its partial-update background whenever a
 button edge changes. Static settings and editor pages force a full redraw rather
-than a list-band update. In each path the arcs render last; this lets the power arc
-temporarily cover the bottom Done segment and lets the underlying content return
+than a list-band update. In each path the liquid shapes render last; this lets the
+power shape temporarily cover the bottom Done segment and lets the underlying content return
 without residual pixels on release. Serial-only `keys` and battery percentage
 overrides support framebuffer geometry captures. These overrides do not prove the
 physical button signals and must be disabled after capture.

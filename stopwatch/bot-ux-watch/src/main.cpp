@@ -2039,38 +2039,41 @@ static uint8_t visibleButtonMask() {
 }
 
 template <typename Gfx>
-static void drawButtonArc(Gfx& target, watchbuttons::Button button) {
-    const auto spec = watchbuttons::arc(button);
-    constexpr float kRadians = 3.14159265358979323846f / 180.0f;
-    int16_t radius = button == watchbuttons::Power ? 230 : 224;
-    int16_t thickness = button == watchbuttons::Power ? 2 : 7;
-    int16_t center = (spec.startDegrees + spec.endDegrees) / 2;
-    int16_t targetHalf = (spec.endDegrees - spec.startDegrees) / 2;
+static void drawButtonBlob(Gfx& target, watchbuttons::Button button) {
     uint8_t step = _diagnosticButtons ? watchbuttons::Feedback::ExpandSteps
                                       : _buttonFeedback.expandStep(button);
-    int16_t half = targetHalf * step / watchbuttons::Feedback::ExpandSteps;
-    auto cap = [&](int16_t degrees) {
+    const auto blob = watchbuttons::expandedBlob(button, step);
+    constexpr float kRadians = 3.14159265358979323846f / 180.0f;
+    constexpr int16_t kOuterRadius = 233;
+    auto edgePoints = [&](float degrees, int16_t& ox, int16_t& oy,
+                          int16_t& ix, int16_t& iy) {
         float angle = degrees * kRadians;
-        int16_t x = 233 + (int16_t)lroundf(cosf(angle) * radius);
-        int16_t y = 233 + (int16_t)lroundf(sinf(angle) * radius);
-        target.fillCircle(x, y, thickness, spec.color);
+        float cosine = cosf(angle), sine = sinf(angle);
+        float inner = kOuterRadius - watchbuttons::blobInset(blob, degrees);
+        ox = 233 + (int16_t)lroundf(cosine * kOuterRadius);
+        oy = 233 + (int16_t)lroundf(sine * kOuterRadius);
+        ix = 233 + (int16_t)lroundf(cosine * inner);
+        iy = 233 + (int16_t)lroundf(sine * inner);
     };
-    if (half > 0) {
-        target.fillArc(233, 233, radius + thickness, radius - thickness,
-                       center - half, center + half, spec.color);
-        cap(center - half);
-        cap(center + half);
-    } else {
-        cap(center);
+    int16_t start = blob.centerDegrees - blob.halfDegrees;
+    int16_t end = blob.centerDegrees + blob.halfDegrees;
+    int16_t ox0, oy0, ix0, iy0;
+    edgePoints(start, ox0, oy0, ix0, iy0);
+    for (int16_t degrees = start; degrees < end; ++degrees) {
+        int16_t ox1, oy1, ix1, iy1;
+        edgePoints(degrees + 1, ox1, oy1, ix1, iy1);
+        target.fillTriangle(ox0, oy0, ox1, oy1, ix0, iy0, blob.color);
+        target.fillTriangle(ox1, oy1, ix1, iy1, ix0, iy0, blob.color);
+        ox0=ox1; oy0=oy1; ix0=ix1; iy0=iy1;
     }
 }
 
 template <typename Gfx>
 static void drawButtonFeedback(Gfx& target) {
     uint8_t held = visibleButtonMask();
-    if (held & watchbuttons::A) drawButtonArc(target, watchbuttons::A);
-    if (held & watchbuttons::B) drawButtonArc(target, watchbuttons::B);
-    if (held & watchbuttons::Power) drawButtonArc(target, watchbuttons::Power);
+    if (held & watchbuttons::A) drawButtonBlob(target, watchbuttons::A);
+    if (held & watchbuttons::B) drawButtonBlob(target, watchbuttons::B);
+    if (held & watchbuttons::Power) drawButtonBlob(target, watchbuttons::Power);
 }
 
 static void render(uint32_t now) {

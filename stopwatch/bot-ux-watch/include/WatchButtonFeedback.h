@@ -1,5 +1,6 @@
 #pragma once
 
+#include <math.h>
 #include <stdint.h>
 
 namespace watchbuttons {
@@ -10,25 +11,46 @@ enum Button : uint8_t {
     Power = 1 << 2,
 };
 
-struct Arc {
-    int16_t startDegrees;
-    int16_t endDegrees;
+struct Blob {
+    int16_t centerDegrees;
+    int16_t halfDegrees;
+    int16_t depth;
     uint16_t color;
 };
 
 // Angles use screen coordinates: 0 degrees points right and 90 degrees down.
 // The locations and colors match the StopWatch enclosure: yellow A at the
 // upper-left edge, blue B at the upper-right edge, and red power at the bottom.
-constexpr Arc arc(Button button) {
-    return button == A ? Arc{205, 235, 0xFFE0}
-         : button == B ? Arc{305, 335, 0x34BF}
-                       : Arc{78, 102, 0xF800};
+constexpr Blob restingBlob(Button button) {
+    return button == A ? Blob{220, 18, 24, 0xFFE0}
+         : button == B ? Blob{320, 18, 24, 0x34BF}
+                       : Blob{90, 15, 20, 0xF800};
+}
+
+inline Blob expandedBlob(Button button, uint8_t step) {
+    static const uint8_t sideHalf[] = {2, 5, 9, 13, 17, 20, 19, 18, 18};
+    static const uint8_t sideDepth[] = {8, 12, 17, 21, 24, 27, 25, 24, 24};
+    static const uint8_t powerHalf[] = {2, 4, 7, 10, 14, 17, 16, 15, 15};
+    static const uint8_t powerDepth[] = {7, 10, 14, 17, 20, 23, 21, 20, 20};
+    if (step > 8) step = 8;
+    Blob result = restingBlob(button);
+    bool power = button == Power;
+    result.halfDegrees = power ? powerHalf[step] : sideHalf[step];
+    result.depth = power ? powerDepth[step] : sideDepth[step];
+    return result;
+}
+
+inline float blobInset(const Blob& blob, float degrees) {
+    float u = (degrees - blob.centerDegrees) / blob.halfDegrees;
+    if (u <= -1.0f || u >= 1.0f) return 0.0f;
+    float base = 1.0f - u * u;
+    return blob.depth * base * sqrtf(base);
 }
 
 class Feedback {
 public:
-    static constexpr uint8_t ExpandSteps = 6;
-    static constexpr uint32_t ExpandMs = 120;
+    static constexpr uint8_t ExpandSteps = 8;
+    static constexpr uint32_t ExpandMs = 160;
 
     bool sample(bool aPressed, bool bPressed, bool powerValid, bool powerPressed,
                 uint32_t nowMs) {

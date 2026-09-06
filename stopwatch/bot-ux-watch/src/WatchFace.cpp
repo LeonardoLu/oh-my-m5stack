@@ -113,16 +113,14 @@ void WatchFace::_drawClock(bool top, uint16_t ink, uint16_t muted) {
         const char* period=_hh>=12?"下午":"上午";
         int prefix=ux::textWidth(period,ux::Cjk18)+8;
         if(prefix+ux::textWidth(time,*font)>(top?240:300)) font=&ux::Latin24;
-        int x=(466-prefix-ux::textWidth(time,*font))/2;
-        int y=top?30:watchedge::bottomClockTimeY();
+        int x=(466-prefix-ux::textWidth(time,*font))/2, y=top?30:6;
         ux::drawText(_hud,period,x,y+(ux::lineHeight(*font)-ux::lineHeight(ux::Cjk18))/2,ink,ux::Cjk18);
         ux::drawText(_hud,time,x+prefix,y,ink,*font);
-    } else centered(_hud,time,top?30:watchedge::bottomClockTimeY(),ink,*font);
+    } else centered(_hud, time, top ? 30 : 6, ink, *font);
     char date[48];
     const char* weekday = _language ? kWeekdaysZh[_weekDay % 7] : kWeekdays[_weekDay % 7];
     snprintf(date, sizeof(date), "%04d/%02u/%02u %s", (int)_year, _month, _day, weekday);
-    centered(_hud,date,top?62:watchedge::bottomClockDateY(),muted,
-             _language?ux::Cjk18:ux::Latin18);
+    centered(_hud, date, top ? 62 : 57, muted, _language ? ux::Cjk18 : ux::Latin18);
 }
 
 void WatchFace::_drawDescription(bool top, uint16_t ink) {

@@ -65,8 +65,12 @@ integration and upload.
 
 The enclosure mapping follows the official StopWatch pin map and product layout:
 A is the yellow upper-left button on GPIO 2, B is the blue upper-right button on
-GPIO 1, and the red power button is at the bottom. While a button is physically
-held, its matching colored liquid edge shape expands over 160 ms. Its outer edge
+GPIO 1, and the red power button is on the lower-left side. The centered bottom
+opening is USB-C, so it has no button feedback. The red shape uses 135 degrees as
+a screen-space UI center based on M5Stack's [official front product
+image](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1242/C152_stopwatch_mainpictures_05.webp),
+not as a precision mechanical measurement. While a button is physically held,
+its matching colored liquid edge shape expands over 160 ms. Its outer edge
 follows the physical display circle; its inner edge uses a smooth central bulge
 whose depth and tangent both converge at the pointed ends. A brief expansion
 overshoot settles to the held shape without becoming an equal-width line. Each
@@ -88,27 +92,22 @@ without changing them.
 
 Face rendering clears and invalidates its partial-update background whenever a
 button edge changes. Static settings and editor pages force a full redraw rather
-than a list-band update. In each path the liquid shapes render last; this lets the
-power shape temporarily cover the bottom Done segment and lets the underlying content return
-without residual pixels on release. Serial-only `keys` and battery percentage
+than a list-band update. In each path the liquid shapes render last and the
+underlying content returns without residual pixels on release. Serial-only `keys`
+and battery percentage
 overrides support framebuffer geometry captures. These overrides do not prove the
 physical button signals and must be disabled after capture.
-
-The liquid power shape can extend inward to global `y=443` at its brief expansion
-peak. The bottom date therefore uses local HUD `y=42`; its actual native Chinese
-and Latin glyph ink ends before global `y=441`, leaving two blank rows before the
-feedback while retaining two blank rows below the large time glyphs. Top clock,
-battery and description positions are unchanged.
 
 `test_watch_button_feedback.cpp` covers held/released transitions, independent
 expansion clocks, simultaneous buttons and invalid power samples. The clean
 dependency build applied the PMIC patch from its original hashes; an immediate
-second build reported both M5GFX and M5Unified patches already verified. The final
-source build used 48,888 bytes RAM and 1,023,653 bytes flash.
+second build reported both M5GFX and M5Unified patches already verified. The
+intermediate source build used 48,888 bytes RAM and 1,023,653 bytes flash.
 
 ## Done/battery device evidence and intermediate button render
 
-The final Watch source was built and uploaded at commit `0bb52ed`. The
+The Watch source for the Done and battery captures was built and uploaded at
+commit `0bb52ed`. The
 1,023,936-byte firmware image has SHA-256
 `266e1c78862ad5bfb209bd8f91cc7cd7016a243ba4255dd6687ed84fbebcb15c`;
 upload verification matched the flashed image.
@@ -124,7 +123,7 @@ files are `battery-green-72.png`, `battery-yellow-24.png`,
 they are retained only as intermediate redraw evidence and do not accept the final
 liquid-button design.
 
-The live final state reported the physical PMIC status read available
+The live intermediate state reported the physical PMIC status read available
 (`pwr_valid=1`) and no held button. The device returned to Face with manual preview
 off, Chinese UI, identity touch profile, diagnostic key rendering disabled and the
 serial port released. Battery values and key masks in these captures are diagnostic

@@ -1,5 +1,4 @@
 #include "WatchStrings.h"
-#include "WatchEdgeGeometry.h"
 #include <UxText.h>
 #include <assert.h>
 #include <fstream>
@@ -34,15 +33,6 @@ void right(Canvas& c,const char* text,int x,int y,uint16_t color,const ux::Font&
 void assertPair(const char* label,const char* value,const ux::Font& font) {
     // Rows start at x=84 and end at x=382. Preserve a readable 16 px gap.
     assert(ux::textWidth(label,font)+ux::textWidth(value,font)<=282);
-}
-void inkY(const char* text,const ux::Font& font,int& first,int& end) {
-    first=1000; end=-1;
-    while(*text) {
-        auto g=ux::glyph(font,ux::nextCodepoint(text));
-        if(!g) continue;
-        if(g->y<first) first=g->y;
-        if(g->y+g->h>end) end=g->y+g->h;
-    }
 }
 }
 
@@ -136,18 +126,6 @@ int main(int argc,char** argv) {
     for(const char* label:{"删除","空格","Aa","确定"}) assert(textWidth(label,Cjk22)<=47);
     assert(Latin24.lineHeight<=37&&Cjk22.lineHeight<=37);
 
-    // The bottom clock remains readable above the deepest accepted power
-    // feedback blob. These are actual native glyph pixels, not line-box guesses.
-    int timeFirst,timeEnd,dateFirst,dateEnd;
-    inkY("01:06:43",Clock36,timeFirst,timeEnd);
-    inkY("2026/09/07 星期一",Cjk18,dateFirst,dateEnd);
-    int timeInkEnd=watchedge::bottomHudY()+watchedge::bottomClockTimeY()+timeEnd;
-    int dateInkFirst=watchedge::bottomHudY()+watchedge::bottomClockDateY()+dateFirst;
-    int dateInkEnd=watchedge::bottomHudY()+watchedge::bottomClockDateY()+dateEnd;
-    assert(dateInkFirst-timeInkEnd>=2);
-    assert(watchedge::bottomFeedbackReserveY()-dateInkEnd>=2);
-    assert(dateInkEnd==441);
-
     Canvas canvas(466,466);
     centered(canvas,"BOT PERSONALITY",18,0xffff,Latin28);
     centered(canvas,"伙伴个性",58,0xffff,Cjk28);
@@ -175,8 +153,5 @@ int main(int argc,char** argv) {
             out.write(rgb,3);
         }
     }
-    std::cout<<"Watch native 22/24/28 px font coverage and layout bounds passed; "
-             <<"bottom time last="<<(timeInkEnd-1)<<" date="<<dateInkFirst
-             <<".."<<(dateInkEnd-1)<<" feedback starts="
-             <<watchedge::bottomFeedbackReserveY()<<"\n";
+    std::cout<<"Watch native 22/24/28 px font coverage and layout bounds passed\n";
 }

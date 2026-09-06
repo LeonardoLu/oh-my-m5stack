@@ -62,6 +62,18 @@ and 2158504 (duration mapping and persisted setting schema),
 `codex-micro-settings-2a601a7f9b9a.js:1`, offset 64940 (public selector), and
 `service-readable.js:1`, offset 24590 (timer and all-off RPC path).
 
+For the September 2026 device validation, the user explicitly set the public
+Auto-dim selector to **Off**. The host mapping above is the deterministic evidence
+that this makes the timeout null. Periodic `device.status` requests do not call
+`handleLightingActivity`; the inspected service calls it only from HID events and
+joystick motion outside the dead zone (offsets 14227 and 14844). Two attempted
+passive device observations were therefore treated conservatively: BLE and the
+app-ready control plane stayed connected, but `sentEventCount` increased during
+each window. Since that counter covers successful outbound key, encoder, and
+joystick messages, neither window proves a full three minutes without device
+activity. They do establish that the firmware did not lose BLE or app readiness
+during the observed spans; they are not used to reinterpret any all-off snapshot.
+
 `webview/assets/codex-micro-bridge-7749dc2a7114.js:1`, offset 12022, permits
 onboarding, mini-game and composer-navigation overrides of slots. `Ft` (offset
 5305) can produce an error-colored first slot for navigation. The onboarding and

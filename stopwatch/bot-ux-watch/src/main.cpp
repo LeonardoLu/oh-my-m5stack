@@ -1400,9 +1400,10 @@ static void selectDiagnosticPage(uint8_t page) {
 
 static uint32_t _diagnosticSeq=0;
 static void printUiState() {
-    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u status=%u\n",
-        (unsigned long)_diagnosticSeq,(unsigned)_screen,(unsigned)_editor,_pointer.pressedTarget(),_pointer.scrolling(),
-        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,_statusPanelUntilMs!=0);
+    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u status=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u\n",
+        (unsigned long)_diagnosticSeq,(unsigned)_screen,(unsigned)_editor,exactPressedTarget(),_pointer.scrolling(),
+        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,_statusPanelUntilMs!=0,
+        _manualPreset,(unsigned)face.bot().mood(),(unsigned)face.bot().effectiveMood(),(unsigned)face.bot().expression(),(unsigned)face.bot().effectiveExpression(),(unsigned)face.bot().animation());
     // Drain this diagnostic reply now, rather than waiting for later telemetry.
     Serial.flush();
 }
@@ -1430,6 +1431,11 @@ static void handleSerialCommands() {
             if(x>=0 && x<kW && y>=0 && y<kH) handleUiPointer(line[1]=='d',line[1]!='u',line[1]=='u',x,y,millis());
             printUiState();
         } else if(!strncmp(line,"ui",2)) printUiState();
+        else if(!strncmp(line,"mood ",5)) {
+            int mood=atoi(line+5);
+            if(mood>=0&&mood<botux::BotUx::moodCount()) showManualMood((botux::BotUx::Mood)mood);
+            printUiState();
+        }
         else if(line[0]=='v' || (line[0]>='0'&&line[0]<='9')) {
             selectDiagnosticPage((uint8_t)atoi(line+(line[0]=='v'))); printUiState();
         } else if(!strcmp(line,"e")) cycleExpression(1,true);

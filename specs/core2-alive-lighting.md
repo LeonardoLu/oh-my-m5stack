@@ -153,9 +153,22 @@ failure. This is runtime transport evidence, not acoustic measurement. Native
 inspected for separation, text readability and saturated accents; they are
 firmware framebuffer captures rather than panel photographs.
 
-The final integration build included the shared Asleep compositing fix and the
-CJK `熟睡` glyph coverage. It used 60,424 B RAM and 1,507,629 B flash. The
-authorized upload wrote 1,514,208 bytes, verified the image hash, and completed
-a hard reset. After reset the Core2 restored the app-ready BLE link at MTU 67;
-steady telemetry reported about 29.4 FPS, speaker master 128, volume gain 255,
-`busy=0`, `sound_fail=0`, and the Bottom2 strip ready on GPIO 25.
+The final identity-light integration build used 60,456 B RAM and 1,508,577 B
+flash. Its 1,515,152-byte image had SHA-256
+`9c37d6c3988ecee55db7a1bfc46ab88ece00ac5a9e40da24cc3b5a17fa4054f7`.
+The authorized upload wrote that image, verified its flash hash, preserved NVS,
+and completed a hard reset. After reset the Core2 restored the app-ready BLE link
+at MTU 67 with `events=0`, `mode=2`, `sound_fail=0`, and the Bottom2 strip ready
+on GPIO 25. The unified host runner passed every Watch, Core2, shared UX, sound
+and BotUx check, including the identity/state LED frame suite.
+
+Read-only `leds` diagnostics sampled four actual generated frames in Dark/Alive
+with fresh app-ready lighting. Slot 1 was Working and moved through
+`14416B`, `174A7A`, `154471`, and `0F3151`, all scaled forms of its `174A7A`
+identity. Slots 2–6 were Idle and reported distinct scaled green, amber, purple,
+rose and cyan identities on physical LEDs 1,2,7,8,9; ambient LEDs 3–6 used the
+selected slot 1 identity. Every source zone reported host brightness 255, and
+the diagnostic sent no HID or fake host lighting. Native Lights-page captures
+under `tmp/core-slot-led-status/` show the renamed Status mode and Alive copy
+without clipping. These are firmware framebuffer and generated-RGB observations,
+not optical measurements of emitted LED color or brightness.

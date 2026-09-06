@@ -47,14 +47,18 @@ uses the M5PM1/M5IOE1 drivers and OPI PSRAM configuration.
 
 Tap the bot or press A to interact. Tap the time to toggle seconds. Swipe left/right
 or press B to cycle expressions.
-Tap SET, swipe up, or hold A for settings. Swipe down or hold B to dim the face;
-the next touch/button press wakes it without activating a control.
+Hold A and B together for three seconds to open settings. Long-press the bot for
+its personalization page. Hold B to dim the face; the next touch/button press
+wakes it without activating a control.
 
-Swipe down from the top edge for battery status; charging opens it automatically.
+Swipe down from the top edge for a compact battery panel with charging indication.
 Settings include time, date, 12/24-hour format, expression, appearance, animation,
 wrist motion, brightness and sound.
-Editors have explicit Back/Done controls. Time and date use the hardware RTC;
-other preferences use NVS.
+Large touch rows scroll through nested settings. Editors have explicit Back/Done
+controls and a live HSV body-color picker. Year, month, day, weekday and time share
+one face region. Time and date use the hardware RTC; other preferences use NVS.
+Auto expression slowly shuffles calm moods, while interaction delays the next
+change. Filtered wrist motion adds subtle movement with a cooldown on shake reactions.
 
 ## The bot
 
@@ -74,18 +78,20 @@ is a serial bridge, so host HID communication uses Bluetooth.
 On macOS, Codex needs Input Monitoring permission to open this composite HID
 interface. After enabling it in Privacy & Security, fully quit and reopen Codex.
 If the device is paired but stays at `BLE`, check this permission and restart;
-`CODEX` indicates that the RPC transport has initialized.
+the green app-ready icon indicates that the RPC transport has initialized.
 
-The header distinguishes advertising (`PAIR`), Bluetooth connection, and a ready
-RPC transport. Agent colors and the ten Bottom2 LEDs reflect host lighting data;
+The header uses separate Bluetooth and app-ready icons to distinguish pairing
+from an initialized RPC transport. Agent colors and the ten Bottom2 LEDs reflect host lighting data;
 there are no invented task names or simulated progress. End-to-end connection
 validation is tracked in [the iteration record](specs/interaction-validation.md).
 
 Holding MIC sends push-to-talk press/release events; the Mac captures the audio.
 Releasing or dragging off stops the hold, and the host decides whether to submit.
-Other buttons activate on release in the original target. The bottom touch buttons
-navigate and switch pages. SET controls brightness, audio, theme, animation, motion,
-reduced motion and LED brightness, with preferences saved in NVS.
+Other buttons activate on release in the original target. The bottom left/right
+halves switch pages around a compact page count. Double-tap the battery to open
+settings for brightness, audio, theme, animation, motion, reduced motion and LED
+brightness. Bot personalization includes live RGB sliders for body, eyes and
+accent; valid releases save in NVS and dragging outside cancels the color edit.
 
 Bottom2 uses ten SK6812 LEDs on GPIO25 and replaces the stock Core2 bottom. Screen,
 LEDs and optional sound provide feedback. Official Micro firmware updates are
@@ -97,7 +103,7 @@ These checks require a C++11 compiler, without an attached device:
 
 ```bash
 mkdir -p tmp
-for watch_test in test_calendar_math test_input_semantics test_timed_state; do
+for watch_test in test_calendar_math test_input_semantics test_timed_state test_watch_interaction; do
   c++ -std=c++11 -Wall -Wextra -Werror \
     -Istopwatch/bot-ux-watch/include \
     "stopwatch/bot-ux-watch/test/$watch_test.cpp" -o "tmp/$watch_test"
@@ -113,6 +119,10 @@ c++ -std=c++11 -Wall -Wextra -Werror \
   core2/bot-ux-codex-core2/src/AnalogInput.cpp \
   core2/bot-ux-codex-core2/test/analog_input_test.cpp -o tmp/analog-input-test
 ./tmp/analog-input-test
+c++ -std=c++11 -Wall -Wextra -Werror \
+  -Icore2/bot-ux-codex-core2/include \
+  core2/bot-ux-codex-core2/test/battery_double_tap_test.cpp -o tmp/battery-double-tap-test
+./tmp/battery-double-tap-test
 sh lib/bot-ux/tools/host-preview/render.sh
 ```
 
@@ -125,8 +135,10 @@ they do not measure physical display performance or reproduce M5GFX text exactly
 [Task specification](specs/start-up.md),
 [implementation decisions and reference sources](specs/implementation-notes.md),
 [baseline validation](specs/validation.md),
-[current requirements](specs/interaction-iteration.md),
-[current validation](specs/interaction-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
+[HID iteration requirements](specs/interaction-iteration.md),
+[HID validation](specs/interaction-validation.md),
+[current UX requirements](specs/ux-polish.md),
+[current UX validation](specs/ux-polish-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
 research, generated previews and validation logs.
 
 ## License

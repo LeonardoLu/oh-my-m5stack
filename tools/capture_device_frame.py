@@ -6,6 +6,7 @@ the panel. The device pauses rendering during this explicit diagnostic transfer.
 """
 
 import argparse
+import re
 from pathlib import Path
 import struct
 import time
@@ -32,6 +33,12 @@ def write_png(path, width, height, pixels, endian):
     path.write_bytes(result)
 
 
+def diagnostic_page(value):
+    if not re.fullmatch(r"v?[0-9]{1,2}", value):
+        raise argparse.ArgumentTypeError("Use a page ID 0..99, or v0..v99 for StopWatch")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port")
@@ -39,7 +46,8 @@ def main():
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--boot-wait", type=float, default=2,
                         help="Seconds for initialization after serial open (Core2 BLE can need 8)")
-    parser.add_argument("--screen", choices="01234", help="Optional firmware diagnostic page selector")
+    parser.add_argument("--screen", type=diagnostic_page, metavar="ID",
+                        help="Firmware diagnostic page: Core2 0..99; StopWatch v0..v99")
     args = parser.parse_args()
     import serial
 
@@ -54,7 +62,7 @@ def main():
         time.sleep(args.boot_wait)
         device.reset_input_buffer()
         if args.screen is not None:
-            device.write((args.screen + "\n").encode())
+            device.write(f"{args.screen}\n".encode())
             time.sleep(0.5)
         device.write(b"c\n")
         deadline = time.monotonic() + args.timeout

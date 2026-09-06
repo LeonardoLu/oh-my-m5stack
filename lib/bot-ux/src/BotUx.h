@@ -194,8 +194,9 @@ private:
     void _drawEyes();
     void _drawAnimationFx();
     void _drawOverlays(); // battery/signal/label/time
-    void _fillCapsule(int16_t cx, int16_t cy, int16_t halfDx, int16_t halfDy,
-                      int16_t radius, uint16_t color);
+    void _fillCapsule(float cx, float cy, float halfDx, float halfDy,
+                      float radius, uint16_t color);
+    void _fillEllipseAA(float cx, float cy, float rx, float ry, uint16_t color);
 
     M5Canvas* _cv = nullptr;
     int16_t _w = 0, _h = 0;
@@ -237,6 +238,9 @@ private:
     float  _bodySX = 1.0f;
     float  _bodySY = 1.0f;
     float  _bodyLean = 0.0f; // -1..1; offsets the two eyes vertically
+    float  _eyeSmile = 0.0f;
+    float  _eyeWink = 0.0f;
+    float  _eyeRound = 0.0f;
     float  _eyeAsym = 0.0f;  // -1..1; closes one eye for thought
     float  _eyePairX = 0.26f; // pair centre, fractions of body radius
     float  _eyePairY = -0.38f;

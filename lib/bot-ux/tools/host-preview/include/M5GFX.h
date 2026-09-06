@@ -4,12 +4,13 @@
 #include <math.h>
 #include <sstream>
 #include <string>
+#include <vector>
 
 enum textdatum_t { top_left, top_right, middle_left, middle_center, middle_right };
 
 class M5Canvas {
 public:
-    M5Canvas(int16_t w, int16_t h) : _w(w), _h(h) {}
+    M5Canvas(int16_t w, int16_t h) : _w(w), _h(h), _pixels(w * h, 0) {}
 
     int32_t width() const { return _w; }
     int32_t height() const { return _h; }
@@ -17,6 +18,10 @@ public:
     std::string svgBody() const { return _out.str(); }
     bool outOfBounds() const { return _outOfBounds; }
 
+    uint16_t readPixel(int32_t x, int32_t y) const {
+        return pointOutside(x, y) ? 0 : _pixels[y * _w + x];
+    }
+    void drawPixel(int32_t x, int32_t y, uint32_t c) { rect(x, y, 1, 1, 0, c, true); }
     void fillSprite(uint32_t c) { rect(0, 0, _w, _h, 0, c, true); }
     void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t c) {
         if (x - r < 0 || y - r < 0 || x + r >= _w || y + r >= _h) _outOfBounds = true;
@@ -96,7 +101,10 @@ private:
     void rect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r,
               uint32_t c, bool fill) {
         if (x < 0 || y < 0 || x + w > _w || y + h > _h) _outOfBounds = true;
-        _out << "<rect x='" << x << "' y='" << y << "' width='" << w << "' height='" << h
+        if (fill) for (int yy = y; yy < y + h; ++yy)
+            for (int xx = x; xx < x + w; ++xx)
+                if (!pointOutside(xx, yy)) _pixels[yy * _w + xx] = c;
+        _out << "<rect shape-rendering='crispEdges' x='" << x << "' y='" << y << "' width='" << w << "' height='" << h
              << "' rx='" << r << "' " << (fill ? "fill='" : "fill='none' stroke='")
              << color(c) << "'/>\n";
     }
@@ -106,5 +114,6 @@ private:
     uint32_t _textColor = 0;
     float _textSize = 1.0f;
     bool _outOfBounds = false;
+    std::vector<uint16_t> _pixels;
     std::ostringstream _out;
 };

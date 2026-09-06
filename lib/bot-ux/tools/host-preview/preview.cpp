@@ -145,16 +145,17 @@ static std::string renderAnimation(const AnimationCase& item, int size,
 }
 
 template <typename Case, size_t N, typename RenderFn>
-static bool writePickerSheet(const char* path, const Case (&items)[N], RenderFn renderItem) {
-    const int size = 120, columns = 3, labelH = 20;
+static bool writePickerSheet(const char* path, const Case (&items)[N], RenderFn renderItem, int size = 120) {
+    const int columns = 3, labelH = 20;
+    const int cellWidth = size < 90 ? 90 : size;
     const int rows = ((int)N + columns - 1) / columns;
     std::ofstream out(path);
     if (!out) return false;
-    out << "<svg xmlns='http://www.w3.org/2000/svg' width='" << columns * size
+    out << "<svg xmlns='http://www.w3.org/2000/svg' width='" << columns * cellWidth
         << "' height='" << rows * (size + labelH) << "'>\n"
         << "<rect width='100%' height='100%' fill='#11151D'/>\n";
     for (int i = 0; i < (int)N; ++i) {
-        int x = (i % columns) * size;
+        int x = (i % columns) * cellWidth + (cellWidth - size) / 2;
         int y = (i / columns) * (size + labelH);
         out << "<g transform='translate(" << x << " " << y << ")'>\n"
             << renderItem(items[i], size) << "</g>\n"
@@ -274,7 +275,7 @@ static void checkExpressionAndAnimationRange() {
     for (const auto& item : kAnimations) {
         const std::string svg = renderAnimation(item, 200);
         animations.insert(svg);
-        assert(countToken(svg, "<") <= 24); // bounded primitive count per frame
+        assert(countToken(svg, "<") <= 2200); // perimeter coverage stays bounded
     }
     assert(animations.size() == sizeof(kAnimations) / sizeof(kAnimations[0]));
 }
@@ -328,7 +329,7 @@ static void checkTransitionsMotionAndSparseFrames() {
     bot.update(10000);
     bot.update(11000);
     bot.draw();
-    assert(canvas.svgBody().find("<polygon") != std::string::npos);
+    assert(countToken(canvas.svgBody(), "<rect") > 30);
 }
 
 static void checkMotionStaysInCanvas() {
@@ -384,7 +385,7 @@ static void checkLateUptimeHasNoPhantomReaction() {
     bot.update(0x80001000u);
     bot.draw();
     // Idle pill eyes use capsule triangles; a phantom Surprised state uses circles.
-    assert(canvas.svgBody().find("<polygon") != std::string::npos);
+    assert(countToken(canvas.svgBody(), "<rect") > 30);
 }
 
 static void checkWaitingAndSleepyStayDistinct() {
@@ -393,8 +394,8 @@ static void checkWaitingAndSleepyStayDistinct() {
     for (int size : {40, 72}) {
         const std::string sleepySvg = render(sleepy, size, 0);
         const std::string waitingSvg = render(waiting, size, 0);
-        const size_t sleepyBody = sleepySvg.find("<ellipse");
-        const size_t waitingBody = waitingSvg.find("<ellipse");
+        const size_t sleepyBody = sleepySvg.find("<rect", 1);
+        const size_t waitingBody = waitingSvg.find("<rect", 1);
         const size_t sleepyBodyEnd = sleepySvg.find("/>", sleepyBody);
         const size_t waitingBodyEnd = waitingSvg.find("/>", waitingBody);
         assert(sleepyBodyEnd != std::string::npos && waitingBodyEnd != std::string::npos);
@@ -402,8 +403,103 @@ static void checkWaitingAndSleepyStayDistinct() {
     }
 }
 
+static void checkCoverageAndFacePlacement() {
+    for (int size : {40, 72, 200, 310}) {
+        for (const auto& item : kExpressions) {
+            gNow = 1000;
+            M5Canvas canvas(size, size);
+            botux::BotUx bot;
+            bot.begin(&canvas);
+            bot.setAnimation(botux::BotUx::Animation::Calm);
+            bot.setMotionAmount(0.0f);
+            bot.setExpression(item.expression, 0);
+            bot.update(gNow);
+            bot.draw();
+            float r = bot.metrics().bodyR;
+            int minX = size, maxX = 0, minY = size, maxY = 0;
+            std::set<uint16_t> colors;
+            for (int y = 0; y < size; ++y) for (int x = 0; x < size; ++x) {
+                uint16_t pixel = canvas.readPixel(x, y);
+                colors.insert(pixel);
+                if (((pixel >> 11) & 31u) < 16u && fabsf(x - size * 0.5f) < r * 0.70f &&
+                    fabsf(y - size * 0.5f) < r * 0.65f) {
+                    minX = std::min(minX, x); maxX = std::max(maxX, x);
+                    minY = std::min(minY, y); maxY = std::max(maxY, y);
+                }
+            }
+            // Actual RGB565 boundary coverage, not browser smoothing of a path.
+            assert(colors.size() > 12);
+            assert(!canvas.outOfBounds());
+            // Every face retains Neutral's upper-right placement and separated
+            // pair scale; no expression throws the eyes to the lower hemisphere.
+            assert(minX < maxX && minY <= maxY);
+            assert((minX + maxX) * 0.5f > size * 0.5f);
+            assert((minY + maxY) * 0.5f < size * 0.5f - r * 0.16f);
+            assert(maxX - minX < r * 0.95f);
+            assert(maxY - minY < r * 0.65f);
+        }
+    }
+}
+
+static void checkExplicitNeutralOverridesRestingMood() {
+    for (int size : {40, 72, 200}) {
+        for (auto mood : {botux::BotUx::Mood::Sleepy, botux::BotUx::Mood::Waiting}) {
+            int heights[2] = {};
+            for (int selected = 0; selected < 2; ++selected) {
+                gNow = 1000;
+                M5Canvas canvas(size, size);
+                botux::BotUx bot;
+                bot.begin(&canvas);
+                bot.setMotionAmount(0.0f);
+                bot.setMood(mood, 0);
+                if (selected) bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+                bot.update(gNow); bot.draw();
+                int minY = size, maxY = -1;
+                float r = bot.metrics().bodyR;
+                for (int y = (int)(size * 0.5f - r * 0.55f); y < size / 2; ++y)
+                    for (int x = size / 2; x < size / 2 + r * 0.60f; ++x)
+                        if (((canvas.readPixel(x, y) >> 11) & 31u) < 16u) {
+                            minY = std::min(minY, y); maxY = std::max(maxY, y);
+                        }
+                heights[selected] = maxY - minY + 1;
+            }
+            // Auto retains the resting marks; explicit Neutral reopens the face,
+            // including the tiny toolbar renderer used by Core2 settings.
+            assert(heights[1] >= heights[0] + 2);
+        }
+    }
+}
+
+static bool writeTransitionSheet(const char* path) {
+    std::ofstream out(path);
+    if (!out) return false;
+    out << "<svg xmlns='http://www.w3.org/2000/svg' width='960' height='280'>";
+    for (int row = 0; row < 2; ++row) {
+        gNow = 1000;
+        M5Canvas canvas(120, 120);
+        botux::BotUx bot;
+        bot.begin(&canvas);
+        bot.setMotionAmount(0.0f);
+        bot.setExpression(botux::BotUx::Expression::Neutral, 0);
+        bot.update(gNow);
+        bot.setExpression(row == 0 ? botux::BotUx::Expression::Joy :
+                                    botux::BotUx::Expression::Wink, 650);
+        for (int frame = 0; frame < 8; ++frame) {
+            gNow += 100;
+            bot.update(gNow);
+            canvas.clear(); bot.draw();
+            out << "<g transform='translate(" << frame * 120 << " " << row * 140 << ")'>"
+                << canvas.svgBody() << "</g>";
+        }
+    }
+    out << "</svg>";
+    return true;
+}
+
 int main(int argc, char** argv) {
     assert(botux::BotUx().style().eyeColor == botux::rgb565(32, 36, 41));
+    checkCoverageAndFacePlacement();
+    checkExplicitNeutralOverridesRestingMood();
     checkBodylessStateGlyphs();
     checkLateUptimeHasNoPhantomReaction();
     checkWaitingAndSleepyStayDistinct();
@@ -420,9 +516,11 @@ int main(int argc, char** argv) {
     if (!writeSheet(tiny.c_str(), 40) || !writeSheet(small.c_str(), 72) ||
         !writeSheet(large.c_str(), 200) ||
         !writePickerSheet(expressions.c_str(), kExpressions, renderExpression) ||
+        !writePickerSheet((std::string(outDir) + "/expressions-40.svg").c_str(), kExpressions, renderExpression, 40) ||
         !writePickerSheet(animations.c_str(), kAnimations,
             [](const AnimationCase& item, int size) { return renderAnimation(item, size); }) ||
-        !writeAnimationPlayer(player.c_str())) {
+        !writeAnimationPlayer(player.c_str()) ||
+        !writeTransitionSheet((std::string(outDir) + "/transitions.svg").c_str())) {
         std::cerr << "could not write preview sheets\n";
         return 1;
     }

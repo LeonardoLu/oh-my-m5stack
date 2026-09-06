@@ -10,7 +10,9 @@ implementation is `src/BotUx.cpp`.
 - All timing is `millis()`-based and framerate-agnostic. `update()` computes the
   per-frame state; `draw()` only renders. Never allocate in `draw()`.
 - Keep drawing to M5GFX primitives (`fillCircle`, `fillEllipse`, `fillArc`,
-  `fillRoundRect`, `fillTriangle`, `drawLine`, `drawString`, …).
+  `fillRoundRect`, `fillTriangle`, `drawLine`, `drawString`, …). Coverage helpers
+  may use `fillRect` spans, `drawPixel`, and RGB565 `readPixel` at edges; do not
+  add a full-resolution secondary framebuffer or allocate while drawing.
 - Arc angle convention (LovyanGFX, verified): **0° = right (3 o'clock), clockwise,
   90° = down, 180° = left, 270° = up**. Happy crescent eyes use the top
   arc (`180..360`).
@@ -23,3 +25,20 @@ implementation is `src/BotUx.cpp`.
   replacement in `_drawBody` or eye treatment in `_drawEyes` if needed.
 - New theme → add a preset in the device apps, not here (this stays generic).
 - API change → update the header, keep it additive so device apps don't break.
+
+## Visual invariants
+
+- Neutral defines the face's proportions. Keep the other expressions close to
+  its eye spacing and upper-right placement; avoid extreme angles and size asymmetry.
+- Joy/Wink/Alarmed morph continuously through eased scalar geometry. Do not
+  restore abrupt per-expression glyph replacement for ordinary facial expressions.
+- Default ellipse and capsule boundaries use explicit RGB565 coverage. Preserve
+  subpixel centres and validate with the host preview; native raster/performance
+  validation belongs to the host/device integration checks.
+- Update `tools/host-preview/include/M5GFX.h` when using a new canvas operation.
+  The preview's raster-backed rectangle/pixel calls check actual coverage colors;
+  other primitives remain SVG approximations.
+
+- Explicit Neutral must restore the baseline face even under Sleepy/Waiting;
+  Auto keeps the mood's face. Keep tiny toolbar expressions on the same eased
+  geometry path, rather than masking them with fixed generic eye glyphs.

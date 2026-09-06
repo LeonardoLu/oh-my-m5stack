@@ -14,7 +14,8 @@ done
 c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
   stopwatch/bot-ux-watch/test/test_watch_typography.cpp \
   lib/ux-components/src/FontLatin18.cpp lib/ux-components/src/FontLatin24.cpp \
-  lib/ux-components/src/FontLatin28.cpp lib/ux-components/src/FontCjk18.cpp \
+  lib/ux-components/src/FontLatin28.cpp lib/ux-components/src/FontClock36.cpp \
+  lib/ux-components/src/FontCjk18.cpp \
   lib/ux-components/src/FontCjk22.cpp lib/ux-components/src/FontCjk24.cpp \
   lib/ux-components/src/FontCjk28.cpp -o "$OUT/test_watch_typography"
 "$OUT/test_watch_typography" "$OUT/watch-typography.ppm"

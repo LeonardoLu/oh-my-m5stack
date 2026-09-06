@@ -1,8 +1,8 @@
 # StopWatch round-edge controls
 
-Status: source implementation, host validation, final firmware upload and device
-framebuffer review complete. Physical button and finger-on-glass behavior remain
-separate manual evidence.
+Status: Done and battery implementation, host validation, firmware upload and
+device framebuffer review complete. Liquid physical-button feedback is undergoing
+its final integration pass. Finger-on-glass behavior remains separate evidence.
 
 ## Completion footer
 
@@ -91,13 +91,19 @@ without residual pixels on release. Serial-only `keys` and battery percentage
 overrides support framebuffer geometry captures. These overrides do not prove the
 physical button signals and must be disabled after capture.
 
+The liquid power shape can extend inward to global `y=443` at its brief expansion
+peak. The bottom date therefore uses local HUD `y=42`; its actual native Chinese
+and Latin glyph ink ends before global `y=441`, leaving two blank rows before the
+feedback while retaining two blank rows below the large time glyphs. Top clock,
+battery and description positions are unchanged.
+
 `test_watch_button_feedback.cpp` covers held/released transitions, independent
 expansion clocks, simultaneous buttons and invalid power samples. The clean
 dependency build applied the PMIC patch from its original hashes; an immediate
 second build reported both M5GFX and M5Unified patches already verified. The final
 source build used 48,888 bytes RAM and 1,023,653 bytes flash.
 
-## Final integrated evidence
+## Done/battery device evidence and intermediate button render
 
 The final Watch source was built and uploaded at commit `0bb52ed`. The
 1,023,936-byte firmware image has SHA-256
@@ -106,13 +112,14 @@ upload verification matched the flashed image.
 
 Firmware framebuffer captures under `tmp/watch-edge-buttons/device/` show the
 smaller Done footer; green 72 percent, yellow 24 percent and red 8 percent battery
-teeth; individual A/B/power arcs; simultaneous A+B arcs; the power arc over Done;
-and the fully restored settings page after release. The three battery frames keep
+teeth; and the fully restored settings page after an intermediate button render.
+The three battery frames keep
 the fixed dark percentage and gauge readable on every container fill. Their exact
 files are `battery-green-72.png`, `battery-yellow-24.png`,
-`battery-red-8.png` and `settings-small-done.png`. Button render evidence uses
-`key-a-yellow.png`, `key-b-blue.png`, `key-power-red.png`,
-`settings-power-overlay.png` and `settings-after-release.png`.
+`battery-red-8.png` and `settings-small-done.png`. The `key-*.png` and
+`settings-power-overlay.png` files show the superseded equal-width arc treatment;
+they are retained only as intermediate redraw evidence and do not accept the final
+liquid-button design.
 
 The live final state reported the physical PMIC status read available
 (`pwr_valid=1`) and no held button. The device returned to Face with manual preview

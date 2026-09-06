@@ -14,6 +14,12 @@ constexpr int16_t displaySize() { return 466; }
 constexpr int16_t displayCenter() { return 233; }
 constexpr int16_t displayRadius() { return 233; }
 constexpr int16_t hudHeight() { return 90; }
+constexpr int16_t bottomHudY() { return 376; }
+constexpr int16_t bottomClockTimeY() { return 6; }
+constexpr int16_t bottomClockDateY() { return 42; }
+// Deepest accepted power feedback begins here, leaving two blank rows below
+// the bottom date's native glyph ink.
+constexpr int16_t bottomFeedbackReserveY() { return 443; }
 
 inline int16_t integerSqrt(int32_t value) {
     if(value<=0) return 0;

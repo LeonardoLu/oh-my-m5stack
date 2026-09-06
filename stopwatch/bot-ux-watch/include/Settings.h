@@ -19,6 +19,7 @@ public:
     struct Data {
         char    botName[17] = "Milo";
         uint8_t language = 0;
+        uint8_t gaze = 0;
         bool showDescription = true;
         bool swapLayout = false;
         bool    hour24      = true;

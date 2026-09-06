@@ -584,6 +584,20 @@ void handleSerial()
             {
                 serialCommand[serialLength] = '\0';
                 bool sent = false;
+                int settingsX, settingsY;
+                if (strcmp(serialCommand,"sound")==0) {
+                    audio.confirm(); audio.update();
+                    Serial.printf("[sound] preview=confirm ready=%u busy=%u failures=%lu\n",audio.available(),audio.busy(),static_cast<unsigned long>(audio.failures()));
+                    serialLength=0; return;
+                }
+                if (sscanf(serialCommand,"ui-tap %d %d",&settingsX,&settingsY)==2) {
+                    if(settings.isOpen()) {
+                        settings.touchBegin(settingsX,settingsY); settings.touchEnd(settingsX,settingsY); syncSettings(); uiDirty=true;
+                    }
+                    Serial.printf("[settings] open=%u theme=%u\n",settings.isOpen(),settings.data().theme);
+                    serialLength=0; return;
+                }
+
                 if (strcmp(serialCommand, "next") == 0) sent = codexLink.turnEncoder(false);
                 else if (strcmp(serialCommand, "prev") == 0) sent = codexLink.turnEncoder(true);
                 else if (strcmp(serialCommand, "c") == 0)
@@ -638,12 +652,12 @@ void reportPerformance()
     if (elapsed < 5000) return;
     const float fps = elapsed ? frameCount * 1000.0f / elapsed : 0.0f;
     Serial.printf("[perf] fps=%.2f draw_max_us=%lu push_max_us=%lu full=%lu frames=%lu "
-                  "heap=%u psram=%u ble=%u ready=%u mtu=%u rpc=%lu events=%lu led=%u mode=%u\n",
+                  "heap=%u psram=%u ble=%u ready=%u mtu=%u rpc=%lu events=%lu led=%u mode=%u sound=%u sound_fail=%lu\n",
                   fps, static_cast<unsigned long>(drawMaxUs), static_cast<unsigned long>(pushMaxUs),
                   static_cast<unsigned long>(fullPushCount), static_cast<unsigned long>(frameCount),
                   ESP.getFreeHeap(), ESP.getFreePsram(), codexLink.connected(), codexLink.controlReady(),
                   codexLink.peerMtu(), static_cast<unsigned long>(codexLink.receivedRpcCount()),
-                  static_cast<unsigned long>(codexLink.sentEventCount()), bottomLeds.available(), settings.data().ledMode);
+                  static_cast<unsigned long>(codexLink.sentEventCount()), bottomLeds.available(), settings.data().ledMode, audio.available(), static_cast<unsigned long>(audio.failures()));
     statsStartedMs = nowMs;
     frameCount = fullPushCount = drawMaxUs = pushMaxUs = 0;
 }
@@ -657,6 +671,7 @@ void setup()
     config.internal_spk = true;
     config.internal_imu = true;
     M5.begin(config);
+    audio.begin();
     M5.Display.setRotation(1);
     canvas.setColorDepth(16);
     if (!canvas.createSprite(kScreenW, kScreenH)) failSprite("DISPLAY BUFFER FAILED");
@@ -686,6 +701,7 @@ void loop()
 {
     nowMs = millis();
     M5.update();
+    audio.update();
     handleSerial();
     codexLink.update(battery, charging, nowMs);
     uint8_t alerts = agentSignals.update(codexLink.lighting(),
@@ -703,6 +719,7 @@ void loop()
     }
     const bool screenTouchEvent = handleTouch();
     handleButtons(screenTouchEvent);
+    audio.update();
     if (codexLink.state() != lastLinkState || codexLink.controlReady() != lastControlReady)
     {
         lastLinkState = codexLink.state();

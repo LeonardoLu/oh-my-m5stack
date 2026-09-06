@@ -147,8 +147,10 @@ uint32_t _traceLastHeldMs = 0, _traceAcquireCount = 0;
 uint16_t _traceMaxSampleGapMs = 0, _traceMaxReadUs = 0;
 volatile bool _touchTraceEnabled = false;
 bool _traceRawKnown = false, _traceRawContact = false;
-bool _traceSensorKnown = false;
-int16_t _traceSensorX = 0, _traceSensorY = 0;
+bool _traceSampleSensorKnown = false, _traceLastSensorKnown = false;
+int16_t _traceSampleSensorX = 0, _traceSampleSensorY = 0;
+int16_t _traceLastSensorX = 0, _traceLastSensorY = 0;
+uint32_t _traceLastSensorAcquisition = 0;
 bool _touchIrqAttached = false;
 constexpr uint8_t kTouchIrqCapacity = 64;
 volatile uint32_t _touchIrqTimes[kTouchIrqCapacity];
@@ -213,9 +215,12 @@ static void pushTouchTrace(TouchTraceKind kind, uint32_t atMs, int16_t x, int16_
                            uint32_t elapsedMs = 0, uint32_t sampleGapMs = 0,
                            uint32_t readUs = 0, uint8_t flags = 0) {
     if (!_touchTraceEnabled) return;
-    if(_traceSensorKnown) flags|=0x80;
-    TouchTraceEvent event{atMs,_traceAcquireCount,_touchIrqTotal,
-                          _traceSensorX,_traceSensorY,x,y,target,other,
+    bool end=kind==TouchTraceKind::End;
+    bool sensorKnown=end?_traceLastSensorKnown:_traceSampleSensorKnown;
+    if(sensorKnown) flags|=0x80;
+    TouchTraceEvent event{atMs,end?_traceLastSensorAcquisition:_traceAcquireCount,_touchIrqTotal,
+                          end?_traceLastSensorX:_traceSampleSensorX,
+                          end?_traceLastSensorY:_traceSampleSensorY,x,y,target,other,
                           traceClamp16(elapsedMs),traceClamp16(sampleGapMs),traceClamp16(readUs),
                           (uint8_t)kind,(uint8_t)_screen,flags};
     if(kind==TouchTraceKind::Down||kind==TouchTraceKind::End||kind==TouchTraceKind::Screen) {
@@ -238,8 +243,10 @@ static void setTouchTraceEnabled(bool enabled) {
     _traceMaxSampleGapMs = _traceMaxReadUs = 0;
     _traceRawKnown = false;
     _traceRawContact = false;
-    _traceSensorKnown = false;
-    _traceSensorX = _traceSensorY = 0;
+    _traceSampleSensorKnown = _traceLastSensorKnown = false;
+    _traceSampleSensorX = _traceSampleSensorY = 0;
+    _traceLastSensorX = _traceLastSensorY = 0;
+    _traceLastSensorAcquisition = 0;
     _touchIrqHead = _touchIrqCount = 0;
     _touchIrqTotal = _touchIrqDropped = 0;
     if(enabled) {
@@ -306,7 +313,7 @@ static void dumpTouchTrace() {
                           e.sensorX,e.sensorY,e.x,e.y,e.sampleGapMs,e.readUs,
                           (unsigned long)e.acquisition,(unsigned long)e.irq);
         } else if (kind == TouchTraceKind::End) {
-            Serial.printf("TRACE t=%lu kind=%s screen=%u sensor_last=%s%d,%d logical=%d,%d captured=%d released=%d elapsed=%u reason=%s acquisition=%lu irq=%lu\n",
+            Serial.printf("TRACE t=%lu kind=%s screen=%u sensor_last=%s%d,%d logical=%d,%d captured=%d released=%d elapsed=%u reason=%s last_sensor_acquisition=%lu irq=%lu\n",
                           (unsigned long)e.atMs,touchTraceKindName(kind),e.screen,sensorKnown?"":"na:",
                           e.sensorX,e.sensorY,e.x,e.y,e.target,e.other,e.elapsedMs,
                           touchEndReasonName((TouchEndReason)(e.flags&0x7F)),
@@ -1065,9 +1072,9 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
 
 static void handleInputs(uint32_t now) {
     bool contact=_contact.isPressed(), acquired=false; int32_t x=_contact.x,y=_contact.y;
+    _traceSampleSensorKnown=false;
     if(_diagnosticContact) {
         contact=_diagnosticDown; x=_diagnosticX; y=_diagnosticY;
-        _traceSensorKnown=false;
     }
     else if(now-_contactReadMs>=8) {
         uint32_t previousReadMs=_contactReadMs;
@@ -1080,8 +1087,10 @@ static void handleInputs(uint32_t now) {
             if(contact) {
                 _touchRawX=point.x; _touchRawY=point.y;
                 if(_touchTraceEnabled) {
-                    _traceSensorKnown=true;
-                    _traceSensorX=point.x; _traceSensorY=point.y;
+                    _traceSampleSensorKnown=_traceLastSensorKnown=true;
+                    _traceSampleSensorX=_traceLastSensorX=point.x;
+                    _traceSampleSensorY=_traceLastSensorY=point.y;
+                    _traceLastSensorAcquisition=_traceAcquireCount+1;
                 }
                 M5.Display.convertRawXY(&point,1);
                 x=point.x; y=point.y;

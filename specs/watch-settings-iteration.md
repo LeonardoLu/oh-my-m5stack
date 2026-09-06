@@ -4,13 +4,16 @@
 BotUx input contract.
 
 - Every non-face screen uses one centered `Done` pill. Its drawn rounded rectangle,
-  pressed surface and touch target use the same bounds and corner radius. In an
+  pressed surface and touch target use the same bounds and corner radius. The final
+  visible control is a 158 by 96 px capsule at `(154,351)`, centered at `(233,399)`
+  with radius 48. In an
   editor it saves and returns to the parent; in Bot Personality it returns to
   the screen that opened it; in Settings it saves and returns to the face. Power Home and hardware
   Long A retain the cancellation paths.
-- Settings and Bot Personality use a 288 px viewport with four 72 px row slots.
+- Settings and Bot Personality use a 264 px viewport with four 66 px row slots and
+  unchanged 58 px rounded rows.
   Each row draws its label at the left and current value at the right. Preview
-  editors use a 120 px lower viewport with two 60 px slots; Motion and Combinations
+  editors use a 96 px lower viewport with two 48 px slots and 44 px rows; Motion and Combinations
   scroll their additional rows. Multi-column steppers, the keyboard and HSV surface
   remain direct controls.
 - A touch press immediately clears persistent navigation selection. Its pressed
@@ -255,7 +258,9 @@ contacts were `(241,246)`, `(254,243)`, and `(243,246)`, averaging `(246,245)` o
 and `(222,226)`, averaging `(221,225.67)` or `(-12,-7.33)`. Every held contact again
 had a zero-pixel raw range; maximum same-orientation distances were 13.34 px normal
 and 5.10 px turned. The two orientation means differ by `(25,19.33)` px and the
-offset reverses sign in display coordinates when the physical device rotates. Under
+offset reverses sign in display coordinates when the physical device rotates. The user
+confirmed that the entire device was rotated 180 degrees while the approach direction
+of the same finger relative to the body remained unchanged. Under
 the preliminary symmetric interpretation `dNormal=b+q`, `dTurned=b-q`, the fixed
 midpoint is only `b=(+0.5,+2.33)` while the direction-linked component is
 `q=(+12.5,+9.67)`. The balanced early/middle/late order makes a fixed device-coordinate
@@ -264,3 +269,17 @@ user/contact-direction effect. With three taps per orientation and 13 px normal 
 the result remains an initial discriminator and does not identify a specific finger,
 occlusion, or controller-centroid mechanism. It ended at identity with no profile,
 candidate, NVS write, or reboot.
+
+The production response keeps the corrected CST820 identity mapping and does not add a
+fixed or fitted coordinate offset. The visible Done capsule grows from 46 to 96 px high
+while retaining center `(233,399)`. At 466 px across the 1.75 inch (44.45 mm) display,
+that changes its nominal height from about 4.4 mm to 9.2 mm. This follows the
+[Windows touch guidance](https://learn.microsoft.com/en-us/windows/win32/uxguide/inter-touch)
+as a sizing reference rather than a device-mandated standard, and keeps the visible
+rounded surface identical to its hit geometry. Main lists
+use the shared 264 px viewport and 66 px step; preview lists use 96 px and 48 px. The
+Name keyboard, HSV pad and hue bar, Display rows, scroll bounds, reveal logic, partial
+framebuffer push and diagnostic pages consume the same WatchControls geometry. HSV
+interaction clamps to each half-open rectangle's last pixel and divides by `w-1` or
+`h-1`, allowing both endpoints. Natural physical Done acceptance on this enlarged
+control requires a new trace and is not inferred from the earlier experiments.

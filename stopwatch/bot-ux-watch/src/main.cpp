@@ -39,8 +39,8 @@ constexpr int16_t kBotY = 90;
 constexpr int16_t kPreviewSize = 178;
 constexpr int16_t kPreviewX = (kW - kPreviewSize) / 2;
 constexpr int16_t kPreviewY = 62;
-constexpr int16_t kMenuStep = 72;
-constexpr uint8_t kVisibleRows = 4;
+constexpr int16_t kMenuStep = watchcontrols::mainList().step;
+constexpr uint8_t kVisibleRows = watchcontrols::mainList().visibleRows;
 constexpr uint8_t kMenuCount=(uint8_t)MenuItem::Done;
 constexpr uint8_t kPersonalCount=(uint8_t)PersonalItem::Back;
 constexpr uint32_t kActiveFrameMs = 16;
@@ -418,9 +418,11 @@ static void markListMoved() {
 }
 
 static void revealRow(ux::ScrollModel& scroll, uint8_t index) {
+    const auto layout=watchcontrols::mainList();
     float top = index * kMenuStep;
     if (top < scroll.offset()) scroll.setOffset(top);
-    else if (top + kMenuStep > scroll.offset() + 288) scroll.setOffset(top + kMenuStep - 288);
+    else if (top + kMenuStep > scroll.offset() + layout.h)
+        scroll.setOffset(top + kMenuStep - layout.h);
 }
 
 static void clickSound()   { _sounds.play(ux::sound::Cue::Select); }
@@ -901,7 +903,7 @@ static void enterSettings() {
     _menu = MenuItem::Time;
     _settingsList.configure(kMenuCount, kVisibleRows);
     _settingsList.select(0);
-    _settingsScroll.setBounds(kMenuCount * kMenuStep, 288);
+    _settingsScroll.setBounds(kMenuCount*kMenuStep,watchcontrols::mainList().h);
     _settingsScroll.setOffset(0);
     _buttonNavigation=false;
     _uiDirty = true;
@@ -919,7 +921,7 @@ static void enterPersonalize(Screen parent = Screen::Settings) {
     _personal = PersonalItem::Expression;
     _personalList.configure(kPersonalCount, kVisibleRows);
     _personalList.select(0);
-    _personalScroll.setBounds(kPersonalCount * kMenuStep, 288);
+    _personalScroll.setBounds(kPersonalCount*kMenuStep,watchcontrols::mainList().h);
     _personalScroll.setOffset(0);
     _uiDirty = true;
     confirmSound();
@@ -1216,13 +1218,17 @@ static void handleFaceInput(Gesture gesture) {
 
 static void updateColorPicker(int16_t x, int16_t y) {
     if (_colorDrag == 1) {
-        if (x < 66) x = 66; if (x > 326) x = 326;
-        if (y < 246) y = 246; if (y > 354) y = 354;
-        settings.data().colorSat = (uint8_t)((x - 66) * 100 / 260);
-        settings.data().colorValue = (uint8_t)((354 - y) * 100 / 108);
+        auto pad=watchcontrols::colorPadBounds();
+        int16_t right=pad.x+pad.w-1,bottom=pad.y+pad.h-1;
+        if(x<pad.x) x=pad.x; if(x>right) x=right;
+        if(y<pad.y) y=pad.y; if(y>bottom) y=bottom;
+        settings.data().colorSat=(uint8_t)((x-pad.x)*100/(pad.w-1));
+        settings.data().colorValue=(uint8_t)((bottom-y)*100/(pad.h-1));
     } else if (_colorDrag == 2) {
-        if (y < 246) y = 246; if (y > 354) y = 354;
-        settings.data().colorHue = (uint16_t)((y - 246) * 359 / 108);
+        auto hue=watchcontrols::hueBarBounds();
+        int16_t bottom=hue.y+hue.h-1;
+        if(y<hue.y) y=hue.y; if(y>bottom) y=bottom;
+        settings.data().colorHue=(uint16_t)((y-hue.y)*359/(hue.h-1));
     } else return;
     settings.data().customColor = true;
     applySettings();
@@ -1678,13 +1684,15 @@ static void drawFormatEditor() {
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.muted());
-    watchText(canvas, "Show seconds on the clock", 233, 330);
+    watchText(canvas, "Show seconds on the clock", 233, 322);
     drawFooter();
 }
 
-static void drawArrowRow(int16_t cy, const char* label, const char* value, bool selected) {
-    if (selected || pressedOver(58,cy-22,350,44)) ux::roundRect(canvas,58,cy-22,350,44,17,
-        pressedOver(58,cy-22,350,44)?ux::blend565(settings.panel(),settings.style().accentColor,55):settings.panel());
+static void drawArrowRow(ux::Rect row, const char* label, const char* value, bool selected) {
+    int16_t cy=row.y+row.h/2;
+    bool pressed=pressedOver(row.x,row.y,row.w,row.h);
+    if(selected||pressed) ux::roundRect(canvas,row.x,row.y,row.w,row.h,17,
+        pressed?ux::blend565(settings.panel(),settings.style().accentColor,55):settings.panel());
     canvas.setTextDatum(middle_left);
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
@@ -1700,7 +1708,7 @@ static void drawPreviewArrowRow(uint8_t index,const char* label,const char* valu
     const auto layout=watchcontrols::previewList();
     auto row=watchcontrols::rowBounds(layout,index,_editorScroll.offset());
     if(row.y+row.h<=layout.y||row.y>=layout.y+layout.h) return;
-    drawArrowRow(row.y+row.h/2,label,value,_buttonNavigation&&_editField==index);
+    drawArrowRow(row,label,value,_buttonNavigation&&_editField==index);
 }
 
 static void drawAppearanceEditor() {
@@ -1726,7 +1734,7 @@ static void drawExpressionEditor() {
     watchText(canvas, Settings::expressionName(settings.data().expression), 233, 274);
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextColor(settings.muted());
-    watchText(canvas, "Tap arrows; tap the bot to react", 233, 326);
+    watchText(canvas, "Tap arrows; tap the bot to react", 233, 318);
     drawFooter();
 }
 
@@ -1750,21 +1758,30 @@ static void drawColorEditor() {
     drawTitle("BOT COLOR");
     previewBot.draw();
     previewSprite.pushSprite(&canvas, kPreviewX, 55);
-    drawPill(163, 207, 140, 32, "USE THEME", !settings.data().customColor);
-    for (int16_t x = 66; x < 326; x += 10) {
-        uint8_t sat = (uint8_t)((x - 66) * 100 / 260);
-        for (int16_t y = 246; y < 354; y += 6) {
-            uint8_t value = (uint8_t)((354 - y) * 100 / 108);
-            canvas.fillRect(x, y, 11, 7, Settings::hsv565(settings.data().colorHue, sat, value));
+    auto theme=watchcontrols::useThemeBounds();
+    auto pad=watchcontrols::colorPadBounds();
+    auto hue=watchcontrols::hueBarBounds();
+    drawPill(theme.x,theme.y,theme.w,theme.h,"USE THEME",!settings.data().customColor);
+    for(int16_t x=pad.x;x<pad.x+pad.w;x+=10) {
+        int16_t tileW=(x+10<pad.x+pad.w)?10:pad.x+pad.w-x;
+        int16_t sampleX=x+tileW==pad.x+pad.w?pad.x+pad.w-1:x;
+        uint8_t sat=(uint8_t)((sampleX-pad.x)*100/(pad.w-1));
+        for(int16_t y=pad.y;y<pad.y+pad.h;y+=6) {
+            int16_t tileH=(y+6<pad.y+pad.h)?6:pad.y+pad.h-y;
+            int16_t sampleY=y+tileH==pad.y+pad.h?pad.y+pad.h-1:y;
+            uint8_t value=(uint8_t)((pad.y+pad.h-1-sampleY)*100/(pad.h-1));
+            canvas.fillRect(x,y,tileW,tileH,
+                            Settings::hsv565(settings.data().colorHue,sat,value));
         }
     }
-    for (int16_t y = 246; y < 354; y += 3)
-        canvas.fillRect(344, y, 56, 4, Settings::hsv565((uint16_t)((y - 246) * 359 / 108), 100, 100));
-    int16_t sx = 66 + settings.data().colorSat * 260 / 100;
-    int16_t sy = 354 - settings.data().colorValue * 108 / 100;
-    int16_t hy = 246 + settings.data().colorHue * 108 / 359;
+    for(int16_t y=hue.y;y<hue.y+hue.h;++y)
+        canvas.drawFastHLine(hue.x,y,hue.w,
+            Settings::hsv565((uint16_t)((y-hue.y)*359/(hue.h-1)),100,100));
+    int16_t sx=pad.x+settings.data().colorSat*(pad.w-1)/100;
+    int16_t sy=pad.y+(100-settings.data().colorValue)*(pad.h-1)/100;
+    int16_t hy=hue.y+settings.data().colorHue*(hue.h-1)/359;
     canvas.drawCircle(sx, sy, 8, settings.ink());
-    ux::strokeRoundRect(canvas, 340, hy - 5, 64, 10, 4, settings.ink());
+    ux::strokeRoundRect(canvas,hue.x-4,hy-5,hue.w+8,10,4,settings.ink());
     drawFooter();
 }
 
@@ -1772,10 +1789,10 @@ static void drawDisplayEditor() {
     drawTitle("DISPLAY & SOUND");
     char brightness[8];
     snprintf(brightness, sizeof(brightness), "%u / 5", settings.data().brightness);
-    drawArrowRow(170,"BRIGHTNESS",brightness,_buttonNavigation&&_editField==0);
-    drawArrowRow(230,"THEME",Settings::themeName(settings.data().theme),_buttonNavigation&&_editField==1);
-    drawArrowRow(290,"SOUND",settings.data().sound?"ON":"OFF",_buttonNavigation&&_editField==2);
-    drawArrowRow(350,"INDICATOR",settings.data().indicator?"ON":"OFF",_buttonNavigation&&_editField==3);
+    drawArrowRow(watchcontrols::displayRowBounds(0),"BRIGHTNESS",brightness,_buttonNavigation&&_editField==0);
+    drawArrowRow(watchcontrols::displayRowBounds(1),"THEME",Settings::themeName(settings.data().theme),_buttonNavigation&&_editField==1);
+    drawArrowRow(watchcontrols::displayRowBounds(2),"SOUND",settings.data().sound?"ON":"OFF",_buttonNavigation&&_editField==2);
+    drawArrowRow(watchcontrols::displayRowBounds(3),"INDICATOR",settings.data().indicator?"ON":"OFF",_buttonNavigation&&_editField==3);
     drawFooter();
 }
 
@@ -1784,9 +1801,9 @@ static void drawNameEditor() {
     canvas.setTextDatum(middle_center);
     canvas.setFont(&fonts::FreeSansBold12pt7b);
     canvas.setTextColor(settings.ink());
-    watchEllipsizedText(canvas, _nameEditor.text(), 233, 128, 310);
+    watchEllipsizedText(canvas,_nameEditor.text(),233,96,310);
     static const ux::NameKeyboardLabels zhKeys={"删除","空格","Aa","确定"};
-    ux::drawNameKeyboard(canvas, _nameEditor, ux::Rect{78,170,310,205},
+    ux::drawNameKeyboard(canvas,_nameEditor,watchcontrols::nameKeyboardBounds(),
                          settings.panel(), settings.ink(), watchKeyboardFont(settings.data().language),
                          _namePressedKey,settings.data().language?&zhKeys:nullptr);
     drawFooter();
@@ -1801,8 +1818,8 @@ static void drawLanguageEditor() {
 
 static void drawLayoutEditor() {
     drawTitle("WATCH LAYOUT");
-    drawArrowRow(170,"BOT TEXT",settings.data().showDescription?"SHOW":"HIDE",_buttonNavigation&&_editField==0);
-    drawArrowRow(250,"TOP",settings.data().swapLayout?"TIME":"BOT TEXT",_buttonNavigation&&_editField==1);
+    drawArrowRow({58,148,350,44},"BOT TEXT",settings.data().showDescription?"SHOW":"HIDE",_buttonNavigation&&_editField==0);
+    drawArrowRow({58,228,350,44},"TOP",settings.data().swapLayout?"TIME":"BOT TEXT",_buttonNavigation&&_editField==1);
     drawFooter();
 }
 
@@ -2025,7 +2042,8 @@ static void render(uint32_t now) {
 
     if (!_uiDirty && !previewIsAnimated()) return;
     bool bandOnly = _listBandOnly && (_screen == Screen::Settings || _screen == Screen::Personalize);
-    if (bandOnly) canvas.fillRect(0, 76, kW, 288, settings.style().bgColor);
+    const auto mainLayout=watchcontrols::mainList();
+    if(bandOnly) canvas.fillRect(0,mainLayout.y,kW,mainLayout.h,settings.style().bgColor);
     else canvas.fillSprite(settings.style().bgColor);
     if (_screen == Screen::Settings) {
         drawSettingsList(!bandOnly);
@@ -2036,7 +2054,8 @@ static void render(uint32_t now) {
     }
     drawPointerFeedback();
     uint32_t t2 = micros();
-    if (bandOnly) M5.Display.pushImage(0, 76, kW, 288, (uint16_t*)canvas.getBuffer() + kW*76);
+    if(bandOnly) M5.Display.pushImage(0,mainLayout.y,kW,mainLayout.h,
+        (uint16_t*)canvas.getBuffer()+kW*mainLayout.y);
     else canvas.pushSprite(0, 0);
     M5.Display.waitDisplay();
     uint32_t t3 = micros();
@@ -2107,14 +2126,14 @@ static void selectDiagnosticPage(uint8_t page) {
         _settingsList.configure(kMenuCount, kVisibleRows);
         _settingsList.select(page == 8 ? kMenuCount-1 : 0);
         _menu = (MenuItem)_settingsList.selected();
-        _settingsScroll.setBounds(kMenuCount*kMenuStep,288);
+        _settingsScroll.setBounds(kMenuCount*kMenuStep,watchcontrols::mainList().h);
         _settingsScroll.setOffset(page == 8 ? 9999 : page == 18 ? 37 : 0);
     } else if (page == 2 || page == 9) {
         _screen = Screen::Personalize;
         _personalList.configure(kPersonalCount, kVisibleRows);
         _personalList.select(page == 9 ? kPersonalCount-1 : 0);
         _personal = (PersonalItem)_personalList.selected();
-        _personalScroll.setBounds(kPersonalCount*kMenuStep,288);
+        _personalScroll.setBounds(kPersonalCount*kMenuStep,watchcontrols::mainList().h);
         _personalScroll.setOffset(page == 9 ? 9999 : 0);
     } else {
         _screen = Screen::Editor;
@@ -2277,7 +2296,8 @@ void loop() {
     }
     handleSerialCommands();
     if (_diagnosticScroll && _screen == Screen::Settings) {
-        _settingsScroll.setOffset((sinf(now * 0.001f) + 1) * 0.5f * (kMenuCount*kMenuStep - 288));
+        _settingsScroll.setOffset((sinf(now*0.001f)+1)*0.5f
+            *(kMenuCount*kMenuStep-watchcontrols::mainList().h));
         markListMoved();
     }
     uint32_t scrollDt = _scrollMs ? now - _scrollMs : 0; _scrollMs = now;

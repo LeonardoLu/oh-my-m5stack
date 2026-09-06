@@ -11,6 +11,14 @@ for name in test_calendar_math test_input_semantics test_timed_state test_watch_
   "$OUT/$name"
   echo "PASS $name"
 done
+c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
+  stopwatch/bot-ux-watch/test/test_watch_typography.cpp \
+  lib/ux-components/src/FontLatin18.cpp lib/ux-components/src/FontLatin24.cpp \
+  lib/ux-components/src/FontLatin28.cpp lib/ux-components/src/FontCjk18.cpp \
+  lib/ux-components/src/FontCjk22.cpp lib/ux-components/src/FontCjk24.cpp \
+  lib/ux-components/src/FontCjk28.cpp -o "$OUT/test_watch_typography"
+"$OUT/test_watch_typography" "$OUT/watch-typography.ppm"
+echo 'PASS test_watch_typography'
 for name in hid_framing analog_input battery_double_tap agent_signal bottom_led_frame feedback_level fresh_reply_attention; do
   case "$name" in
     hid_framing) source=core2/bot-ux-codex-core2/src/HidFraming.cpp ;;

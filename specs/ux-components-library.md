@@ -9,7 +9,9 @@ Rendering uses native RGB565 coverage, with solid scanline spans for rounded
 panel interiors and individual blended pixels only at boundaries. Hollow AA
 strokes preserve existing content. Typography uses native 4-bit Noto Sans SC
 Regular coverage at Latin14/18/24, Clock36 and bounded Cjk18. It is not a browser
-font substitution or a scaled 1-bit glyph mask. Font-derived assets retain the
+font substitution or a scaled 1-bit glyph mask. The Watch settings extension adds
+native Latin28 plus bounded Cjk22/24/28 faces while retaining the smaller faces
+for other surfaces. Font-derived assets retain the
 upstream SIL OFL 1.1 notice; component code is MIT. Source font SHA256 and a pinned
 Google Fonts source revision are recorded under the component.
 
@@ -35,8 +37,8 @@ Verified on host with C++11 and `-Wall -Wextra -Werror`:
   hold cancels momentum, with or without intermediate stationary samples.
 - All 30 keyboard center hits map to their rendered key rectangles; gaps reject
   hits, and names enforce length, allowed characters and Milo empty fallback.
-- Independent static archive linkage containing all five fonts, linked from a
-  program referencing only Latin14, contains no Latin18/24/Clock36/Cjk18 symbols.
+- Independent static archive linkage keeps every face in its own translation
+  unit, so consumers link only the font objects they reference.
 
 `test/components_test.cpp` emits a native RGB565-derived PPM preview including
 Chinese text and the naming keyboard; the preview uses the exact firmware

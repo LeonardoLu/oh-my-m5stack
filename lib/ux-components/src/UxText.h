@@ -4,7 +4,8 @@ namespace ux {
 struct Glyph { uint32_t code, offset; int8_t x,y; uint8_t w,h,advance; };
 struct Font { const Glyph* glyphs; const uint8_t* coverage; uint16_t count; uint8_t lineHeight; };
 // Each face lives in a separate translation unit; reference only what you use.
-extern const Font Latin14, Latin18, Latin24, Clock36, Cjk18;
+extern const Font Latin14, Latin18, Latin24, Latin28, Clock36;
+extern const Font Cjk18, Cjk22, Cjk24, Cjk28;
 inline uint32_t nextCodepoint(const char*& s) {
     uint8_t b=(uint8_t)*s++; if(b<128) return b;
     int n=b>=0xF0?3:b>=0xE0?2:b>=0xC2?1:0;

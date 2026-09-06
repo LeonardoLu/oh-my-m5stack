@@ -8,7 +8,13 @@ root = Path(__file__).resolve().parents[1]
 source = Path(sys.argv[1])
 latin = ''.join(chr(i) for i in range(32,127))
 corpus = (root/'fonts/corpus.txt').read_text()
-for name,size,chars in [('Latin14',14,latin),('Latin18',18,latin),('Latin24',24,latin),('Clock36',36,' 0123456789:/APM?'),('Cjk18',18,latin+corpus)]:
+faces = [
+    ('Latin14',14,latin),('Latin18',18,latin),('Latin24',24,latin),
+    ('Latin28',28,latin),('Clock36',36,' 0123456789:/APM?'),
+    ('Cjk18',18,latin+corpus),('Cjk22',22,latin+corpus),
+    ('Cjk24',24,latin+corpus),('Cjk28',28,latin+corpus),
+]
+for name,size,chars in faces:
     font = ImageFont.truetype(str(source),size)
     font.set_variation_by_name('Regular')
     ascent,descent = font.getmetrics()

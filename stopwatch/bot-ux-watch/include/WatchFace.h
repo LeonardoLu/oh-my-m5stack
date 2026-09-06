@@ -23,7 +23,7 @@ public:
     void update(uint32_t nowMs);
     void invalidate() { _drawInvalid = true; }
     void draw(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
-              uint16_t accent, uint16_t panel, uint16_t warning, bool statusOpen);
+              uint16_t accent, uint16_t panel, uint16_t warning, float statusProgress);
 
     botux::BotUx& bot() { return _bot; }
 
@@ -35,11 +35,10 @@ public:
     uint8_t day() const { return _day; }
 
 private:
-    void _drawTop(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
-                  uint16_t accent, uint16_t panel, uint16_t warning, bool statusOpen);
     void _drawClock(lgfx::LovyanGFX* target, uint16_t bg, uint16_t ink, uint16_t muted,
                     uint16_t accent);
-    void _drawSetPill(lgfx::LovyanGFX* target, uint16_t ink, uint16_t accent, uint16_t panel);
+    void _drawBatteryPanel(lgfx::LovyanGFX* target, uint16_t ink, uint16_t muted,
+                           uint16_t panel, uint16_t warning, float progress);
     static void _drawBolt(lgfx::LovyanGFX* target, int16_t x, int16_t y, uint16_t c);
 
     botux::BotUx _bot;
@@ -55,5 +54,7 @@ private:
     uint32_t _lastRtcReadMs = 0;
     uint8_t _drawHour = 0xFF, _drawMinute = 0xFF, _drawSecond = 0xFF;
     uint8_t _drawDay = 0xFF, _drawMonth = 0xFF, _drawBattery = 0xFF;
-    bool _drawCharging = false, _drawStatusOpen = false, _drawInvalid = true;
+    int16_t _drawYear = -1;
+    bool _drawCharging = false, _drawInvalid = true;
+    bool _panelWasVisible = false;
 };

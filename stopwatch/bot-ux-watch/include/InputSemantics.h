@@ -48,12 +48,12 @@ public:
             int16_t dy = _y - _y0;
             if (magnitude(dx) > 24 || magnitude(dy) > 24) _moved = true;
             if (_moved && !_longSent && !_swipeSent
-                && magnitude(dy) > 52 && magnitude(dy) > magnitude(dx)) {
+                && magnitude(dy) > 50 && magnitude(dy) > magnitude(dx)) {
                 _swipeSent = true;
                 return dy < 0 ? Gesture::SwipeUp : Gesture::SwipeDown;
             }
             if (_moved && !_longSent && !_swipeSent
-                && magnitude(dx) > 52 && magnitude(dx) > magnitude(dy)) {
+                && magnitude(dx) > 50 && magnitude(dx) > magnitude(dy)) {
                 _swipeSent = true;
                 return dx < 0 ? Gesture::SwipeLeft : Gesture::SwipeRight;
             }

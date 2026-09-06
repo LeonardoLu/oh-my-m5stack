@@ -12,6 +12,7 @@ public:
     static const uint8_t THEME_MONO   = 2;
     static const uint8_t THEME_COUNT  = 3;
     static const uint8_t APPEARANCE_COUNT = 3;
+    static const uint8_t EYE_STYLE_COUNT = 4;
     static const uint8_t EXPRESSION_COUNT = 10;
     static const uint8_t ANIMATION_COUNT = 8;
 
@@ -22,9 +23,16 @@ public:
         uint8_t theme       = THEME_NIGHT;
         uint8_t appearance  = 0;
         uint8_t expression  = 0;
-        uint8_t animation   = 2;
+        uint8_t animation   = 1;
         uint8_t brightness  = 3;     // 1..5
         bool    motion       = true;
+        uint8_t eyeStyle     = 1;
+        bool    customColor  = false;
+        uint16_t colorHue    = 42;   // HSV: 0..359, 0..100, 0..100
+        uint8_t colorSat     = 8;
+        uint8_t colorValue   = 95;
+        uint8_t motionAmount = 2;    // 1..5, intentionally gentle by default
+        uint8_t animationSpeed = 2;  // 1..5
     };
 
     void begin();        // load from NVS (defaults on first boot)
@@ -38,8 +46,10 @@ public:
 
     static const char* themeName(uint8_t idx);
     static const char* appearanceName(uint8_t idx);
+    static const char* eyeStyleName(uint8_t idx);
     static const char* expressionName(uint8_t idx);
     static const char* animationName(uint8_t idx);
+    static uint16_t hsv565(uint16_t hue, uint8_t saturation, uint8_t value);
 
     // UI text never borrows the bot eye color: official-style eyes are dark.
     uint16_t ink() const;

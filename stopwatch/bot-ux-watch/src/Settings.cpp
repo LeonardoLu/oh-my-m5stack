@@ -1,4 +1,5 @@
 #include "Settings.h"
+#include "WatchInteraction.h"
 
 namespace {
 struct ThemeColors {
@@ -23,6 +24,7 @@ const ThemeColors kThemes[Settings::THEME_COUNT] = {
 
 const char* kThemeNames[Settings::THEME_COUNT] = { "Night", "Dusk", "Mono" };
 const char* kAppearanceNames[Settings::APPEARANCE_COUNT] = { "Orb", "Bean", "Pebble" };
+const char* kEyeStyleNames[Settings::EYE_STYLE_COUNT] = { "Round", "Oval", "Square", "Googly" };
 const char* kExpressionNames[Settings::EXPRESSION_COUNT] = {
     "Auto", "Neutral", "Curious", "Focused", "Joy",
     "Skeptical", "Bashful", "Wink", "Dizzy", "Alarmed"
@@ -45,13 +47,26 @@ void Settings::begin() {
     _data.animation   = prefs.getUChar("anim", _data.animation);
     _data.brightness  = prefs.getUChar("bright", _data.brightness);
     _data.motion      = prefs.getBool("motion", _data.motion);
+    _data.eyeStyle    = prefs.getUChar("eyes", _data.eyeStyle);
+    _data.customColor = prefs.getBool("custom", _data.customColor);
+    _data.colorHue    = prefs.getUShort("hue", _data.colorHue);
+    _data.colorSat    = prefs.getUChar("sat", _data.colorSat);
+    _data.colorValue  = prefs.getUChar("value", _data.colorValue);
+    _data.motionAmount = prefs.getUChar("amount", _data.motionAmount);
+    _data.animationSpeed = prefs.getUChar("speed", _data.animationSpeed);
     prefs.end();
 
     if (_data.theme >= THEME_COUNT) _data.theme = THEME_NIGHT;
     if (_data.appearance >= APPEARANCE_COUNT) _data.appearance = 0;
     if (_data.expression >= EXPRESSION_COUNT) _data.expression = 0;
-    if (_data.animation >= ANIMATION_COUNT) _data.animation = 2;
+    if (_data.animation >= ANIMATION_COUNT) _data.animation = 1;
     if (_data.brightness < 1 || _data.brightness > 5) _data.brightness = 3;
+    if (_data.eyeStyle >= EYE_STYLE_COUNT) _data.eyeStyle = 1;
+    if (_data.colorHue > 359) _data.colorHue = 42;
+    if (_data.colorSat > 100) _data.colorSat = 8;
+    if (_data.colorValue > 100) _data.colorValue = 95;
+    if (_data.motionAmount < 1 || _data.motionAmount > 5) _data.motionAmount = 2;
+    if (_data.animationSpeed < 1 || _data.animationSpeed > 5) _data.animationSpeed = 2;
 
     rebuildStyle();
 }
@@ -68,6 +83,13 @@ void Settings::save() {
     prefs.putUChar("anim", _data.animation);
     prefs.putUChar("bright", _data.brightness);
     prefs.putBool("motion", _data.motion);
+    prefs.putUChar("eyes", _data.eyeStyle);
+    prefs.putBool("custom", _data.customColor);
+    prefs.putUShort("hue", _data.colorHue);
+    prefs.putUChar("sat", _data.colorSat);
+    prefs.putUChar("value", _data.colorValue);
+    prefs.putUChar("amount", _data.motionAmount);
+    prefs.putUChar("speed", _data.animationSpeed);
     prefs.end();
 }
 
@@ -75,13 +97,13 @@ void Settings::rebuildStyle() {
     const ThemeColors& c = kThemes[_data.theme];
     botux::BotUx::Style s;
     s.bgColor     = c.bg;
-    s.bodyColor   = c.body;
+    s.bodyColor   = _data.customColor ? hsv565(_data.colorHue, _data.colorSat, _data.colorValue) : c.body;
     s.accentColor = c.accent;
     s.eyeColor    = c.eye;
     s.pupilColor  = c.pupil;
     s.mouthColor  = c.mouth;
     s.blushColor  = c.blush;
-    s.eyeStyle = botux::BotUx::EyeStyle::Oval;
+    s.eyeStyle = (botux::BotUx::EyeStyle)_data.eyeStyle;
     static const botux::BotUx::BodyStyle bodies[APPEARANCE_COUNT] = {
         botux::BotUx::BodyStyle::Round,
         botux::BotUx::BodyStyle::RoundedSquare,
@@ -99,6 +121,10 @@ const char* Settings::appearanceName(uint8_t idx) {
     return (idx < APPEARANCE_COUNT) ? kAppearanceNames[idx] : "?";
 }
 
+const char* Settings::eyeStyleName(uint8_t idx) {
+    return (idx < EYE_STYLE_COUNT) ? kEyeStyleNames[idx] : "?";
+}
+
 const char* Settings::expressionName(uint8_t idx) {
     return (idx < EXPRESSION_COUNT) ? kExpressionNames[idx] : "?";
 }
@@ -111,3 +137,8 @@ uint16_t Settings::ink() const     { return kThemes[_data.theme].ink; }
 uint16_t Settings::muted() const   { return kThemes[_data.theme].muted; }
 uint16_t Settings::panel() const   { return kThemes[_data.theme].panel; }
 uint16_t Settings::warning() const { return kThemes[_data.theme].warning; }
+
+uint16_t Settings::hsv565(uint16_t hue, uint8_t saturation, uint8_t value) {
+    auto rgb = watchinteraction::hsvRgb(hue, saturation, value);
+    return botux::rgb565(rgb.r, rgb.g, rgb.b);
+}

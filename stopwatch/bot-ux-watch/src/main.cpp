@@ -9,15 +9,17 @@
 #include "Settings.h"
 #include "TimedState.h"
 #include "WatchFace.h"
+#include "WatchInteraction.h"
 
 #include <esp_heap_caps.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
-enum class Screen : uint8_t { Face, Settings, Editor };
-enum class Editor : uint8_t { None, Time, Date, Format, Expression, Appearance, Motion, Brightness };
-enum class MenuItem : uint8_t { Time, Date, Format, Expression, Appearance, Motion, Brightness, Done, Count };
+enum class Screen : uint8_t { Face, Settings, Personalize, Editor };
+enum class Editor : uint8_t { None, Time, Date, Format, Expression, Appearance, Motion, Color, Display };
+enum class MenuItem : uint8_t { Time, Date, Format, Personalize, Display, Done, Count };
+enum class PersonalItem : uint8_t { Expression, Action, Appearance, Color, Intensity, Speed, Back, Count };
 using watchinput::Gesture;
 
 namespace {
@@ -29,15 +31,19 @@ constexpr int16_t kBotY = 66;
 constexpr int16_t kPreviewSize = 178;
 constexpr int16_t kPreviewX = (kW - kPreviewSize) / 2;
 constexpr int16_t kPreviewY = 62;
-constexpr int16_t kMenuY = 82;
-constexpr int16_t kMenuStep = 43;
+constexpr int16_t kMenuY = 105;
+constexpr int16_t kMenuStep = 72;
+constexpr uint8_t kVisibleRows = 4;
 constexpr uint32_t kActiveFrameMs = 16;
 constexpr uint32_t kPreviewFrameMs = 33;
 constexpr uint32_t kDozeFrameMs = 250;
 constexpr uint8_t kLowBattery = 15;
 
 const char* const kMenuLabels[(uint8_t)MenuItem::Count] = {
-    "TIME", "DATE", "FORMAT", "EXPRESSION", "APPEARANCE", "MOTION", "BRIGHTNESS", "DONE"
+    "TIME", "DATE", "FORMAT", "BOT", "DISPLAY", "DONE"
+};
+const char* const kPersonalLabels[(uint8_t)PersonalItem::Count] = {
+    "EXPRESSION", "ACTION", "APPEARANCE", "COLOR", "INTENSITY", "SPEED", "BACK"
 };
 const char* const kMonths[12] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                                   "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
@@ -54,11 +60,19 @@ Power power;
 Screen _screen = Screen::Face;
 Editor _editor = Editor::None;
 MenuItem _menu = MenuItem::Time;
+PersonalItem _personal = PersonalItem::Expression;
 Settings::Data _originalSettings;
+Screen _editorParent = Screen::Settings;
+Screen _personalParent = Screen::Settings;
 
 watchinput::ButtonGesture _buttonA;
 watchinput::ButtonGesture _buttonB;
 watchinput::TouchGesture _touch;
+watchinteraction::SettingsChord _settingsChord;
+watchinteraction::ScrollList _settingsList;
+watchinteraction::ScrollList _personalList;
+watchinteraction::MotionFilter _motionFilter;
+watchinteraction::AmbientCycle _ambientCycle;
 int16_t _tapX = 0, _tapY = 0;
 
 uint8_t _battery = 100;
@@ -66,14 +80,18 @@ bool _charging = false;
 bool _powerKnown = false;
 uint32_t _powerReadMs = 0;
 TimedState _happyAcknowledgment;
-TimedState _statusPanel;
+uint32_t _statusPanelStartMs = 0;
+uint32_t _statusPanelUntilMs = 0;
 bool _dozing = false;
 bool _renderReady = false;
 bool _uiDirty = true;
 bool _faceNeedsClear = true;
 uint32_t _lastFrameMs = 0;
 uint32_t _lastImuReadMs = 0;
-uint32_t _lastShakeMs = 0;
+botux::BotUx::Mood _ambientMood = botux::BotUx::Mood::Idle;
+botux::BotUx::Mood _drawMood = (botux::BotUx::Mood)0xFF;
+uint8_t _colorDrag = 0;
+bool _gestureActive = false;
 
 uint8_t _editHour = 0;
 uint8_t _editMinute = 0;
@@ -116,14 +134,18 @@ static void applySettings() {
     settings.apply(previewBot);
     auto expression = (botux::BotUx::Expression)settings.data().expression;
     auto animation = (botux::BotUx::Animation)settings.data().animation;
-    face.bot().setExpression(expression);
-    previewBot.setExpression(expression);
+    face.bot().setExpression(expression, 500);
+    previewBot.setExpression(expression, 500);
     face.bot().setAnimation(animation);
     previewBot.setAnimation(animation);
     face.bot().setReducedMotion(!settings.data().motion);
     previewBot.setReducedMotion(!settings.data().motion);
-    face.bot().setMotionAmount(1.0f);
-    previewBot.setMotionAmount(1.0f);
+    float amount = 0.25f + settings.data().motionAmount * 0.15f;
+    float speed = 0.45f + settings.data().animationSpeed * 0.14f;
+    face.bot().setMotionAmount(amount);
+    previewBot.setMotionAmount(amount);
+    face.bot().setAnimationSpeed(speed);
+    previewBot.setAnimationSpeed(speed);
     face.setHour24(settings.data().hour24);
     face.setShowSeconds(settings.data().showSeconds);
     power.applyLevel(settings.data().brightness);
@@ -166,10 +188,29 @@ static void refreshPower(uint32_t now) {
     _charging = power.charging();
     if (_powerKnown && _charging && !wasCharging) {
         _happyAcknowledgment.start(now, 1400);
-        _statusPanel.start(now, 3200);
-        confirmSound();
+        _statusPanelStartMs = now;
+        _statusPanelUntilMs = now + 6000;
     }
     _powerKnown = true;
+}
+
+static void showStatusPanel(uint32_t now, uint32_t duration = 6000) {
+    _statusPanelStartMs = now;
+    _statusPanelUntilMs = now + duration;
+    _uiDirty = true;
+}
+
+static float statusPanelProgress(uint32_t now) {
+    if (!_statusPanelUntilMs) return 0.0f;
+    if ((int32_t)(now - _statusPanelUntilMs) >= 0) {
+        _statusPanelUntilMs = 0;
+        return 0.0f;
+    }
+    uint32_t age = now - _statusPanelStartMs;
+    if (age < 300) return age / 300.0f;
+    uint32_t left = _statusPanelUntilMs - now;
+    if (left < 260) return left / 260.0f;
+    return 1.0f;
 }
 
 static botux::BotUx::Mood faceMood(uint32_t now) {
@@ -177,15 +218,41 @@ static botux::BotUx::Mood faceMood(uint32_t now) {
     if (_happyAcknowledgment.active(now)) return botux::BotUx::Mood::Happy;
     if (_battery <= kLowBattery) return botux::BotUx::Mood::Sleepy;
     if (_screen != Screen::Face) return botux::BotUx::Mood::Listening;
-    return botux::BotUx::Mood::Idle;
+    return settings.data().expression == 0 ? _ambientMood : botux::BotUx::Mood::Idle;
 }
 
 static void enterSettings() {
+    _ambientCycle.postpone(millis());
     _screen = Screen::Settings;
     _editor = Editor::None;
     _menu = MenuItem::Time;
+    _settingsList.configure((uint8_t)MenuItem::Count, kVisibleRows);
+    _settingsList.select(0);
     _uiDirty = true;
     confirmSound();
+}
+
+static void enterPersonalize(Screen parent = Screen::Settings) {
+    _ambientCycle.postpone(millis());
+    _personalParent = parent;
+    _screen = Screen::Personalize;
+    _editor = Editor::None;
+    _personal = PersonalItem::Expression;
+    _personalList.configure((uint8_t)PersonalItem::Count, kVisibleRows);
+    _personalList.select(0);
+    _uiDirty = true;
+    confirmSound();
+}
+
+static void leavePersonalize() {
+    _screen = _personalParent;
+    _editor = Editor::None;
+    _uiDirty = true;
+    if (_screen == Screen::Face) {
+        _faceNeedsClear = true;
+        face.invalidate();
+    }
+    clickSound();
 }
 
 static void leaveSettings() {
@@ -197,10 +264,11 @@ static void leaveSettings() {
     confirmSound();
 }
 
-static void enterEditor(Editor editor) {
+static void enterEditor(Editor editor, Screen parent = Screen::Settings) {
     _screen = Screen::Editor;
     _editor = editor;
     _originalSettings = settings.data();
+    _editorParent = parent;
     _editField = 0;
     _uiDirty = true;
     auto dt = M5.Rtc.getDateTime();
@@ -215,7 +283,7 @@ static void enterEditor(Editor editor) {
 static void cancelEditor() {
     settings.data() = _originalSettings;
     applySettings();
-    _screen = Screen::Settings;
+    _screen = _editorParent;
     _editor = Editor::None;
     _uiDirty = true;
     clickSound();
@@ -238,7 +306,7 @@ static void saveEditor() {
     } else {
         settings.save();
     }
-    _screen = Screen::Settings;
+    _screen = _editorParent;
     _editor = Editor::None;
     _uiDirty = true;
     confirmSound();
@@ -266,17 +334,11 @@ static void cycleExpression(int8_t delta, bool persist = false) {
     settings.data().expression = (uint8_t)((settings.data().expression
         + Settings::EXPRESSION_COUNT + delta) % Settings::EXPRESSION_COUNT);
     auto expression = (botux::BotUx::Expression)settings.data().expression;
-    face.bot().setExpression(expression);
-    previewBot.setExpression(expression);
+    face.bot().setExpression(expression, 500);
+    previewBot.setExpression(expression, 500);
     _uiDirty = true;
     if (persist) settings.save();
     clickSound();
-}
-
-static float clampMotion(float value) {
-    if (value < -1.0f) return -1.0f;
-    if (value > 1.0f) return 1.0f;
-    return value;
 }
 
 static void updateMotion(uint32_t now) {
@@ -284,6 +346,7 @@ static void updateMotion(uint32_t now) {
     _lastImuReadMs = now;
 
     if (_dozing) {
+        _motionFilter.reset();
         face.bot().setMotion(0.0f, 0.0f, 0.0f);
         return;
     }
@@ -297,19 +360,15 @@ static void updateMotion(uint32_t now) {
         gyroOk = M5.Imu.getGyro(&gx, &gy, &gz);
     }
 
-    float shake = 0.0f;
-    if (gyroOk) {
-        shake = sqrtf(gx * gx + gy * gy + gz * gz) / 180.0f;
-        if (shake > 1.0f) shake = 1.0f;
-    }
-    float tiltX = accelOk ? clampMotion(ax) : 0.0f;
-    float tiltY = accelOk ? clampMotion(ay) : 0.0f;
-    face.bot().setMotion(tiltX, tiltY, shake);
-    previewBot.setMotion(tiltX, tiltY, shake);
+    float gyroMagnitude = gyroOk ? sqrtf(gx * gx + gy * gy + gz * gz) : 0.0f;
+    auto filtered = _motionFilter.update(accelOk ? ax : 0.0f, accelOk ? ay : 0.0f,
+                                         gyroMagnitude, now);
+    face.bot().setMotion(filtered.x, filtered.y, filtered.shake * 0.45f);
+    previewBot.setMotion(filtered.x, filtered.y, filtered.shake * 0.45f);
 
-    if (shake > 0.82f && now - _lastShakeMs > 1400) {
-        _lastShakeMs = now;
+    if (filtered.poke) {
         face.bot().poke();
+        _ambientCycle.postpone(now);
         pokeSound();
     }
 }
@@ -337,31 +396,37 @@ static void changeEditorValue(int8_t delta) {
         cycleExpression(delta);
     } else if (_editor == Editor::Appearance) {
         if (_editField == 0) {
-            settings.data().theme = (uint8_t)((settings.data().theme + Settings::THEME_COUNT + delta) % Settings::THEME_COUNT);
-        } else if (_editField == 1) {
             settings.data().appearance = (uint8_t)((settings.data().appearance + Settings::APPEARANCE_COUNT + delta) % Settings::APPEARANCE_COUNT);
         } else {
-            bool enabling = !settings.data().sound;
-            if (!enabling) clickSound();
-            settings.data().sound = enabling;
+            settings.data().eyeStyle = (uint8_t)((settings.data().eyeStyle + Settings::EYE_STYLE_COUNT + delta) % Settings::EYE_STYLE_COUNT);
         }
         applySettings();
     } else if (_editor == Editor::Motion) {
         if (_editField == 0) {
             settings.data().animation = (uint8_t)((settings.data().animation
                 + Settings::ANIMATION_COUNT + delta) % Settings::ANIMATION_COUNT);
-        } else {
+        } else if (_editField == 1) {
             settings.data().motion = !settings.data().motion;
+        } else if (_editField == 2) {
+            int level = settings.data().motionAmount + delta;
+            settings.data().motionAmount = (uint8_t)(level < 1 ? 1 : level > 5 ? 5 : level);
+        } else {
+            int level = settings.data().animationSpeed + delta;
+            settings.data().animationSpeed = (uint8_t)(level < 1 ? 1 : level > 5 ? 5 : level);
         }
         applySettings();
-    } else if (_editor == Editor::Brightness) {
-        int level = settings.data().brightness + delta;
-        if (level < 1) level = 1;
-        if (level > 5) level = 5;
-        settings.data().brightness = (uint8_t)level;
+    } else if (_editor == Editor::Display) {
+        if (_editField == 0) {
+            int level = settings.data().brightness + delta;
+            settings.data().brightness = (uint8_t)(level < 1 ? 1 : level > 5 ? 5 : level);
+        } else if (_editField == 1) {
+            settings.data().theme = (uint8_t)((settings.data().theme + Settings::THEME_COUNT + delta) % Settings::THEME_COUNT);
+        } else {
+            settings.data().sound = !settings.data().sound;
+        }
         applySettings();
     }
-    if (!(_editor == Editor::Appearance && _editField == 2 && !settings.data().sound)) clickSound();
+    clickSound();
 }
 
 static void selectMenuItem() {
@@ -369,29 +434,36 @@ static void selectMenuItem() {
         case MenuItem::Time:       enterEditor(Editor::Time); break;
         case MenuItem::Date:       enterEditor(Editor::Date); break;
         case MenuItem::Format:     enterEditor(Editor::Format); break;
-        case MenuItem::Expression: enterEditor(Editor::Expression); break;
-        case MenuItem::Appearance: enterEditor(Editor::Appearance); break;
-        case MenuItem::Motion:     enterEditor(Editor::Motion); break;
-        case MenuItem::Brightness: enterEditor(Editor::Brightness); break;
+        case MenuItem::Personalize: enterPersonalize(); break;
+        case MenuItem::Display:    enterEditor(Editor::Display); break;
         case MenuItem::Done:       leaveSettings(); break;
+        default: break;
+    }
+}
+
+static void selectPersonalItem() {
+    switch (_personal) {
+        case PersonalItem::Expression: enterEditor(Editor::Expression, Screen::Personalize); break;
+        case PersonalItem::Action:     enterEditor(Editor::Motion, Screen::Personalize); break;
+        case PersonalItem::Appearance: enterEditor(Editor::Appearance, Screen::Personalize); break;
+        case PersonalItem::Color:      enterEditor(Editor::Color, Screen::Personalize); break;
+        case PersonalItem::Intensity:  enterEditor(Editor::Motion, Screen::Personalize); _editField = 2; break;
+        case PersonalItem::Speed:      enterEditor(Editor::Motion, Screen::Personalize); _editField = 3; break;
+        case PersonalItem::Back:       leavePersonalize(); break;
         default: break;
     }
 }
 
 static void handleFaceInput(Gesture gesture) {
     if (gesture == Gesture::Tap) {
-        if (hit(_tapX, _tapY, 154, 420, 158, 46)) enterSettings();
-        else if (hit(_tapX, _tapY, 112, 354, 242, 72)) toggleSeconds();
+        if (_statusPanelUntilMs && hit(_tapX, _tapY, 128, 0, 210, 72)) {
+            _statusPanelUntilMs = 0;
+        } else if (hit(_tapX, _tapY, 88, 370, 290, 96)) toggleSeconds();
         else if (hit(_tapX, _tapY, kBotX, kBotY, kBotSize, kBotSize)) pokeBot();
-    } else if (gesture == Gesture::SwipeUp) {
-        enterSettings();
+    } else if (gesture == Gesture::Long) {
+        if (hit(_tapX, _tapY, kBotX, kBotY, kBotSize, kBotSize)) enterPersonalize(Screen::Face);
     } else if (gesture == Gesture::SwipeDown) {
-        if (_touch.startY() <= 28) {
-            _statusPanel.start(millis(), 3200);
-            _uiDirty = true;
-        } else {
-            startDoze();
-        }
+        if (_touch.startY() <= 20) showStatusPanel(millis());
     } else if (gesture == Gesture::SwipeLeft) {
         cycleExpression(1, true);
     } else if (gesture == Gesture::SwipeRight) {
@@ -400,19 +472,57 @@ static void handleFaceInput(Gesture gesture) {
 }
 
 static void handleSettingsTouch() {
-    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; ++i) {
-        int16_t cy = kMenuY + i * kMenuStep;
-        if (hit(_tapX, _tapY, 58, cy - 23, 350, 46)) {
-            _menu = (MenuItem)i;
+    for (uint8_t row = 0; row < kVisibleRows; ++row) {
+        uint8_t i = _settingsList.first() + row;
+        if (i >= (uint8_t)MenuItem::Count) break;
+        int16_t cy = kMenuY + row * kMenuStep;
+        if (hit(_tapX, _tapY, 50, cy - 31, 366, 62)) {
+            _settingsList.select(i);
+            _menu = (MenuItem)_settingsList.selected();
             selectMenuItem();
             return;
         }
     }
 }
 
+static void handlePersonalTouch() {
+    for (uint8_t row = 0; row < kVisibleRows; ++row) {
+        uint8_t i = _personalList.first() + row;
+        if (i >= (uint8_t)PersonalItem::Count) break;
+        int16_t cy = kMenuY + row * kMenuStep;
+        if (hit(_tapX, _tapY, 50, cy - 31, 366, 62)) {
+            _personalList.select(i);
+            _personal = (PersonalItem)_personalList.selected();
+            selectPersonalItem();
+            return;
+        }
+    }
+}
+
+static void updateColorPicker(int16_t x, int16_t y) {
+    if (_colorDrag == 1) {
+        if (x < 66) x = 66; if (x > 326) x = 326;
+        if (y < 246) y = 246; if (y > 354) y = 354;
+        settings.data().colorSat = (uint8_t)((x - 66) * 100 / 260);
+        settings.data().colorValue = (uint8_t)((354 - y) * 100 / 108);
+    } else if (_colorDrag == 2) {
+        if (y < 246) y = 246; if (y > 354) y = 354;
+        settings.data().colorHue = (uint16_t)((y - 246) * 359 / 108);
+    } else return;
+    settings.data().customColor = true;
+    applySettings();
+}
+
 static void handleEditorTouch() {
-    if (hit(_tapX, _tapY, 84, 388, 138, 54)) { cancelEditor(); return; }
-    if (hit(_tapX, _tapY, 244, 388, 138, 54)) { saveEditor(); return; }
+    if (hit(_tapX, _tapY, 84, 374, 138, 50)) { cancelEditor(); return; }
+    if (hit(_tapX, _tapY, 244, 374, 138, 50)) { saveEditor(); return; }
+
+    if (_editor == Editor::Color && hit(_tapX, _tapY, 163, 207, 140, 34)) {
+        settings.data().customColor = false;
+        applySettings();
+        clickSound();
+        return;
+    }
 
     if (_editor == Editor::Time) {
         const int16_t centers[2] = { 157, 309 };
@@ -447,8 +557,8 @@ static void handleEditorTouch() {
             previewBot.poke(); pokeSound();
         }
     } else if (_editor == Editor::Appearance) {
-        const int16_t rows[3] = { 264, 312, 360 };
-        for (uint8_t i = 0; i < 3; ++i) {
+        const int16_t rows[2] = { 278, 340 };
+        for (uint8_t i = 0; i < 2; ++i) {
             if (hit(_tapX, _tapY, 58, rows[i] - 23, 350, 46)) {
                 _editField = i;
                 int8_t delta = (_tapX < 233) ? -1 : 1;
@@ -457,8 +567,8 @@ static void handleEditorTouch() {
             }
         }
     } else if (_editor == Editor::Motion) {
-        const int16_t rows[2] = { 274, 334 };
-        for (uint8_t i = 0; i < 2; ++i) {
+        const int16_t rows[4] = { 218, 262, 306, 350 };
+        for (uint8_t i = 0; i < 4; ++i) {
             if (hit(_tapX, _tapY, 58, rows[i] - 24, 350, 48)) {
                 _editField = i;
                 int8_t delta = (_tapX < 233) ? -1 : 1;
@@ -466,14 +576,22 @@ static void handleEditorTouch() {
                 return;
             }
         }
-    } else if (_editor == Editor::Brightness) {
-        if (hit(_tapX, _tapY, 72, 160, 96, 76)) changeEditorValue(-1);
-        else if (hit(_tapX, _tapY, 298, 160, 96, 76)) changeEditorValue(1);
+    } else if (_editor == Editor::Display) {
+        const int16_t rows[3] = { 170, 250, 330 };
+        for (uint8_t i = 0; i < 3; ++i) {
+            if (hit(_tapX, _tapY, 58, rows[i] - 30, 350, 60)) {
+                _editField = i;
+                changeEditorValue(_tapX < 233 ? -1 : 1);
+                return;
+            }
+        }
     }
 }
 
 static void handleInputs(uint32_t now) {
     auto touch = M5.Touch.getDetail(0);
+    _gestureActive = M5.BtnA.isPressed() || M5.BtnB.isPressed()
+        || touch.wasPressed() || touch.isPressed();
     bool wakePressed = M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || touch.wasPressed();
     if (_dozing) {
         if (wakePressed) {
@@ -484,6 +602,16 @@ static void handleInputs(uint32_t now) {
         return;
     }
 
+    if (_screen == Screen::Face) {
+        bool entered = _settingsChord.poll(M5.BtnA.isPressed(), M5.BtnB.isPressed(), now);
+        if (_settingsChord.tracking()) {
+            _buttonA.consume(M5.BtnA.isPressed());
+            _buttonB.consume(M5.BtnB.isPressed());
+            if (entered) enterSettings();
+            return;
+        }
+    }
+
     Gesture ga = _buttonA.poll(M5.BtnA.wasPressed(), M5.BtnA.isPressed(), M5.BtnA.wasReleased(), now);
     Gesture gb = _buttonB.poll(M5.BtnB.wasPressed(), M5.BtnB.isPressed(), M5.BtnB.wasReleased(), now);
     Gesture gt = _touch.poll(touch.wasPressed(), touch.isPressed(), touch.wasReleased(),
@@ -491,14 +619,29 @@ static void handleInputs(uint32_t now) {
     if (gt == Gesture::Tap) {
         _tapX = _touch.tapX();
         _tapY = _touch.tapY();
+    } else if (gt == Gesture::Long) {
+        _tapX = (int16_t)touch.x;
+        _tapY = (int16_t)touch.y;
+    }
+
+    if (_screen == Screen::Editor && _editor == Editor::Color) {
+        if (touch.wasPressed()) {
+            if (hit((int16_t)touch.x, (int16_t)touch.y, 66, 246, 260, 108)) _colorDrag = 1;
+            else if (hit((int16_t)touch.x, (int16_t)touch.y, 344, 246, 56, 108)) _colorDrag = 2;
+        }
+        if (touch.isPressed() && _colorDrag) updateColorPicker((int16_t)touch.x, (int16_t)touch.y);
+        if (touch.wasReleased()) _colorDrag = 0;
+        if (gt == Gesture::SwipeUp || gt == Gesture::SwipeDown
+            || gt == Gesture::SwipeLeft || gt == Gesture::SwipeRight || gt == Gesture::Long)
+            gt = Gesture::None;
     }
 
     if (_screen == Screen::Face) {
         if (ga == Gesture::Tap) pokeBot();
-        else if (ga == Gesture::Long) enterSettings();
         if (gb == Gesture::Tap) cycleExpression(1, true);
         else if (gb == Gesture::Long) startDoze();
         if (gt != Gesture::None) handleFaceInput(gt);
+        if (ga != Gesture::None || gb != Gesture::None || gt != Gesture::None) _ambientCycle.postpone(now);
         return;
     }
 
@@ -506,12 +649,33 @@ static void handleInputs(uint32_t now) {
         if (ga == Gesture::Tap) selectMenuItem();
         else if (ga == Gesture::Long) leaveSettings();
         if (gb == Gesture::Tap) {
-            _menu = (MenuItem)(((uint8_t)_menu + 1) % (uint8_t)MenuItem::Count);
+            _settingsList.move(1);
+            _menu = (MenuItem)_settingsList.selected();
             _uiDirty = true;
             clickSound();
         }
         if (gt == Gesture::Tap) handleSettingsTouch();
-        else if (gt == Gesture::SwipeDown) leaveSettings();
+        else if (gt == Gesture::SwipeUp || gt == Gesture::SwipeDown) {
+            _settingsList.move(gt == Gesture::SwipeUp ? 1 : -1);
+            _menu = (MenuItem)_settingsList.selected();
+            _uiDirty = true;
+        }
+        return;
+    }
+
+    if (_screen == Screen::Personalize) {
+        if (ga == Gesture::Long) leavePersonalize();
+        if (gb == Gesture::Tap) {
+            _personalList.move(1);
+            _personal = (PersonalItem)_personalList.selected();
+            _uiDirty = true;
+        }
+        if (gt == Gesture::Tap) handlePersonalTouch();
+        else if (gt == Gesture::SwipeUp || gt == Gesture::SwipeDown) {
+            _personalList.move(gt == Gesture::SwipeUp ? 1 : -1);
+            _personal = (PersonalItem)_personalList.selected();
+            _uiDirty = true;
+        }
         return;
     }
 
@@ -549,13 +713,16 @@ static void drawTitle(const char* title) {
 
 static void drawSettingsList() {
     drawTitle("SETTINGS");
-    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; ++i) {
-        int16_t cy = kMenuY + i * kMenuStep;
+    for (uint8_t row = 0; row < kVisibleRows; ++row) {
+        uint8_t i = _settingsList.first() + row;
+        if (i >= (uint8_t)MenuItem::Count) break;
+        int16_t cy = kMenuY + row * kMenuStep;
         bool selected = i == (uint8_t)_menu;
-        if (selected) canvas.fillRoundRect(78, cy - 19, 310, 38, 19, settings.panel());
+        canvas.fillRoundRect(58, cy - 29, 350, 58, 25, selected ? settings.panel() : settings.style().bgColor);
+        if (selected) canvas.drawRoundRect(58, cy - 29, 350, 58, 25, settings.style().accentColor);
 
         canvas.setTextDatum(middle_left);
-        canvas.setFont(&fonts::FreeSansBold9pt7b);
+        canvas.setFont(&fonts::FreeSansBold12pt7b);
         canvas.setTextSize(1.0f);
         canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
         canvas.drawString(kMenuLabels[i], 88, cy);
@@ -570,28 +737,56 @@ static void drawSettingsList() {
                 break;
             }
             case MenuItem::Format: snprintf(value, sizeof(value), settings.data().hour24 ? "24 H" : "12 H"); break;
-            case MenuItem::Expression: snprintf(value, sizeof(value), "%s", Settings::expressionName(settings.data().expression)); break;
-            case MenuItem::Appearance: snprintf(value, sizeof(value), "%s", Settings::appearanceName(settings.data().appearance)); break;
-            case MenuItem::Motion: snprintf(value, sizeof(value), "%s", settings.data().motion ? "FULL" : "REDUCED"); break;
-            case MenuItem::Brightness: snprintf(value, sizeof(value), "%u / 5", settings.data().brightness); break;
+            case MenuItem::Personalize: snprintf(value, sizeof(value), ">"); break;
+            case MenuItem::Display: snprintf(value, sizeof(value), "%u / 5", settings.data().brightness); break;
             default: break;
         }
         if (value[0]) {
+            canvas.setFont(&fonts::FreeSansBold9pt7b);
             canvas.setTextDatum(middle_right);
             canvas.setTextColor(settings.muted());
             canvas.drawString(value, 378, cy);
         }
     }
-    canvas.setTextDatum(middle_center);
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextSize(1.0f);
-    canvas.setTextColor(settings.muted());
-    canvas.drawString("A SELECT     B MOVE", 233, 425);
+    canvas.fillRoundRect(221, 410, 24, 8, 4, settings.muted());
+}
+
+static void drawPersonalizeList() {
+    drawTitle("BOT PERSONALITY");
+    for (uint8_t row = 0; row < kVisibleRows; ++row) {
+        uint8_t i = _personalList.first() + row;
+        if (i >= (uint8_t)PersonalItem::Count) break;
+        int16_t cy = kMenuY + row * kMenuStep;
+        bool selected = i == (uint8_t)_personal;
+        canvas.fillRoundRect(58, cy - 29, 350, 58, 25, selected ? settings.panel() : settings.style().bgColor);
+        if (selected) canvas.drawRoundRect(58, cy - 29, 350, 58, 25, settings.style().accentColor);
+        canvas.setFont(&fonts::FreeSansBold12pt7b);
+        canvas.setTextDatum(middle_left);
+        canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
+        canvas.drawString(kPersonalLabels[i], 78, cy);
+        char value[20] = {};
+        switch ((PersonalItem)i) {
+            case PersonalItem::Expression: snprintf(value, sizeof(value), "%s", Settings::expressionName(settings.data().expression)); break;
+            case PersonalItem::Action: snprintf(value, sizeof(value), "%s", Settings::animationName(settings.data().animation)); break;
+            case PersonalItem::Appearance: snprintf(value, sizeof(value), "%s", Settings::appearanceName(settings.data().appearance)); break;
+            case PersonalItem::Color: snprintf(value, sizeof(value), settings.data().customColor ? "CUSTOM" : "THEME"); break;
+            case PersonalItem::Intensity: snprintf(value, sizeof(value), "%u / 5", settings.data().motionAmount); break;
+            case PersonalItem::Speed: snprintf(value, sizeof(value), "%u / 5", settings.data().animationSpeed); break;
+            default: break;
+        }
+        if (value[0]) {
+            canvas.setFont(&fonts::FreeSansBold9pt7b);
+            canvas.setTextDatum(middle_right);
+            canvas.setTextColor(settings.muted());
+            canvas.drawString(value, 390, cy);
+        }
+    }
+    canvas.fillRoundRect(221, 410, 24, 8, 4, settings.muted());
 }
 
 static void drawFooter() {
-    drawPill(84, 390, 138, 48, "BACK", false);
-    drawPill(244, 390, 138, 48, "DONE", true, true);
+    drawPill(84, 376, 138, 46, "BACK", false);
+    drawPill(244, 376, 138, 46, "DONE", true, true);
 }
 
 static void drawStepper(int16_t cx, const char* label, const char* value, bool selected, int16_t width) {
@@ -665,9 +860,8 @@ static void drawAppearanceEditor() {
     drawTitle("APPEARANCE");
     previewBot.draw();
     previewSprite.pushSprite(&canvas, kPreviewX, kPreviewY);
-    drawArrowRow(264, "THEME", Settings::themeName(settings.data().theme), _editField == 0);
-    drawArrowRow(312, "SHAPE", Settings::appearanceName(settings.data().appearance), _editField == 1);
-    drawArrowRow(360, "SOUND", settings.data().sound ? "ON" : "OFF", _editField == 2);
+    drawArrowRow(278, "SHAPE", Settings::appearanceName(settings.data().appearance), _editField == 0);
+    drawArrowRow(340, "EYES", Settings::eyeStyleName(settings.data().eyeStyle), _editField == 1);
     drawFooter();
 }
 
@@ -691,31 +885,45 @@ static void drawMotionEditor() {
     drawTitle("MOTION");
     previewBot.draw();
     previewSprite.pushSprite(&canvas, kPreviewX, kPreviewY);
-    drawArrowRow(274, "ANIMATION", Settings::animationName(settings.data().animation), _editField == 0);
-    drawArrowRow(334, "WRIST", settings.data().motion ? "FULL" : "REDUCED", _editField == 1);
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextDatum(middle_center);
-    canvas.setTextColor(settings.muted());
-    canvas.drawString(settings.data().motion ? "Tilt and shake to move the bot" : "Gentle animation, IMU response off", 233, 374);
+    char amount[8], speed[8];
+    snprintf(amount, sizeof(amount), "%u / 5", settings.data().motionAmount);
+    snprintf(speed, sizeof(speed), "%u / 5", settings.data().animationSpeed);
+    drawArrowRow(218, "ACTION", Settings::animationName(settings.data().animation), _editField == 0);
+    drawArrowRow(262, "WRIST", settings.data().motion ? "ON" : "OFF", _editField == 1);
+    drawArrowRow(306, "INTENSITY", amount, _editField == 2);
+    drawArrowRow(350, "SPEED", speed, _editField == 3);
     drawFooter();
 }
 
-static void drawBrightnessEditor() {
-    drawTitle("BRIGHTNESS");
-    drawPill(72, 160, 96, 76, "-", false);
-    drawPill(298, 160, 96, 76, "+", false);
-    for (uint8_t i = 0; i < 5; ++i) {
-        uint16_t color = i < settings.data().brightness
-            ? settings.style().accentColor : settings.panel();
-        canvas.fillRoundRect(185 + i * 22, 187, 16, 22, 6, color);
+static void drawColorEditor() {
+    drawTitle("BOT COLOR");
+    previewBot.draw();
+    previewSprite.pushSprite(&canvas, kPreviewX, 55);
+    drawPill(163, 207, 140, 32, "USE THEME", !settings.data().customColor);
+    for (int16_t x = 66; x < 326; x += 10) {
+        uint8_t sat = (uint8_t)((x - 66) * 100 / 260);
+        for (int16_t y = 246; y < 354; y += 6) {
+            uint8_t value = (uint8_t)((354 - y) * 100 / 108);
+            canvas.fillRect(x, y, 11, 7, Settings::hsv565(settings.data().colorHue, sat, value));
+        }
     }
-    char value[8];
-    snprintf(value, sizeof(value), "%u / 5", settings.data().brightness);
-    canvas.setTextDatum(middle_center);
-    canvas.setFont(&fonts::FreeSansBold12pt7b);
-    canvas.setTextSize(1.0f);
-    canvas.setTextColor(settings.ink());
-    canvas.drawString(value, 233, 278);
+    for (int16_t y = 246; y < 354; y += 3)
+        canvas.fillRect(344, y, 56, 4, Settings::hsv565((uint16_t)((y - 246) * 359 / 108), 100, 100));
+    int16_t sx = 66 + settings.data().colorSat * 260 / 100;
+    int16_t sy = 354 - settings.data().colorValue * 108 / 100;
+    int16_t hy = 246 + settings.data().colorHue * 108 / 359;
+    canvas.drawCircle(sx, sy, 8, settings.ink());
+    canvas.drawRoundRect(340, hy - 5, 64, 10, 4, settings.ink());
+    drawFooter();
+}
+
+static void drawDisplayEditor() {
+    drawTitle("DISPLAY & SOUND");
+    char brightness[8];
+    snprintf(brightness, sizeof(brightness), "%u / 5", settings.data().brightness);
+    drawArrowRow(170, "BRIGHTNESS", brightness, _editField == 0);
+    drawArrowRow(250, "THEME", Settings::themeName(settings.data().theme), _editField == 1);
+    drawArrowRow(330, "SOUND", settings.data().sound ? "ON" : "OFF", _editField == 2);
     drawFooter();
 }
 
@@ -727,14 +935,16 @@ static void drawEditor() {
         case Editor::Expression: drawExpressionEditor(); break;
         case Editor::Appearance: drawAppearanceEditor(); break;
         case Editor::Motion:     drawMotionEditor(); break;
-        case Editor::Brightness: drawBrightnessEditor(); break;
+        case Editor::Color:      drawColorEditor(); break;
+        case Editor::Display:    drawDisplayEditor(); break;
         default: break;
     }
 }
 
 static bool previewIsAnimated() {
     return _screen == Screen::Editor
-        && (_editor == Editor::Expression || _editor == Editor::Appearance || _editor == Editor::Motion);
+        && (_editor == Editor::Expression || _editor == Editor::Appearance
+            || _editor == Editor::Motion || _editor == Editor::Color);
 }
 
 static void recordFrame(uint32_t now, uint32_t updateUs, uint32_t drawUs, uint32_t pushUs) {
@@ -773,7 +983,11 @@ static void render(uint32_t now) {
     face.setCharging(_charging);
     face.setHour24(settings.data().hour24);
     face.setShowSeconds(settings.data().showSeconds);
-    face.bot().setMood(faceMood(now));
+    auto mood = faceMood(now);
+    if (mood != _drawMood) {
+        face.bot().setMood(mood, 700);
+        _drawMood = mood;
+    }
     auto selectedExpression = (botux::BotUx::Expression)settings.data().expression;
     face.bot().setExpression((_dozing || _battery <= kLowBattery)
         ? botux::BotUx::Expression::Auto : selectedExpression);
@@ -796,7 +1010,7 @@ static void render(uint32_t now) {
         botSprite.pushSprite(&M5.Display, kBotX, kBotY);
         face.draw(&M5.Display, settings.style().bgColor, settings.ink(), settings.muted(),
                   settings.style().accentColor, settings.panel(), settings.warning(),
-                  _statusPanel.active(now));
+                  statusPanelProgress(now));
         M5.Display.waitDisplay();
         uint32_t t3 = micros();
         recordFrame(now, t1 - t0, t2 - t1, t3 - t2);
@@ -807,6 +1021,8 @@ static void render(uint32_t now) {
     canvas.fillSprite(settings.style().bgColor);
     if (_screen == Screen::Settings) {
         drawSettingsList();
+    } else if (_screen == Screen::Personalize) {
+        drawPersonalizeList();
     } else {
         drawEditor();
     }
@@ -825,7 +1041,12 @@ static void emitFrameCapture() {
         face.invalidate();
         face.draw(&canvas, settings.style().bgColor, settings.ink(), settings.muted(),
                   settings.style().accentColor, settings.panel(), settings.warning(),
-                  _statusPanel.active(millis()));
+                  statusPanelProgress(millis()));
+    } else {
+        canvas.fillSprite(settings.style().bgColor);
+        if (_screen == Screen::Settings) drawSettingsList();
+        else if (_screen == Screen::Personalize) drawPersonalizeList();
+        else drawEditor();
     }
 
     const uint8_t* pixels = (const uint8_t*)canvas.getBuffer();
@@ -841,9 +1062,61 @@ static void emitFrameCapture() {
     Serial.flush();
 }
 
+static void selectDiagnosticPage(uint8_t page) {
+    _originalSettings = settings.data();
+    _editor = Editor::None;
+    _editorParent = Screen::Personalize;
+    _personalParent = Screen::Settings;
+    if (page == 0 || page == 10) {
+        _screen = Screen::Face;
+        _faceNeedsClear = true;
+        face.invalidate();
+        if (page == 10) {
+            showStatusPanel(millis(), 6000);
+            _statusPanelStartMs -= 300;
+        }
+    } else if (page == 1 || page == 8) {
+        _screen = Screen::Settings;
+        _settingsList.configure((uint8_t)MenuItem::Count, kVisibleRows);
+        _settingsList.select(page == 8 ? (uint8_t)MenuItem::Done : 0);
+        _menu = (MenuItem)_settingsList.selected();
+    } else if (page == 2 || page == 9) {
+        _screen = Screen::Personalize;
+        _personalList.configure((uint8_t)PersonalItem::Count, kVisibleRows);
+        _personalList.select(page == 9 ? (uint8_t)PersonalItem::Back : 0);
+        _personal = (PersonalItem)_personalList.selected();
+    } else {
+        _screen = Screen::Editor;
+        _editor = page == 3 ? Editor::Expression
+                : page == 4 ? Editor::Appearance
+                : page == 5 ? Editor::Motion
+                : page == 6 ? Editor::Color
+                : page == 7 ? Editor::Display
+                : page == 11 ? Editor::Format : Editor::Time;
+        _editField = 0;
+    }
+    _uiDirty = true;
+}
+
 static void handleSerialCommands() {
+    static bool readingView = false;
+    static uint8_t view = 0;
     while (Serial.available()) {
         char command = (char)Serial.read();
+        if (readingView) {
+            if (command >= '0' && command <= '9') {
+                view = (uint8_t)(view * 10 + command - '0');
+                continue;
+            }
+            selectDiagnosticPage(view);
+            readingView = false;
+            if (command == '\n' || command == '\r') continue;
+        }
+        if (command == 'v') {
+            readingView = true;
+            view = 0;
+            continue;
+        }
         if (command == 'e') cycleExpression(1, true);
         else if (command == 'a') {
             settings.data().animation = (settings.data().animation + 1) % Settings::ANIMATION_COUNT;
@@ -854,26 +1127,9 @@ static void handleSerialCommands() {
             applySettings();
             settings.save();
         } else if (command == 'p') pokeBot();
-        else if (command == 's') _statusPanel.start(millis(), 3200);
+        else if (command == 's') showStatusPanel(millis());
         else if (command == 'c') emitFrameCapture();
-        else if (command >= '0' && command <= '4') {
-            _originalSettings = settings.data();
-            if (command == '0') {
-                _screen = Screen::Face;
-                _editor = Editor::None;
-                _faceNeedsClear = true;
-                face.invalidate();
-            } else if (command == '1') {
-                _screen = Screen::Settings;
-                _editor = Editor::None;
-            } else {
-                _screen = Screen::Editor;
-                _editor = command == '2' ? Editor::Expression
-                        : command == '3' ? Editor::Appearance : Editor::Motion;
-                _editField = 0;
-            }
-            _uiDirty = true;
-        }
+        else if (command >= '0' && command <= '9') selectDiagnosticPage((uint8_t)(command - '0'));
     }
 }
 
@@ -910,7 +1166,11 @@ void setup() {
     previewBot.begin(&previewSprite);
     applySettings();
     refreshPower(millis());
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, 0-4 preview screens\n",
+    _settingsList.configure((uint8_t)MenuItem::Count, kVisibleRows);
+    _personalList.configure((uint8_t)PersonalItem::Count, kVisibleRows);
+    _ambientCycle.begin(millis());
+    showStatusPanel(millis(), 1800);
+    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v11\\n diagnostic pages\n",
                   M5.Imu.isEnabled());
 }
 
@@ -922,6 +1182,15 @@ void loop() {
     refreshPower(now);
     updateMotion(now);
     handleInputs(now);
+    if (_screen == Screen::Face && !_gestureActive
+        && settings.data().expression == 0 && _ambientCycle.update(now)) {
+        static const botux::BotUx::Mood moods[6] = {
+            botux::BotUx::Mood::Idle, botux::BotUx::Mood::Listening,
+            botux::BotUx::Mood::Thinking, botux::BotUx::Mood::Done,
+            botux::BotUx::Mood::Happy, botux::BotUx::Mood::Waiting,
+        };
+        _ambientMood = moods[_ambientCycle.index()];
+    }
     handleSerialCommands();
 
     if (_screen != Screen::Face && !_uiDirty && !previewIsAnimated()) {

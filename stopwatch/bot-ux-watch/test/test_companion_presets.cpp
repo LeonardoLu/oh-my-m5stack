@@ -14,4 +14,14 @@ int main() {
     static_assert(watchcompanion::ambientMoodCount()==7,"safe ambient mood count");
     for(uint8_t i=0;i<watchcompanion::ambientMoodCount();++i)
         assert(watchcompanion::ambientMood(i)==expected[i]);
+
+    // A center touch temporarily clears saved Focused/Wave, then restores both.
+    auto gaze=watchcompanion::presentation(true,false,0,0,0,3,6,false);
+    assert(gaze.expression==0&&gaze.animation==0&&!gaze.talking);
+    auto restored=watchcompanion::presentation(false,false,0,0,0,3,6,false);
+    assert(restored.expression==3&&restored.animation==6&&!restored.talking);
+    auto speaking=watchcompanion::presentation(false,true,3,0,0,8,6,false);
+    assert(speaking.expression==0&&speaking.animation==0&&speaking.talking);
+    auto interrupted=watchcompanion::presentation(true,true,3,0,0,8,6,false);
+    assert(!interrupted.talking);
 }

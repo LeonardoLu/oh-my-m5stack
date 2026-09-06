@@ -1229,16 +1229,19 @@ static void render(uint32_t now) {
         face.bot().setMood(mood, 700);
         _drawMood = mood;
     }
-    if(_manualPreset) {
-        bool restored=mood==_manualCombo.mood&&(int32_t)(now-_gazeUntil)>=0;
-        face.bot().setExpression(restored?_manualCombo.expression:botux::BotUx::Expression::Auto);
-        face.bot().setAnimation(restored?_manualCombo.animation:botux::BotUx::Animation::Auto);
-        face.bot().setTalking(restored&&mood==botux::BotUx::Mood::Speaking);
-    }
     auto selectedExpression = (botux::BotUx::Expression)settings.data().expression;
-    if (!_manualPreset) face.bot().setExpression((_dozing || _battery <= kLowBattery)
-        ? botux::BotUx::Expression::Auto : selectedExpression);
+    bool gazeActive=_screen==Screen::Face&&(int32_t)(_gazeUntil-now)>0;
+    auto presentation=watchcompanion::presentation(gazeActive,_manualPreset,(uint8_t)_manualCombo.mood,
+        (uint8_t)_manualCombo.expression,(uint8_t)_manualCombo.animation,
+        (uint8_t)selectedExpression,settings.data().animation,_dozing||_battery<=kLowBattery);
+    face.bot().setExpression((botux::BotUx::Expression)presentation.expression);
+    face.bot().setAnimation((botux::BotUx::Animation)presentation.animation);
+    face.bot().setTalking(presentation.talking);
     face.update(now);
+    // The HUD keeps the real percentage. Explicit previews temporarily suppress
+    // BotUx's <=10% sleepy override so every selected mood remains visible.
+    face.bot().setBattery(!_dozing&&_screen==Screen::Face&&(_manualPreset||gazeActive)?100:_battery);
+    face.bot().setBatteryVisible(false);
     face.bot().update(now);
 
     if (previewIsAnimated()) {

@@ -27,4 +27,19 @@ static const uint8_t kAmbientMoods[]={0,1,2,4,8,9,11};
 constexpr uint8_t ambientMoodCount() { return sizeof(kAmbientMoods)/sizeof(kAmbientMoods[0]); }
 inline uint8_t ambientMood(uint8_t index) { return kAmbientMoods[index%ambientMoodCount()]; }
 
+struct Presentation {
+    uint8_t expression;
+    uint8_t animation;
+    bool talking;
+};
+
+inline Presentation presentation(bool gazeActive,bool manual,uint8_t manualMood,
+                                 uint8_t manualExpression,uint8_t manualAnimation,
+                                 uint8_t savedExpression,uint8_t savedAnimation,
+                                 bool forceAutoExpression) {
+    if(gazeActive) return {0,0,false};
+    if(manual) return {manualExpression,manualAnimation,manualMood==3};
+    return {(uint8_t)(forceAutoExpression?0:savedExpression),savedAnimation,false};
+}
+
 }

@@ -26,7 +26,8 @@ BotUx input contract.
 - A chooses a non-repeating random result across every shared mood and B advances
   through every shared mood, including Working and appended moods such as Asleep.
   B double returns to automatic Idle and resumes the safe ambient rotation.
-  Explicit selection temporarily overrides the low-battery expression. Autonomous
+  Explicit selection temporarily overrides the BotUx low-battery expression while
+  the Watch HUD retains the real percentage. Autonomous
   idle rotation is limited to Idle, Listening, Thinking, Happy, Working, Waiting
   and Done.
 

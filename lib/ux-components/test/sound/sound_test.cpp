@@ -88,6 +88,39 @@ int main(int argc,char**argv) {
     PcmPlayer p;assert(p.play(clip));auto pcm=render(p,91);assert(pcm.size()==1600&&pcm.front()==0&&pcm.back()==0);
     clip.data=unsignedPcm.data();clip.encoding=PcmEncoding::Unsigned8;assert(p.play(clip));assert(pcm==render(p,512));wav(directory+"/pcm8-demo.wav",pcm);
     assert(p.play(clip,Priority::Alert));assert(!p.play(clip,Priority::Ambient));p.render(b,200);p.cancel();assert(render(p).size()==128);p.setEnabled(false);assert(!p.play(clip));
+    // Each selectable timbre is distinct and bounded even at maximum gain/velocity.
+    std::vector<std::vector<int16_t>> timbres;
+    for(Timbre timbre: {Timbre::Sine,Timbre::Bell,Timbre::SoftSquare,Timbre::Pluck,Timbre::Chime,Timbre::Noise}) {
+        Synth voice;voice.setVolume(255);Note note;note.timbre=timbre;note.velocity=255;
+        assert(voice.play(note));auto signal=render(voice,73);
+        assert(signal.front()==0&&signal.back()==0);
+        for(auto sample:signal)assert(std::abs(sample)<=15000);
+        for(const auto& previous:timbres)assert(previous!=signal);
+        timbres.push_back(signal);
+    }
+    // All user volume steps are monotonic; an idle zero setting is truly silent.
+    double previousSynth=-1,previousPcm=-1;
+    for(uint8_t volume: {0,64,120,180,220,255}) {
+        Synth level;level.setVolume(volume);assert(level.volume()==volume);
+        assert(level.play(Cue::Confirm));auto signal=render(level);
+        PcmPlayer pcmLevel;pcmLevel.setVolume(volume);assert(pcmLevel.volume()==volume);
+        assert(pcmLevel.play(clip));auto pcmSignal=render(pcmLevel);
+        double synthEnergy=0,pcmEnergy=0;
+        for(auto sample:signal){assert(std::abs(sample)<=15000);synthEnergy+=double(sample)*sample;}
+        for(auto sample:pcmSignal){assert(std::abs(sample)<=15000);pcmEnergy+=double(sample)*sample;}
+        if(!volume)assert(synthEnergy==0&&pcmEnergy==0);
+        assert(synthEnergy>previousSynth&&pcmEnergy>previousPcm);
+        previousSynth=synthEnergy;previousPcm=pcmEnergy;
+        level.setEnabled(false);pcmLevel.setEnabled(false);
+        assert(level.volume()==volume&&pcmLevel.volume()==volume);
+        assert(!level.enabled()&&!pcmLevel.enabled());
+    }
+    // Active gain changes retain a smooth envelope instead of a discontinuous step.
+    Synth gain;gain.setVolume(255);Note low;low.midi=45;low.durationMs=500;low.timbre=Timbre::Sine;
+    assert(gain.play(low));gain.render(b,512);int16_t last=b[511];gain.setVolume(0);
+    assert(gain.render(b,512)==512);assert(std::abs(b[0]-last)<600);
+    for(size_t i=1;i<512;++i)assert(std::abs(b[i]-b[i-1])<600);
+    assert(std::abs(b[511])<5);
     Speaker speaker;Synth streamed;M5Output<Speaker> output;assert(output.begin(speaker,streamed));assert(!output.begin(speaker,streamed));assert(streamed.play(Cue::Success));assert(!output.setSource(p));
     for(unsigned i=0; i<100 && output.busy();++i){pump(output);assert(speaker.queue.size()<=2);speaker.consume();}
     assert(!output.busy()&&output.failures()==0&&speaker.submissions>=3);

@@ -16,7 +16,9 @@ class PcmPlayer : public Source {
 public:
     bool play(PcmClip clip, Priority priority = Priority::Notification);
     void setEnabled(bool enabled);
-    void setVolume(uint8_t volume) { _volume = volume; }
+    void setVolume(uint8_t volume) { _volume = volume; if (!active()) _gain = volume / 255.0f; }
+    uint8_t volume() const { return _volume; }
+    bool enabled() const { return _enabled; }
     void cancel() override;
     bool active() const override { return _clip.data != nullptr; }
     size_t render(int16_t* output, size_t capacity) override;

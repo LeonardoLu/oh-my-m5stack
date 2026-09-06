@@ -43,7 +43,7 @@ public:
     bool play(const Note& note, Priority priority = Priority::Interaction) { return play(&note, 1, priority); }
     void setEnabled(bool enabled);
     bool enabled() const { return _enabled; }
-    void setVolume(uint8_t volume) { _volume = volume; }
+    void setVolume(uint8_t volume) { _volume = volume; if (!active()) _gain = volume / 255.0f; }
     uint8_t volume() const { return _volume; }
     void cancel() override;
     bool active() const override { return _count != 0; }

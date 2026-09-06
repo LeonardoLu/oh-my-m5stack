@@ -74,8 +74,12 @@ queued. Already queued material drains naturally: **maximum queued cancellation
 or preemption application-queue latency is 256 ms plus release**, under normal device operation; the hardware DMA path can add its own latency.
 Muting rejects all new cues immediately. This deliberately avoids an abrupt
 speaker `stop()` that would cut a waveform and produce a click. Enabling again
-does not replay discarded pending cues. `setVolume` changes are smoothed over
-roughly 4 ms in newly synthesized samples; queued samples retain their old gain.
+does not replay discarded pending cues. `setVolume(uint8_t)` uses 0..255 (default 180), independently of the mute switch.
+An idle source adopts the gain immediately, so starting at zero produces silence.
+Active changes use a 4 ms exponential smoothing time constant in newly synthesized
+samples; queued samples retain their old gain. Muting preserves the selected
+volume. Core2 exposes the same range through `AudioFeedback::setVolume`; its six
+UI steps map to 0, 64, 120, 180, 220, and 255. The default is step 3.
 
 ## Sound vocabulary and synthesis
 

@@ -83,8 +83,15 @@ public:
         Sparkle,
     };
 
+    enum class GazeDirection : uint8_t { Auto = 0, Center, Left, Right, Up, Down };
     enum class Language : uint8_t { English = 0, Chinese };
     static constexpr size_t kNameMax = 16;
+    static constexpr uint8_t gazeDirectionCount() { return 6; }
+    static const char* gazeDirectionName(GazeDirection value, Language language = Language::English);
+    // Persistent direction with subtle drift. Auto follows mood/expression gaze.
+    // Temporary gazeAt takes precedence, then returns here. No UI/persistence ownership.
+    void setGazeDirection(GazeDirection direction);
+    GazeDirection gazeDirection() const { return _gazeDirection; }
     static constexpr uint8_t moodCount() { return 12; }
     static constexpr uint8_t expressionCount() { return 10; }
     static constexpr uint8_t animationCount() { return 8; }
@@ -238,6 +245,7 @@ private:
     char _name[kNameMax + 1] = "Milo";
     uint8_t _presetIndex = 0;
     uint32_t _presetSeed = 0xA341316Cu;
+    GazeDirection _gazeDirection = GazeDirection::Auto;
     bool _gazeHeld = false;
     uint32_t _gazeUntil = 0;
     float _gazeX = 0.0f, _gazeY = 0.0f;

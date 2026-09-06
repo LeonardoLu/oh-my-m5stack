@@ -301,6 +301,15 @@ void BotUx::resetToIdle() {
     _presetIndex = 0; _pokeUntil = _reactionUntil = 0;
     clearGaze(); setMood(Mood::Idle); setExpression(Expression::Auto); setAnimation(Animation::Auto);
 }
+const char* BotUx::gazeDirectionName(GazeDirection value, Language language) {
+    static const char* const en[] = {"Auto", "Center", "Left", "Right", "Up", "Down"};
+    static const char* const zh[] = {"自动", "居中", "向左", "向右", "向上", "向下"};
+    return (language == Language::Chinese ? zh : en)[(uint8_t)value < gazeDirectionCount() ? (uint8_t)value : 0];
+}
+void BotUx::setGazeDirection(GazeDirection direction) {
+    _gazeDirection = (uint8_t)direction < gazeDirectionCount() ? direction : GazeDirection::Auto;
+}
+
 void BotUx::gazeAt(float x, float y, uint16_t holdMs) {
     if (_mood != Mood::Idle) return;
     _gazeX = clampf(x, -1.0f, 1.0f); _gazeY = clampf(y, -1.0f, 1.0f);
@@ -465,7 +474,8 @@ void BotUx::_resolveMood(uint32_t now) {
         case Expression::Dizzy:
             targetOpen = 0.92f; targetAsym = 0.0f;
             targetPairX = 0.18f; targetPairY = -0.25f;
-            targetTwist = sinf(2.0f * kPi * (now - _animStart) / 3600.0f) * 0.08f;
+            targetTwist = sinf(2.0f * kPi * (now - _animStart) * _animationSpeed / 3600.0f)
+                * 0.08f * (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
             gazeX = 0.0f; gazeY = 0.0f;
             break;
         case Expression::Alarmed:
@@ -496,6 +506,20 @@ void BotUx::_resolveMood(uint32_t now) {
     _eyeAngle += (targetAngle - _eyeAngle) * a;
     _bodyLean += (targetLean - _bodyLean) * a;
     _eyeTwist += (targetTwist - _eyeTwist) * a;
+    float gazeMotion = (_reducedMotion ? 0.20f : 1.0f) * fminf(_motionAmount, 1.0f);
+    if (_gazeDirection != GazeDirection::Auto) {
+        gazeX = _gazeDirection == GazeDirection::Left ? -0.85f : _gazeDirection == GazeDirection::Right ? 0.85f : 0.0f;
+        gazeY = _gazeDirection == GazeDirection::Up ? -0.85f : _gazeDirection == GazeDirection::Down ? 0.85f : 0.0f;
+        gazeX += _wanderX * 0.10f * gazeMotion;
+        gazeY += _wanderY * 0.10f * gazeMotion;
+    } else if (_effExpression == Expression::Neutral &&
+               (_effMood == Mood::Idle || _expression == Expression::Neutral)) {
+        gazeX *= gazeMotion; gazeY *= gazeMotion;
+    } else {
+        // A stable facial expression still glances around without losing its pose.
+        gazeX = clampf(gazeX + _wanderX * 0.20f * gazeMotion, -1, 1);
+        gazeY = clampf(gazeY + _wanderY * 0.16f * gazeMotion, -1, 1);
+    }
     if (_gazeHeld && ((int32_t)(now - _gazeUntil) >= 0 || _mood != Mood::Idle)) clearGaze();
     if (_gazeHeld && _effMood == Mood::Idle) { gazeX = _gazeX; gazeY = _gazeY; }
     _pupilDX += (gazeX - _pupilDX) * a;
@@ -527,29 +551,30 @@ void BotUx::_resolveMood(uint32_t now) {
                  : (_effMood == Mood::Waiting) ? 4600.0f : 3800.0f;
     _breath = sinf(2.0f * kPi * animElapsed / period);
     int16_t r = _m.bodyR ? _m.bodyR : (int16_t)(min16(_w, _h) * 0.39f);
+    float lifeAmount = (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
     float dx = 0.0f;
-    float dy = lift * r + _breath * r * 0.018f;
-    float sx = 1.0f + _breath * 0.018f;
-    float sy = 1.0f - _breath * 0.012f + stretch;
+    float dy = lift * r + _breath * r * 0.030f * lifeAmount;
+    float sx = 1.0f + _breath * 0.022f * lifeAmount;
+    float sy = 1.0f - _breath * 0.016f * lifeAmount + stretch;
     switch (_effMood) {
         case Mood::Thinking:
-            dx += sinf(2.0f * kPi * animElapsed / 2300.0f) * r * 0.055f;
+            dx += sinf(2.0f * kPi * animElapsed / 2300.0f) * r * 0.055f * lifeAmount;
             break;
         case Mood::Speaking:
-            dy -= _talkAmp * r * 0.045f;
-            sx += _talkAmp * 0.035f;
-            sy += _talkAmp * 0.055f;
+            dy -= _talkAmp * r * 0.045f * lifeAmount;
+            sx += _talkAmp * 0.035f * lifeAmount;
+            sy += _talkAmp * 0.055f * lifeAmount;
             break;
         case Mood::Working:
-            dx += sinf(2.0f * kPi * animElapsed / 900.0f) * r * 0.025f;
-            sy += _pulse((uint32_t)animElapsed, 520.0f) * 0.035f;
+            dx += sinf(2.0f * kPi * animElapsed / 900.0f) * r * 0.025f * lifeAmount;
+            sy += _pulse((uint32_t)animElapsed, 520.0f) * 0.035f * lifeAmount;
             break;
         case Mood::Happy:
         case Mood::Done:
-            dy -= _pulse((uint32_t)animElapsed, 780.0f) * r * 0.025f;
+            dy -= _pulse((uint32_t)animElapsed, 780.0f) * r * 0.025f * lifeAmount;
             break;
         case Mood::Surprised:
-            sy += _pulse((uint32_t)animElapsed, 260.0f) * 0.025f;
+            sy += _pulse((uint32_t)animElapsed, 260.0f) * 0.025f * lifeAmount;
             sx -= 0.025f;
             break;
         default:
@@ -573,10 +598,15 @@ void BotUx::_resolveMood(uint32_t now) {
     }
     _activeAnimation = active;
 
-    float amount = (_reducedMotion ? 0.10f : 0.45f) * _motionAmount;
+    float amount = (_reducedMotion ? 0.12f : 0.80f) * _motionAmount;
     float phase = 2.0f * kPi * animElapsed;
     float animEyeTwist = 0.0f;
     switch (active) {
+        case Animation::Calm:
+            dx += sinf(phase / 4200.0f) * r * 0.045f * amount;
+            dy += cosf(phase / 5400.0f) * r * 0.025f * amount;
+            animEyeTwist = sinf(phase / 4600.0f) * 0.055f * amount;
+            break;
         case Animation::Curious:
             dx += sinf(phase / 1900.0f) * r * 0.050f * amount;
             dy += cosf(phase / 2500.0f) * r * 0.025f * amount;
@@ -661,25 +691,26 @@ void BotUx::_drawBody() {
 
     // Thinking and Blocked replace the avatar silhouette in the official motion language.
     if (_effMood == Mood::Thinking) {
-        int16_t dotR = (int16_t)(r * 0.19f);
-        if (dotR < 2) dotR = 2;
+        float dotR = fmaxf(2.0f, r * 0.19f);
+        float lifeAmount = (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
         for (int i = -1; i <= 1; ++i) {
             float phase = i * 1.35f;
             float elapsed = (_now - _animStart) * _animationSpeed;
-            int16_t y = cy + (int16_t)(sinf(2.0f * kPi * elapsed / 920.0f + phase) * r * 0.13f);
+            float y = _m.cy + _bodyDY + sinf(2.0f * kPi * elapsed / 920.0f + phase) * r * 0.13f * lifeAmount;
             uint8_t mix = (uint8_t)(35 + (i + 1) * 25);
-            _cv->fillCircle(cx + i * (int16_t)(r * 0.48f), y, dotR,
-                            mix565(_style.bodyColor, _style.bgColor, mix));
+            _fillEllipseAA(_m.cx + _bodyDX + i * r * 0.48f, y, dotR, dotR,
+                           mix565(_style.bodyColor, _style.bgColor, mix));
         }
         return;
     }
     if (_effMood == Mood::Blocked) {
-        int16_t stemW = (int16_t)(r * 0.28f);
-        int16_t stemH = (int16_t)(r * 0.98f);
-        if (stemW < 3) stemW = 3;
-        _cv->fillRoundRect(cx - stemW / 2, cy - (int16_t)(r * 0.63f), stemW, stemH,
-                           stemW / 2, _style.bodyColor);
-        _cv->fillCircle(cx, cy + (int16_t)(r * 0.58f), stemW / 2, _style.bodyColor);
+        float stemW = fmaxf(3.0f, r * 0.28f * _bodySX);
+        float stemH = r * 0.98f * _bodySY;
+        float x = _m.cx + _bodyDX, y = _m.cy + _bodyDY;
+        _fillCapsule(x, y - r * 0.63f + stemH * 0.5f, 0,
+                     (stemH - stemW) * 0.5f, stemW * 0.5f, _style.bodyColor);
+        _fillEllipseAA(x, y + r * 0.58f * _bodySY, stemW * 0.5f, stemW * 0.5f,
+                       _style.bodyColor);
         return;
     }
     if (_style.bodyStyle == BodyStyle::None) return;

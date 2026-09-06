@@ -368,14 +368,23 @@ static void checkBodylessStateGlyphs() {
     bot.setMood(botux::BotUx::Mood::Thinking);
     bot.update(3000);
     bot.draw();
-    assert(canvas.svgBody().find("<circle") != std::string::npos);
+    std::set<uint16_t> coverageColors;
+    int lit = 0;
+    for (int y = 0; y < 72; ++y) for (int x = 0; x < 72; ++x) {
+        uint16_t c = canvas.readPixel(x,y);
+        if (c != style.bgColor) { ++lit; coverageColors.insert(c); }
+    }
+    assert(lit > 150 && lit < 500);
+    assert(coverageColors.size() > 12); // three opaque dot colors plus native AA fringes
+    assert(canvas.svgBody().find("<circle") == std::string::npos);
 
     canvas.clear();
     bot.setMood(botux::BotUx::Mood::Blocked);
     bot.update(3200);
     bot.draw();
     const std::string blocked = canvas.svgBody();
-    assert(blocked.find("<circle") != std::string::npos);
+    assert(blocked.find("<circle") == std::string::npos);
+    assert(canvas.readPixel(36, 36) != style.bgColor);
     assert(blocked.find("rx='") != std::string::npos);
 }
 
@@ -607,6 +616,104 @@ static void checkConnectedEyeMorphs() {
     }
 }
 
+static uint32_t rasterHash(M5Canvas& canvas) {
+    uint32_t hash = 2166136261u;
+    for (int y = 0; y < canvas.height(); ++y) for (int x = 0; x < canvas.width(); ++x)
+        hash = (hash ^ canvas.readPixel(x, y)) * 16777619u;
+    return hash;
+}
+
+static void checkPersistentAnimationWindows() {
+    using Bot = botux::BotUx;
+    M5Canvas canvas(72, 72); canvas.setRecording(false);
+    for (uint8_t mood = 0; mood < Bot::moodCount(); ++mood)
+        for (uint8_t expr = 0; expr < Bot::expressionCount(); ++expr)
+            for (uint8_t anim = 0; anim < Bot::animationCount(); ++anim) {
+                gNow = 1000; Bot bot; bot.begin(&canvas);
+                auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 60000; bot.setStyle(style); bot.seedBlink(1234);
+                bot.setMood((Bot::Mood)mood, 0); bot.setExpression((Bot::Expression)expr, 0);
+                bot.setAnimation((Bot::Animation)anim); bot.setTalking(mood == (uint8_t)Bot::Mood::Speaking);
+                // Re-sample late windows too: changes must not depend on entry morph/blink.
+                for (uint32_t window : {10000u, 30000u, 50000u}) {
+                    std::set<uint32_t> frames;
+                    for (int frame = 0; frame < 12; ++frame) {
+                        gNow = window + frame * 250; bot.update(gNow); canvas.clear(); bot.draw();
+                        assert(!canvas.outOfBounds()); frames.insert(rasterHash(canvas));
+                    }
+                    if (frames.size() < 4) std::cerr << "frozen " << (int)mood << "/" << (int)expr << "/" << (int)anim << " at " << window << " unique " << frames.size() << "\n";
+                    assert(frames.size() >= 4);
+                }
+            }
+    for (uint8_t preset = 0; preset < Bot::presetCount(); ++preset) {
+        gNow = 1000; Bot bot; bot.begin(&canvas); bot.applyPreset(preset); bot.setMotionAmount(0.55f);
+        for (uint32_t window : {10000u, 40000u, 80000u}) {
+            std::set<uint32_t> frames;
+            for (int frame = 0; frame < 16; ++frame) {
+                gNow = window + frame * 250; bot.update(gNow); canvas.clear(); bot.draw();
+                frames.insert(rasterHash(canvas));
+            }
+            assert(frames.size() >= 8);
+        }
+    }
+}
+
+static void checkGazeDirectionsAndMotionZero() {
+    using Bot = botux::BotUx;
+    M5Canvas canvas(200, 200); canvas.setRecording(false);
+    gNow = 1000; Bot bot; bot.begin(&canvas);
+    auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style);
+    bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
+    bot.setGazeDirection(Bot::GazeDirection::Left); bot.update(gNow); canvas.clear(); bot.draw();
+    float left = eyeCentroidX(canvas);
+    bot.setGazeDirection(Bot::GazeDirection::Right); bot.setExpression(Bot::Expression::Neutral, 0);
+    gNow += 1000; bot.update(gNow); canvas.clear(); bot.draw();
+    assert(eyeCentroidX(canvas) > left + 25);
+    bot.gazeAt(-1, 0); gNow += 200; bot.update(gNow); canvas.clear(); bot.draw();
+    assert(eyeCentroidX(canvas) < left + 5);
+    gNow += 2000; bot.update(gNow); canvas.clear(); bot.draw();
+    assert(eyeCentroidX(canvas) > left + 25);
+    assert(bot.gazeDirection() == Bot::GazeDirection::Right);
+    for (uint8_t mood = 0; mood < Bot::moodCount(); ++mood) {
+        bot.setMood((Bot::Mood)mood, 0); bot.setExpression(Bot::Expression::Dizzy, 0);
+        bot.setAnimation(Bot::Animation::Orbit); bot.setGazeDirection(Bot::GazeDirection::Auto);
+        for (int i = 0; i < 10; ++i) { gNow += 1000; bot.update(gNow); }
+        canvas.clear(); bot.draw(); uint32_t first = rasterHash(canvas);
+        for (int i = 0; i < 5; ++i) {
+            gNow += 300; bot.update(gNow); canvas.clear(); bot.draw();
+            assert(rasterHash(canvas) == first);
+        }
+    }
+}
+
+static void checkReducedMotionAmplitude() {
+    using Bot = botux::BotUx;
+    unsigned changes[2] = {};
+    for (int reduced = 0; reduced < 2; ++reduced) {
+        gNow = 1000; M5Canvas canvas(120, 120); canvas.setRecording(false);
+        Bot bot; bot.begin(&canvas); bot.setReducedMotion(reduced);
+        bot.setGazeDirection(Bot::GazeDirection::Center);
+        bot.setExpression(Bot::Expression::Neutral, 0); bot.setAnimation(Bot::Animation::Calm);
+        auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style);
+        std::vector<uint16_t> previous(120 * 120);
+        for (int frame = 0; frame < 40; ++frame) {
+            gNow = 10000 + frame * 100; bot.update(gNow); canvas.clear(); bot.draw();
+            for (int y = 0; y < 120; ++y) for (int x = 0; x < 120; ++x) {
+                uint16_t pixel = canvas.readPixel(x, y);
+                if (frame) {
+                    uint16_t prior = previous[y * 120 + x];
+                    changes[reduced] += 2 * std::abs((int)(pixel >> 11) - (int)(prior >> 11))
+                        + std::abs((int)((pixel >> 5) & 63) - (int)((prior >> 5) & 63))
+                        + 2 * std::abs((int)(pixel & 31) - (int)(prior & 31));
+                }
+                previous[y * 120 + x] = pixel;
+            }
+        }
+    }
+    assert(changes[0] > changes[1] * 2);
+    assert(changes[1] > 0);
+    std::cout << "Calm RGB565 temporal difference full/reduced: " << changes[0] << "/" << changes[1] << "\n";
+}
+
 static void benchmarkEyes() {
     using Bot = botux::BotUx;
     for (int size : {40, 72, 200}) for (auto expr : {Bot::Expression::Neutral, Bot::Expression::Joy}) {
@@ -620,11 +727,29 @@ static void benchmarkEyes() {
     }
 }
 
+static bool writeGazeSheet(const char* path) {
+    using Bot = botux::BotUx;
+    std::ofstream out(path); if (!out) return false;
+    out << "<svg xmlns='http://www.w3.org/2000/svg' width='720' height='140'>";
+    for (uint8_t direction = 0; direction < Bot::gazeDirectionCount(); ++direction) {
+        gNow = 1000; M5Canvas canvas(120, 120); Bot bot; bot.begin(&canvas);
+        bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
+        bot.setGazeDirection((Bot::GazeDirection)direction); bot.update(gNow); bot.draw();
+        out << "<g transform='translate(" << direction * 120 << " 0)'>" << canvas.svgBody()
+            << "<text x='60' y='132' text-anchor='middle' font-family='sans-serif' font-size='12'>"
+            << Bot::gazeDirectionName((Bot::GazeDirection)direction) << "</text></g>";
+    }
+    out << "</svg>"; return true;
+}
+
 int main(int argc, char** argv) {
     assert(botux::BotUx().style().eyeColor == botux::rgb565(32, 36, 41));
     checkCompanionSemantics();
     checkTemporaryGaze();
     checkConnectedEyeMorphs();
+    checkPersistentAnimationWindows();
+    checkGazeDirectionsAndMotionZero();
+    checkReducedMotionAmplitude();
     benchmarkEyes();
     checkCoverageAndFacePlacement();
     checkExplicitNeutralOverridesRestingMood();
@@ -641,7 +766,8 @@ int main(int argc, char** argv) {
     std::string expressions = std::string(outDir) + "/expressions.svg";
     std::string animations = std::string(outDir) + "/animations.svg";
     std::string player = std::string(outDir) + "/animation-player.html";
-    if (!writeSheet(tiny.c_str(), 40) || !writeSheet(small.c_str(), 72) ||
+    if (!writeGazeSheet((std::string(outDir) + "/gaze-directions.svg").c_str()) ||
+        !writeSheet(tiny.c_str(), 40) || !writeSheet(small.c_str(), 72) ||
         !writeSheet(large.c_str(), 200) ||
         !writePickerSheet(expressions.c_str(), kExpressions, renderExpression) ||
         !writePickerSheet((std::string(outDir) + "/expressions-40.svg").c_str(), kExpressions, renderExpression, 40) ||

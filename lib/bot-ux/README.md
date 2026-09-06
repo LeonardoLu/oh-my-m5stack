@@ -227,3 +227,56 @@ disabled: full Neutral/Joy draw at 40px **3.12/3.42 µs**, 72px **8.25/8.91 µs*
 200px **48.33/50.68 µs**. These isolate CPU/raster cost from SVG serialization and
 are not ESP32 timings. The parent integration owns native frame/memory timing,
 firmware builds, flashing and actual device captures.
+
+## Direction and sustained motion (September 2026)
+
+`GazeDirection { Auto=0, Center, Left, Right, Up, Down }` is additive; every older
+mood/expression/animation enum retains its value. `setGazeDirection()` stores the
+selection and `gazeDirection()` reads it. `gazeDirectionCount()` and
+`gazeDirectionName(value, language)` expose all six choices, including Chinese
+`自动 / 居中 / 向左 / 向右 / 向上 / 向下`. Device apps own persistence. Invalid
+values fall back to Auto. Direction is retained by presets and resetToIdle.
+
+Auto follows the mood/expression's gaze and adds a little wandering even to
+stable explicit faces. A chosen direction replaces that gaze with a clear
+left/right/up/down target and subtle drift around it. Center stays centered.
+Temporary `gazeAt()` takes precedence in Idle and returns to the selected
+direction when it expires. All autonomous gaze drift scales with motion amount
+and reduced motion; explicit user direction/tap commands still work at zero.
+The host preview additionally writes `gaze-directions.svg` from actual BotUx code.
+
+Calm now has continuous slow sway and a small eye rotation in addition to
+breathing. Choreography is more visible for stable expressions and at the
+Watch's 0.55 motion setting; every curated preset keeps moving in late time
+windows. Breathing, mood-specific pulses, Dizzy rotation and Thinking dot travel
+now all respect motion amount and reduced motion. At zero, the pose remains
+stable after easing settles (normal blinking is independent). Reduced motion
+keeps a small amount of slower-looking travel instead of repeating full-size
+motion. It does not change animation speed or erase an expression.
+
+Thinking's three dots now use float centers and the same real RGB565 AA ellipse
+coverage as the orb. Blocked's stem/dot also use float capsule/ellipse coverage
+and follow body scale: the new time-window checks exposed its integer-only
+position jumps, so breathing now remains visible even for this silhouette.
+No extra framebuffer or frame allocation was introduced.
+
+Added validation beyond the existing tests:
+
+- All 960 mood/expression/animation combinations produce at least four distinct
+  raster frames in each 3-second window starting at 10, 30 and 50 seconds. Blink
+  is delayed beyond those windows, so entry morphs/blinks cannot make a frozen
+  choreography pass. All sampled frames stay inside the canvas.
+- All eight presets at the Watch's 0.55 motion amount produce at least eight
+  distinct raster frames in windows starting at 10, 40 and 80 seconds.
+- Left/right produce clearly separated eye positions; a temporary tap overrides
+  direction and returns to it. Zero-motion stable frames are identical across
+  all 12 moods with Dizzy/Orbit, after settling and with blinking delayed.
+- Thinking coverage has more than 12 actual RGB565 colors across its three dots,
+  rather than checking for an SVG circle instruction.
+- On a four-second Calm sequence, aggregate RGB565 temporal difference is
+  394,939 full motion versus 107,745 reduced (27.3%). This measures pixel-channel
+  movement rather than merely counting different frame hashes.
+
+`tools/host-preview/render.sh` passes with C++11 `-Wall -Wextra -Werror`.
+Device integration owns native frame timing, screenshots and battery/persistence
+acceptance; these host tests do not claim physical-device acceptance.

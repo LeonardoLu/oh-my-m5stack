@@ -39,7 +39,7 @@ void loop() {
 
 - **Moods** — the original `Idle`, `Listening`, `Thinking`, `Speaking`, `Happy`,
   `Sad`, `Sleepy`, and `Surprised`, plus additive task states `Working`, `Waiting`,
-  `Blocked`, and `Done` via `setMood()`.
+  `Blocked`, `Done`, and append-only `Asleep` via `setMood()`.
 - **Personalization** — `Style` holds the background, orb, eye, and status colors;
   eye mark style; silhouette style; eye scale; and blink rate. `Round` + `Oval`
   is the closest match to the default Grok visual language.
@@ -67,8 +67,9 @@ simple geometric avatars, expressive eyes, and avatar motion that carries state.
 `Thinking` becomes three animated dots and `Blocked` becomes an exclamation;
 ordinary character moods keep the recognizable orb-and-eye-pair anatomy.
 The shared default uses a warm-white orb, dark graphite eye marks, and blue only
-for status accents. `Waiting` uses short resting marks, while `Sleepy` keeps the familiar face
-placement, settles the body, and uses a longer blink. The Neutral pose defines
+for status accents. `Waiting` has open patient eyes and a slow searching glance;
+`Sleepy` settles into narrow eyes and a longer blink. `Asleep` closes the eyes
+fully, breathes deeply, and drifts three fading z marks above the orb. The Neutral pose defines
 the common eye spacing and upper-right placement for every expression.
 
 The expanded control model was also informed by two public implementations:
@@ -139,7 +140,7 @@ transition frames. Pixel rectangles are displayed without browser interpolation.
 The same continuous pill geometry also runs at 40 px, including Joy and Wink in
 Core2's toolbar/settings preview. An explicitly selected `Neutral` resets the
 face to its baseline proportions while retaining the mood's body rhythm;
-`Auto` continues to use Sleepy/Waiting resting eyes. The preview verifies this
+`Auto` retains Sleepy's narrow eyes and Waiting's patient searching face. The preview verifies this
 reopening behavior at 40, 72, and 200 px and emits `expressions-40.svg`.
 
 A parent-run isolated StopWatch benchmark (310 px orb, existing host app) measured
@@ -167,9 +168,9 @@ always terminates a nonempty buffer, and avoids cutting UTF-8 characters. Hosts
 must provide an appropriate font; BotUx does not add font assets or render this
 text automatically. Names remain English in either language.
 
-`moodCount()` = 12, `expressionCount()` = 10 (including Auto), and
+`moodCount()` = 13, `expressionCount()` = 10 (including Auto), and
 `animationCount()` = 8 (including Auto). All existing enum numeric values remain
-unchanged. Hosts can independently iterate all **960 combinations** in a preview
+unchanged. Hosts can independently iterate all **1,040 combinations** in a preview
 Bot. `mood()`, `expression()`, `animation()` report selections;
 `effectiveMood()` / `effectiveExpression()` report mood reactions and Auto's
 resolved face. Thinking and Blocked retain their intentional silhouette
@@ -216,7 +217,7 @@ not native device captures. Regenerate current source sheets with
 comparison. The default rounded body and eye primitives are backed by real
 RGB565 raster pixels; other shapes remain SVG approximations.
 
-Validation on 2026-09-06: existing host checks pass; added checks exercise all 960
+Validation on 2026-09-06: existing host checks pass; added checks exercise all 1,040
 selector combinations, safe names, tiny UTF-8 buffers, preset transitions,
 temporary tap gaze and expiry. A connected-component pixel check verifies two
 continuous eye marks through 40 morph frames for all four eye styles at 40, 72,
@@ -270,7 +271,7 @@ No extra framebuffer or frame allocation was introduced.
 
 Added validation beyond the existing tests:
 
-- All 960 mood/expression/animation combinations produce at least four distinct
+- All 1,040 mood/expression/animation combinations produce at least four distinct
   raster frames in each 3-second window starting at 10, 30 and 50 seconds. Blink
   is delayed beyond those windows, so entry morphs/blinks cannot make a frozen
   choreography pass. All sampled frames stay inside the canvas.
@@ -278,7 +279,7 @@ Added validation beyond the existing tests:
   distinct raster frames in windows starting at 10, 40 and 80 seconds.
 - Left/right produce clearly separated eye positions; a temporary tap overrides
   direction and returns to it. Zero-motion stable frames are identical across
-  all 12 moods with Dizzy/Orbit, after settling and with blinking delayed.
+  all 13 moods with Dizzy/Orbit, after settling and with blinking delayed.
 - Thinking coverage has more than 12 actual RGB565 colors across its three dots,
   rather than checking for an SVG circle instruction.
 - On a four-second Calm sequence, aggregate RGB565 temporal difference is
@@ -335,4 +336,35 @@ high motion amounts capped for this travel at 1.5 and reduced motion unchanged
 at a 20% multiplier. Actual center-dot peak travel at 200px is **47px full,
 9.5px reduced, 0px at motion zero**, measured over a late 2.4s window. Consecutive
 16ms centers move no more than 3.5px. Native ellipse AA and all existing geometry,
-960-combination sustained-motion, and preset-loop tests still pass.
+1,040-combination sustained-motion, and preset-loop tests still pass.
+
+
+## Patient and sleeping faces, native catalog (2026-09-06)
+
+Every face now derives its default pair position from Idle (0.26r right,
+0.38r above center). Expression-specific openness, lean and slant still apply.
+Explicit directions retain body-relative centering and mirrored perspective;
+downward travel is capped at 0.16r, versus 0.24r upward. Thinking's staggered
+vertical dot amplitude rises from 0.28r to 0.42r. Its center-dot measured travel
+at 200px is 68.5px normally, 13.5px with reduced motion, and 0px at zero amount.
+
+Waiting is alert and patient: partly open eyes, a gentle questioning lean and
+a 5.2-second sideways search; tiny previews use the same eased capsule path.
+Asleep appends enum value 12 without moving existing values. It combines closed
+eyes, an 8.8-second breath and three vector z marks. Marks stay outside the orb
+and fade fully at their 4.8-second cycle endpoints, avoiding visible wraps.
+Reduced motion calms travel; zero amount freezes the marks. Explicit Neutral
+still reopens the eyes while Asleep retains its sleep indicator.
+
+[The illustrated catalog](../../wiki/bot-ux/intro.html) contains all 13 moods,
+10 expressions and 8 animations, including Auto, with bilingual search,
+category filters, pause controls and offline embedded assets. Its 31 GIFs are
+72 native renderer frames each, sampled at 10fps and displayed at their native
+120px size. [The Markdown guide](../../wiki/bot-ux/intro.md) documents reproduction.
+Host circle calls now update the preview RGB565 buffer so sparkle captures are
+visible; those circles remain a simple host approximation of M5GFX rasterization.
+
+Focused native checks pass with all 1,040 combinations and nine directions.
+Across two Asleep cycles the maximum phase-wrap/ordinary adjacent frame
+RGB565 differences were 1,674/4,163 normally and 380/822 reduced; zero amount
+remained identical. This is host rendering evidence, not hardware acceptance.

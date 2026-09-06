@@ -36,9 +36,10 @@ public:
         Sleepy,     // half/closed eyes, slow breath
         Surprised,  // wide eye marks + quick vertical stretch (transient)
         Working,    // active pulse; eyes move toward the centre
-        Waiting,    // compact, horizontal waiting marks
+        Waiting,    // alert, patient eyes with a slow searching glance
         Blocked,    // exclamation-mark silhouette
         Done,       // settled orb with a low-left glance
+        Asleep,     // closed eyes, deep breathing and drifting zzz (append-only)
     };
 
     enum class EyeStyle : uint8_t {
@@ -96,7 +97,7 @@ public:
     // Temporary gazeAt takes precedence, then returns here. No UI/persistence ownership.
     void setGazeDirection(GazeDirection direction);
     GazeDirection gazeDirection() const { return _gazeDirection; }
-    static constexpr uint8_t moodCount() { return 12; }
+    static constexpr uint8_t moodCount() { return 13; }
     static constexpr uint8_t expressionCount() { return 10; }
     static constexpr uint8_t animationCount() { return 8; }
     static const char* moodName(Mood value, Language language = Language::English);

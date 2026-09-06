@@ -26,6 +26,8 @@ public:
     void fillSprite(uint32_t c) { rect(0, 0, _w, _h, 0, c, true); }
     void fillCircle(int32_t x, int32_t y, int32_t r, uint32_t c) {
         if (x - r < 0 || y - r < 0 || x + r >= _w || y + r >= _h) _outOfBounds = true;
+        for (int yy = y-r; yy <= y+r; ++yy) for (int xx = x-r; xx <= x+r; ++xx)
+            if ((xx-x)*(xx-x)+(yy-y)*(yy-y) <= r*r && !pointOutside(xx,yy)) _pixels[yy*_w+xx] = c;
         _out << "<circle cx='" << x << "' cy='" << y << "' r='" << r
              << "' fill='" << color(c) << "'/>\n";
     }

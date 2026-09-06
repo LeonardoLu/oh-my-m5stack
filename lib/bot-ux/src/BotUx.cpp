@@ -206,8 +206,8 @@ void BotUx::_updateBlink(uint32_t now) {
 }
 
 const char* BotUx::moodName(Mood value, Language language) {
-    static const char* const en[] = {"Idle", "Listening", "Thinking", "Speaking", "Happy", "Sad", "Sleepy", "Surprised", "Working", "Waiting", "Blocked", "Done"};
-    static const char* const zh[] = {"空闲", "聆听", "思考", "说话", "开心", "难过", "困倦", "惊讶", "工作", "等待", "受阻", "完成"};
+    static const char* const en[] = {"Idle", "Listening", "Thinking", "Speaking", "Happy", "Sad", "Sleepy", "Surprised", "Working", "Waiting", "Blocked", "Done", "Asleep"};
+    static const char* const zh[] = {"空闲", "聆听", "思考", "说话", "开心", "难过", "困倦", "惊讶", "工作", "等待", "受阻", "完成", "熟睡"};
     return (language == Language::Chinese ? zh : en)[(uint8_t)value < moodCount() ? (uint8_t)value : 0];
 }
 const char* BotUx::expressionName(Expression value, Language language) {
@@ -237,11 +237,11 @@ size_t BotUx::describe(char* out, size_t capacity, Language language) const {
     static const char* const moodEn[] = {
         "is resting", "is listening", "is thinking", "is speaking", "is happy",
         "feels sad", "feels sleepy", "feels surprised", "is working", "is waiting",
-        "has hit a blocker", "has finished"
+        "has hit a blocker", "has finished", "is asleep"
     };
     static const char* const moodZh[] = {
         "正在休息", "正在聆听", "正在思考", "正在说话", "很高兴", "有些难过",
-        "有些困倦", "感到惊讶", "正在工作", "正在等待", "遇到阻碍", "已经完成"
+        "有些困倦", "感到惊讶", "正在工作", "正在等待", "遇到阻碍", "已经完成", "正在熟睡"
     };
     static const char* const expressionEn[] = {
         "is resting", "looks relaxed", "feels curious", "looks focused", "is happy",
@@ -375,7 +375,7 @@ void BotUx::_resolveMood(uint32_t now) {
     switch (_effMood) {
         case Mood::Listening:
             targetOpen = 1.12f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.24f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.24f;
             gazeX = 0.0f; gazeY = 0.0f; lift = -0.02f;
             break;
         case Mood::Thinking:
@@ -384,37 +384,43 @@ void BotUx::_resolveMood(uint32_t now) {
             break;
         case Mood::Speaking:
             targetOpen = 0.94f; targetAsym = 0.06f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.18f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.18f;
             gazeX = 0.0f; gazeY = 0.0f;
             break;
         case Mood::Happy:
             targetOpen = 0.66f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f;
+            targetPairX = 0.26f; targetPairY = -0.38f;
             gazeX = 0.0f; gazeY = 0.0f; lift = -0.05f; stretch = -0.025f;
             break;
         case Mood::Sad:
             targetOpen = 0.48f; targetAsym = 0.12f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.25f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.25f;
             gazeX = -0.10f; gazeY = 0.48f; lift = 0.045f; stretch = -0.035f;
             break;
         case Mood::Sleepy:
             targetOpen = 0.11f; targetAsym = 0.10f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.28f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.28f;
             gazeX = -0.18f; gazeY = 0.30f; lift = 0.055f; stretch = -0.045f;
             break;
+        case Mood::Asleep:
+            targetOpen = 0.0f; targetAsym = 0.0f;
+            gazeX = 0.0f; gazeY = 0.20f; lift = 0.075f; stretch = -0.055f;
+            break;
         case Mood::Waiting:
-            targetOpen = 0.16f; targetAsym = 0.14f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.30f;
-            gazeX = 0.0f; gazeY = 0.0f; lift = 0.015f; stretch = -0.015f;
+            targetOpen = 0.72f; targetAsym = -0.08f;
+            targetAngle = 0.20f; targetLean = 0.08f;
+            gazeX = sinf(2.0f * kPi * (now - _animStart) * _animationSpeed / 5200.0f)
+                * 0.42f * (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
+            gazeY = -0.10f; lift = 0.015f; stretch = -0.015f;
             break;
         case Mood::Surprised:
             targetOpen = 1.16f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.05f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.05f;
             gazeX = 0.0f; gazeY = 0.0f; lift = -0.055f; stretch = 0.08f;
             break;
         case Mood::Working:
             targetOpen = 0.96f; targetAsym = 0.03f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.10f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.10f;
             gazeX = 0.12f; gazeY = 0.0f;
             break;
         case Mood::Blocked:
@@ -423,7 +429,7 @@ void BotUx::_resolveMood(uint32_t now) {
             break;
         case Mood::Done:
             targetOpen = 0.88f; targetAsym = -0.06f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.28f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.28f;
             gazeX = -0.22f; gazeY = 0.15f; lift = -0.025f;
             break;
         default:
@@ -443,44 +449,44 @@ void BotUx::_resolveMood(uint32_t now) {
             break;
         case Expression::Curious:
             targetOpen = 1.06f; targetAsym = 0.08f;
-            targetPairX = 0.18f; targetPairY = -0.27f; targetAngle = 0.22f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.22f;
             targetLean = -0.12f; gazeX = 0.48f; gazeY = -0.22f;
             break;
         case Expression::Focused:
             targetOpen = 0.70f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.22f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.22f;
             gazeX = 0.0f; gazeY = 0.08f;
             break;
         case Expression::Joy:
             targetOpen = 0.66f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f;
+            targetPairX = 0.26f; targetPairY = -0.38f;
             gazeX = 0.0f; gazeY = 0.0f;
             break;
         case Expression::Skeptical:
             targetOpen = 0.86f; targetAsym = -0.14f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.28f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.28f;
             targetLean = 0.16f; gazeX = -0.54f; gazeY = -0.10f;
             break;
         case Expression::Bashful:
             targetOpen = 0.86f; targetAsym = 0.12f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.34f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.34f;
             gazeX = -0.34f; gazeY = 0.46f; targetTwist = -0.08f;
             break;
         case Expression::Wink:
             targetOpen = 0.80f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.18f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.18f;
             targetLean = -0.15f; gazeX = 0.24f; gazeY = 0.0f;
             break;
         case Expression::Dizzy:
             targetOpen = 0.92f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f;
+            targetPairX = 0.26f; targetPairY = -0.38f;
             targetTwist = sinf(2.0f * kPi * (now - _animStart) * _animationSpeed / 3600.0f)
                 * 0.08f * (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
             gazeX = 0.0f; gazeY = 0.0f;
             break;
         case Expression::Alarmed:
             targetOpen = 1.16f; targetAsym = 0.0f;
-            targetPairX = 0.18f; targetPairY = -0.25f; targetAngle = 0.05f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.05f;
             gazeX = 0.0f; gazeY = 0.0f;
             break;
         default:
@@ -561,7 +567,8 @@ void BotUx::_resolveMood(uint32_t now) {
 
     uint32_t elapsed = now - _animStart;
     float animElapsed = elapsed * _animationSpeed;
-    float period = (_effMood == Mood::Sleepy) ? 7200.0f
+    float period = (_effMood == Mood::Asleep) ? 8800.0f
+                 : (_effMood == Mood::Sleepy) ? 7200.0f
                  : (_effMood == Mood::Waiting) ? 4600.0f : 3800.0f;
     _breath = sinf(2.0f * kPi * animElapsed / period);
     int16_t r = _m.bodyR ? _m.bodyR : (int16_t)(min16(_w, _h) * 0.39f);
@@ -605,7 +612,7 @@ void BotUx::_resolveMood(uint32_t now) {
             case Mood::Surprised: active = Animation::Bounce; break;
             case Mood::Happy:
             case Mood::Done:      active = Animation::Sparkle; break;
-            case Mood::Waiting:   active = Animation::Wave; break;
+            case Mood::Waiting:   active = Animation::Calm; break;
             case Mood::Blocked:   active = Animation::Glitch; break;
             default:              active = Animation::Calm; break;
         }
@@ -710,7 +717,7 @@ void BotUx::_drawBody() {
         for (int i = -1; i <= 1; ++i) {
             float phase = i * 1.35f;
             float elapsed = (_now - _animStart) * _animationSpeed;
-            float y = _m.cy + _bodyDY + sinf(2.0f * kPi * elapsed / 920.0f + phase) * r * 0.28f * fminf(lifeAmount, 1.5f);
+            float y = _m.cy + _bodyDY + sinf(2.0f * kPi * elapsed / 920.0f + phase) * r * 0.42f * fminf(lifeAmount, 1.5f);
             uint8_t mix = (uint8_t)(35 + (i + 1) * 25);
             _fillEllipseAA(_m.cx + _bodyDX + i * r * 0.48f, y, dotR, dotR,
                            mix565(_style.bodyColor, _style.bgColor, mix));
@@ -756,6 +763,28 @@ void BotUx::_drawBody() {
 }
 
 void BotUx::_drawAnimationFx() {
+    if (_effMood == Mood::Asleep) {
+        // Three vector z marks; fixed geometry also works without a font or orb.
+        float r = _m.bodyR ? _m.bodyR : min16(_w, _h) * 0.39f;
+        float amount = (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
+        float phase = (_now - _animStart) * _animationSpeed / 4800.0f;
+        for (int i = 0; i < 3; ++i) {
+            float t = phase + i / 3.0f;
+            t -= floorf(t);
+            float travel = (t - 0.5f) * amount;
+            float x = _m.cx + r * (0.75f + i * 0.08f + travel * 0.06f);
+            float y = _m.cy - r * (0.88f + i * 0.10f + travel * 0.10f);
+            float half = fmaxf(1.1f, r * (0.045f + i * 0.010f));
+            float stroke = fmaxf(0.65f, r * 0.009f);
+            uint16_t color = mix565(_style.accentColor, _style.bgColor,
+                (uint8_t)(amount > 0 ? 255 * (1.0f - sinf(kPi * t) * sinf(kPi * t)) : 35));
+            _fillCapsule(x, y - half, half, 0, stroke, color);
+            _fillCapsule(x, y, -half, half, stroke, color);
+            _fillCapsule(x, y + half, half, 0, stroke, color);
+        }
+        return;
+    }
+
     if (_activeAnimation != Animation::Sparkle || _reducedMotion ||
         _m.bodyR == 0 || _motionAmount <= 0.0f) return;
     int16_t r = _m.bodyR;
@@ -893,7 +922,7 @@ void BotUx::_drawEyes() {
     float gazeX = clampf(_pupilDX - _motionX * 0.18f * sensorAmount, -1.0f, 1.0f);
     float gazeY = clampf(_pupilDY - _motionY * 0.14f * sensorAmount, -1.0f, 1.0f);
     float pairCx = bodyCx + _eyePairX * r + gazeX * r * (0.24f + 0.04f * _directionPose);
-    float pairCy = bodyCy + _eyePairY * r + gazeY * r * (0.20f + 0.04f * _directionPose);
+    float pairCy = bodyCy + _eyePairY * r + gazeY * r * (gazeY > 0.0f ? 0.16f : (0.20f + 0.04f * _directionPose));
     float facingX = gazeX * _directionPose, facingY = gazeY * _directionPose;
     float dx = _m.eyeDX * (1.0f - 0.16f * fabsf(facingX));
     float baseEr = (float)_m.eyeRadius;
@@ -913,12 +942,6 @@ void BotUx::_drawEyes() {
         float pairY = s * _bodyLean * baseEr + s * facingX * facingY * baseEr * 0.45f;
         float ex = pairCx + pairX * twistCos - pairY * twistSin;
         float ey = pairCy + pairX * twistSin + pairY * twistCos;
-
-        if (_expression == Expression::Auto && _effMood == Mood::Waiting && side <= 96) {
-            int16_t halfW = (side <= 48) ? 1 : 2;
-            _fillCapsule(ex, ey, halfW, 0, 1, _style.eyeColor);
-            continue;
-        }
 
         float lengthScale = 1.0f, radiusScale = 0.52f;
         switch (_style.eyeStyle) {

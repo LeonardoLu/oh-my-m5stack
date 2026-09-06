@@ -24,3 +24,20 @@ rectangles use `crispEdges` so a browser does not add its own antialiasing or
 seams between adjacent scanlines. Native circle/triangle/round-rectangle calls
 still use SVG approximations; this harness is not a replacement for M5GFX raster
 capture or device frame-time measurements.
+
+
+The complete bilingual offline catalog is generated with:
+
+```sh
+./render.sh
+../../../../tmp/botux-preview/botux-preview ../../../../tmp/botux-preview --catalog
+python3 catalog.py ../../../../tmp/botux-preview
+```
+
+`catalog.py` requires Pillow. It packages 72 real 120px frames for every mood,
+expression and animation into `wiki/bot-ux/assets/` GIFs and the self-contained
+`wiki/bot-ux/intro.html`; `intro.md` is the matching illustrated source guide.
+The browser has only search/filter/pause behavior; movement comes from the C++
+renderer. GIFs repeat a finite capture and may show a loop boundary that is not
+present in continuous firmware. Asleep's live z cycles have a separate native
+wrap-continuity, reduced-motion and zero-motion regression test.

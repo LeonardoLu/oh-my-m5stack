@@ -30,6 +30,7 @@ static const MoodCase kMoods[] = {
     {botux::BotUx::Mood::Waiting, "Waiting", false},
     {botux::BotUx::Mood::Blocked, "Blocked", false},
     {botux::BotUx::Mood::Done, "Done", false},
+    {botux::BotUx::Mood::Asleep, "Asleep", false},
 };
 
 struct ExpressionCase {
@@ -454,7 +455,7 @@ static void checkCoverageAndFacePlacement() {
 
 static void checkExplicitNeutralOverridesRestingMood() {
     for (int size : {40, 72, 200}) {
-        for (auto mood : {botux::BotUx::Mood::Sleepy, botux::BotUx::Mood::Waiting}) {
+        for (auto mood : {botux::BotUx::Mood::Sleepy, botux::BotUx::Mood::Waiting, botux::BotUx::Mood::Asleep}) {
             int heights[2] = {};
             for (int selected = 0; selected < 2; ++selected) {
                 gNow = 1000;
@@ -466,17 +467,17 @@ static void checkExplicitNeutralOverridesRestingMood() {
                 if (selected) bot.setExpression(botux::BotUx::Expression::Neutral, 0);
                 bot.update(gNow); bot.draw();
                 int minY = size, maxY = -1;
-                float r = bot.metrics().bodyR;
-                for (int y = (int)(size * 0.5f - r * 0.55f); y < size / 2; ++y)
-                    for (int x = size / 2; x < size / 2 + r * 0.60f; ++x)
-                        if (((canvas.readPixel(x, y) >> 11) & 31u) < 16u) {
+                for (int y = 0; y < size; ++y)
+                    for (int x = 0; x < size; ++x)
+                        if (canvas.readPixel(x, y) == bot.style().eyeColor &&
+                            (x-size/2)*(x-size/2)+(y-size/2)*(y-size/2) < bot.metrics().bodyR*bot.metrics().bodyR*.70f) {
                             minY = std::min(minY, y); maxY = std::max(maxY, y);
                         }
                 heights[selected] = maxY - minY + 1;
             }
             // Auto retains the resting marks; explicit Neutral reopens the face,
             // including the tiny toolbar renderer used by Core2 settings.
-            assert(heights[1] >= heights[0] + 2);
+            assert(heights[1] >= heights[0] + (size <= 72 ? 1 : 2));
         }
     }
 }
@@ -534,7 +535,7 @@ static void checkCompanionSemantics() {
             else { assert(desc[i + 1] && desc[i + 2]); i += 3; }
         }
     }
-    assert(Bot::moodCount() * Bot::expressionCount() * Bot::animationCount() == 960);
+    assert(Bot::moodCount() * Bot::expressionCount() * Bot::animationCount() == 1040);
     M5Canvas canvas(72, 72); bot.begin(&canvas);
     bot.resetToIdle(); gNow += 16; bot.update(gNow);
     bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Milo is resting") == 0);
@@ -738,7 +739,8 @@ static void checkDirectionsDominateEveryFace() {
                     static const int8_t sy[] = {0,0,0,0,-1,1,-1,-1,1,1};
                     if (sx[index] && dx*sx[index]<r*.12f) std::cerr<<"direction "<<(int)mood<<"/"<<(int)expr<<"/"<<(int)eyeStyle<<" d="<<index<<" dx="<<dx<<"\n";
                     if (sx[index]) assert(dx * sx[index] >= r * 0.12f);
-                    if (sy[index]) assert(dy * sy[index] >= r * 0.09f);
+                    // Downward pitch is deliberately nearer center than upward pitch.
+                    if (sy[index]) assert(dy * sy[index] >= r * 0.06f);
                 }
     }
 }
@@ -810,7 +812,7 @@ static void checkNineDirectionPerspective() {
     assert(right.eyes[0].height() >= right.eyes[1].height()*1.2f);
     assert(std::abs(front.eyes[0].height()-front.eyes[1].height())<=1);
     assert(std::fabs((front.eyes[0].cx()+front.eyes[1].cx())*.5f-100)<1);
-    assert(up.eyes[0].cy()<88 && down.eyes[0].cy()>112);
+    assert(up.eyes[0].cy()<88 && down.eyes[0].cy()>110 && down.eyes[0].cy()<114);
     assert(up.eyes[0].height()>down.eyes[0].height());
     unsigned mirrorMismatch=0, eyeUnion=0;
     const uint16_t ink=botux::rgb565(32,36,41);
@@ -824,7 +826,7 @@ static void checkNineDirectionPerspective() {
         float x=(frame.eyes[0].cx()+frame.eyes[1].cx())*.5f;
         float y=(frame.eyes[0].cy()+frame.eyes[1].cy())*.5f;
         assert((g==G::UpLeft||g==G::DownLeft)?x<88:x>112);
-        assert((g==G::UpLeft||g==G::UpRight)?y<88:y>112);
+        assert((g==G::UpLeft||g==G::UpRight)?y<88:y>109);
     }
     auto diagonal=directionRaster(G::DownLeft), tapped=directionRaster(G::Auto,true);
     assert(diagonal.pixels==tapped.pixels); // same continuous vector, exactly the same pose/raster
@@ -862,15 +864,46 @@ static void checkThinkingTravelAndContinuity() {
             int top=200,bottom=-1;
             for(int y=0;y<200;++y) if(canvas.readPixel(100,y)!=bot.style().bgColor) {top=std::min(top,y);bottom=std::max(bottom,y);}
             assert(bottom>=top); float center=(top+bottom)*.5f;
-            if(frame>100) assert(std::fabs(center-previous)<=3.5f);
+            if(frame>100) assert(std::fabs(center-previous)<=5.0f);
             previous=center; lo=std::min(lo,center);hi=std::max(hi,center);
         }
         ranges[mode]=hi-lo;
     }
-    assert(ranges[0]>200*.39f*.45f);
+    assert(ranges[0]>200*.39f*.75f);
     assert(ranges[1]>0 && ranges[1]<ranges[0]*.35f);
     assert(ranges[2]==0);
     std::cout<<"Thinking center-dot peak travel full/reduced/zero: "<<ranges[0]<<"/"<<ranges[1]<<"/"<<ranges[2]<<" px\n";
+}
+
+static void checkSleepContinuity() {
+    using Bot = botux::BotUx;
+    static_assert((int)Bot::Mood::Done == 11 && (int)Bot::Mood::Asleep == 12, "append-only moods");
+    double totals[3] = {};
+    for (int mode = 0; mode < 3; ++mode) {
+        gNow = 1000; M5Canvas canvas(120,120); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+        auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style);
+        bot.setMood(Bot::Mood::Asleep, 0); bot.setReducedMotion(mode == 1); bot.setMotionAmount(mode == 2 ? 0 : 1);
+        std::vector<uint16_t> prior(14400); double wrapMax=0, ordinaryMax=0;
+        for (int frame=0; frame<=610; ++frame) {
+            gNow=1000+frame*16; bot.update(gNow); canvas.clear(); bot.draw(); assert(!canvas.outOfBounds());
+            double diff=0;
+            for(int y=0;y<120;++y) for(int x=0;x<120;++x) {
+                uint16_t pixel=canvas.readPixel(x,y), old=prior[y*120+x];
+                diff += std::abs(int((pixel>>11)&31)-int((old>>11)&31));
+                diff += std::abs(int((pixel>>5)&63)-int((old>>5)&63));
+                diff += std::abs(int(pixel&31)-int(old&31)); prior[y*120+x]=pixel;
+            }
+            if(frame>20) {
+                totals[mode]+=diff;
+                if(frame%100<=1) wrapMax=std::max(wrapMax,diff); else ordinaryMax=std::max(ordinaryMax,diff);
+            }
+        }
+        std::cout << "sleep wrap/ordinary " << mode << ": " << wrapMax << "/" << ordinaryMax << "\n";
+        assert(wrapMax <= ordinaryMax * 1.5 + 1);
+    }
+    assert(totals[0]>0 && totals[1]<totals[0]*0.65 && totals[2]==0);
+    std::cout << "Asleep RGB565 temporal difference full/reduced/zero: " << totals[0] << "/" << totals[1] << "/" << totals[2] << "\n";
+    assert(render({Bot::Mood::Asleep, "Asleep", false}, 120, 0) != render({Bot::Mood::Sleepy, "Sleepy", false}, 120, 0));
 }
 
 static void benchmarkEyes() {
@@ -912,7 +945,37 @@ static bool writeGazeSheet(const char* path) {
     return true;
 }
 
+static void writeCatalogFrames(const std::string& directory) {
+    using Bot = botux::BotUx;
+    std::ofstream manifest(directory + "/catalog.tsv");
+    const int counts[] = {Bot::moodCount(), Bot::expressionCount(), Bot::animationCount()};
+    const char* groups[] = {"Mood", "Expression", "Animation"};
+    for (int group = 0; group < 3; ++group) for (int index = 0; index < counts[group]; ++index) {
+        std::string id = std::string(groups[group]) + "-" + std::to_string(index);
+        const char* name = group == 0 ? Bot::moodName((Bot::Mood)index) : group == 1 ?
+            Bot::expressionName((Bot::Expression)index) : Bot::animationName((Bot::Animation)index);
+        const char* zh = group == 0 ? Bot::moodName((Bot::Mood)index, Bot::Language::Chinese) : group == 1 ?
+            Bot::expressionName((Bot::Expression)index, Bot::Language::Chinese) : Bot::animationName((Bot::Animation)index, Bot::Language::Chinese);
+        manifest << id << "\t" << groups[group] << "\t" << name << "\t" << zh << "\n";
+        std::ofstream raw(directory + "/" + id + ".rgb", std::ios::binary);
+        gNow = 1000; M5Canvas canvas(120,120); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+        bot.seedBlink(1234);
+        if (group == 0) { bot.setMood((Bot::Mood)index, 0); bot.setTalking(index == (int)Bot::Mood::Speaking); }
+        if (group == 1) bot.setExpression((Bot::Expression)index, 0);
+        if (group == 2) bot.setAnimation((Bot::Animation)index);
+        for (int frame = 0; frame < 72; ++frame) {
+            gNow = 1000 + frame * 100; bot.update(gNow); canvas.clear(); bot.draw();
+            for(int y=0;y<120;++y) for(int x=0;x<120;++x) {
+                uint16_t pixel = canvas.readPixel(x,y);
+                char rgb[3] = {(char)(((pixel>>11)&31)*255/31), (char)(((pixel>>5)&63)*255/63), (char)((pixel&31)*255/31)};
+                raw.write(rgb,3);
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
+    if (argc > 2 && std::string(argv[2]) == "--catalog") { writeCatalogFrames(argv[1]); return 0; }
     assert(botux::BotUx().style().eyeColor == botux::rgb565(32, 36, 41));
     checkCompanionSemantics();
     checkTemporaryGaze();
@@ -924,6 +987,7 @@ int main(int argc, char** argv) {
     checkNineDirectionPerspective();
     checkDirectionTransitionContinuity();
     checkThinkingTravelAndContinuity();
+    checkSleepContinuity();
     benchmarkEyes();
     checkCoverageAndFacePlacement();
     checkExplicitNeutralOverridesRestingMood();

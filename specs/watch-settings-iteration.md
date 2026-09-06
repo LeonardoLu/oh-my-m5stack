@@ -54,3 +54,35 @@ as mood 12. The session finished by hardware-resetting volatile diagnostic state
 the final readback was Face, automatic mode, Idle, with the original persisted
 Chinese language and other settings intact. These captures and injected contacts
 exercise firmware paths but do not claim physical touch-panel acceptance.
+
+## Physical Done investigation (in progress)
+
+The 2026-09-06 physical trial uses a command-gated, fixed-capacity trace in the
+Watch firmware. It records sampled contact changes, bounded held-contact and long-gap
+checkpoints, pointer capture/scroll/end reasons, screen transitions, CST820 interrupt
+timestamps, acquisition count, and maximum sample/read time. Trace collection performs
+no Serial output or allocation in the input/render loop. `trace dump` first disarms the
+GPIO interrupt and sampling trace, then emits the bounded buffers.
+
+The first trial is preserved in `tmp/done-debug/session.log`. The user attempted the
+Settings Done control more than five times and reported one success. All contacts were
+acquired by the controller and application. Seven rejected presses began and ended at
+stable converted coordinates `(227,433)`, `(231,440)`, `(223,442)`, `(220,431)`,
+`(227,437)`, `(220,458)`, and `(223,449)`; every one captured `None` and ended with
+`reason=no_target`. The accepted press began and ended at `(276,416)`, captured and
+released target `Done`, ended after 67 ms with `reason=accepted`, and immediately logged
+the Settings-to-Face transition. The trace contained 25,912 acquisitions, no ring drops,
+a maximum observed acquisition gap of 79 ms, a maximum read of 329 us, and 24 retained
+CST820 interrupt edges.
+
+The corresponding native framebuffer is `tmp/done-debug/settings.png`. Its visible blue
+Done pill occupies exactly `x=154..311, y=376..421`; the half-open rounded hit target is
+`x=154..312, y=376..422`. StopWatch panel and touch rotation are both zero, M5GFX scales
+raw touch `0..233` to panel `0..467`, and the 466 px application canvas is pushed at
+`(0,0)`. The two-pixel panel/canvas difference cannot explain the rejected samples,
+which are 9–37 px below the visible pill. This trial rules out missed acquisition,
+release timeout, drag promotion, and draw/hit disagreement for those failures. It does
+not yet establish whether the physical target-to-coordinate mapping is offset or the
+finger contact centroid landed below the intended visual point. A second trace asking
+for one press centered precisely on the rendered Done text is pending before changing
+geometry or calibration.

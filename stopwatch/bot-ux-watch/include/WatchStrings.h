@@ -15,7 +15,7 @@ static const Entry entries[] = {
     {"JUL","七月"},{"AUG","八月"},{"SEP","九月"},{"OCT","十月"},{"NOV","十一月"},{"DEC","十二月"},
     {"TIME FORMAT","时间格式"},{"12 HOUR","12小时制"},{"24 HOUR","24小时制"},
     {"SECONDS  ON","显示秒数"},{"SECONDS  OFF","隐藏秒数"},
-    {"Choose whether seconds appear in the clock","选择是否在时钟上显示秒数"},
+    {"Show seconds on the clock","选择是否在时钟上显示秒数"},
     {"SHAPE","形状"},{"EYES","眼睛"},{"Tap arrows; tap the bot to react","轻点箭头切换，轻点伙伴互动"},
     {"MOTION","动态效果"},{"WRIST","手腕感应"},{"ON","开启"},{"OFF","关闭"},
     {"BOT COLOR","伙伴颜色"},{"USE THEME","使用主题"},{"DISPLAY & SOUND","显示与声音"},

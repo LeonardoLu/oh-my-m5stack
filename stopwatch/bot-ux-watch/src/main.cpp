@@ -128,6 +128,28 @@ uint8_t _colorDrag = 0;
 bool _gestureActive = false;
 bool _buttonNavigation = false;
 
+enum class TouchTraceKind : uint8_t { Raw, Down, Scroll, End, Screen };
+enum class TouchEndReason : uint8_t { Accepted, NoTarget, Scrolled, TargetChanged, Timeout, Outside };
+struct TouchTraceEvent {
+    uint32_t atMs;
+    int16_t x, y;
+    int16_t target, other;
+    uint16_t elapsedMs, sampleGapMs, readUs;
+    uint8_t kind, screen, flags;
+};
+constexpr uint16_t kTouchTraceCapacity = 160;
+TouchTraceEvent _touchTrace[kTouchTraceCapacity];
+uint16_t _touchTraceHead = 0, _touchTraceCount = 0;
+uint32_t _touchTraceDropped = 0, _traceLastHeldMs = 0, _traceLastDelayMs = 0, _traceAcquireCount = 0;
+uint16_t _traceMaxSampleGapMs = 0, _traceMaxReadUs = 0;
+volatile bool _touchTraceEnabled = false;
+bool _traceRawKnown = false, _traceRawContact = false;
+bool _touchIrqAttached = false;
+constexpr uint8_t kTouchIrqCapacity = 64;
+volatile uint32_t _touchIrqTimes[kTouchIrqCapacity];
+volatile uint32_t _touchIrqTotal = 0, _touchIrqDropped = 0;
+volatile uint8_t _touchIrqHead = 0, _touchIrqCount = 0;
+
 uint8_t _editHour = 0;
 uint8_t _editMinute = 0;
 int16_t _editYear = 2026;
@@ -144,6 +166,128 @@ struct FrameTelemetry {
     uint32_t maxFrameUs = 0;
     uint8_t screen = 0xFF;
 } _telemetry;
+
+static uint16_t traceClamp16(uint32_t value) { return value > 65535 ? 65535 : (uint16_t)value; }
+
+static void IRAM_ATTR touchTraceIrq() {
+    if (!_touchTraceEnabled) return;
+    uint8_t index = (_touchIrqHead + _touchIrqCount) % kTouchIrqCapacity;
+    if (_touchIrqCount == kTouchIrqCapacity) {
+        index = _touchIrqHead;
+        _touchIrqHead = (_touchIrqHead + 1) % kTouchIrqCapacity;
+        ++_touchIrqDropped;
+    } else {
+        ++_touchIrqCount;
+    }
+    _touchIrqTimes[index] = micros();
+    ++_touchIrqTotal;
+}
+
+static void pushTouchTrace(TouchTraceKind kind, uint32_t atMs, int16_t x, int16_t y,
+                           int16_t target = watchcontrols::None, int16_t other = watchcontrols::None,
+                           uint32_t elapsedMs = 0, uint32_t sampleGapMs = 0,
+                           uint32_t readUs = 0, uint8_t flags = 0) {
+    if (!_touchTraceEnabled) return;
+    uint16_t index = (_touchTraceHead + _touchTraceCount) % kTouchTraceCapacity;
+    if (_touchTraceCount == kTouchTraceCapacity) {
+        index = _touchTraceHead;
+        _touchTraceHead = (_touchTraceHead + 1) % kTouchTraceCapacity;
+        ++_touchTraceDropped;
+    } else {
+        ++_touchTraceCount;
+    }
+    _touchTrace[index] = {atMs, x, y, target, other, traceClamp16(elapsedMs),
+                          traceClamp16(sampleGapMs), traceClamp16(readUs),
+                          (uint8_t)kind, (uint8_t)_screen, flags};
+}
+
+static void setTouchTraceEnabled(bool enabled) {
+    if(_touchIrqAttached) {
+        detachInterrupt(digitalPinToInterrupt(13));
+        _touchIrqAttached=false;
+    }
+    _touchTraceEnabled = enabled;
+    _touchTraceHead = _touchTraceCount = 0;
+    _touchTraceDropped = 0;
+    _traceLastHeldMs = _traceLastDelayMs = 0;
+    _traceAcquireCount = 0;
+    _traceMaxSampleGapMs = _traceMaxReadUs = 0;
+    _traceRawKnown = false;
+    _traceRawContact = false;
+    _touchIrqHead = _touchIrqCount = 0;
+    _touchIrqTotal = _touchIrqDropped = 0;
+    if(enabled) {
+        attachInterrupt(digitalPinToInterrupt(13), touchTraceIrq, FALLING);
+        _touchIrqAttached=true;
+    }
+}
+
+static void stopTouchTrace() {
+    _touchTraceEnabled = false;
+    if(_touchIrqAttached) {
+        detachInterrupt(digitalPinToInterrupt(13));
+        _touchIrqAttached=false;
+    }
+}
+
+static const char* touchTraceKindName(TouchTraceKind kind) {
+    switch (kind) {
+        case TouchTraceKind::Raw: return "raw";
+        case TouchTraceKind::Down: return "down";
+        case TouchTraceKind::Scroll: return "scroll";
+        case TouchTraceKind::End: return "end";
+        case TouchTraceKind::Screen: return "screen";
+    }
+    return "?";
+}
+
+static const char* touchEndReasonName(TouchEndReason reason) {
+    switch (reason) {
+        case TouchEndReason::Accepted: return "accepted";
+        case TouchEndReason::NoTarget: return "no_target";
+        case TouchEndReason::Scrolled: return "scrolled";
+        case TouchEndReason::TargetChanged: return "target_changed";
+        case TouchEndReason::Timeout: return "timeout";
+        case TouchEndReason::Outside: return "outside";
+    }
+    return "?";
+}
+
+static void dumpTouchTrace() {
+    bool wasEnabled = _touchTraceEnabled;
+    stopTouchTrace();
+    Serial.printf("TRACE begin count=%u dropped=%lu enabled=%u acquisitions=%lu max_gap=%u max_read_us=%u irq=%lu irq_kept=%u irq_dropped=%lu\n",
+                  _touchTraceCount, (unsigned long)_touchTraceDropped, wasEnabled,
+                  (unsigned long)_traceAcquireCount, _traceMaxSampleGapMs, _traceMaxReadUs,
+                  (unsigned long)_touchIrqTotal, _touchIrqCount, (unsigned long)_touchIrqDropped);
+    for (uint8_t i = 0; i < _touchIrqCount; ++i) {
+        Serial.printf("TRACEIRQ t_us=%lu\n",
+                      (unsigned long)_touchIrqTimes[(_touchIrqHead + i) % kTouchIrqCapacity]);
+    }
+    for (uint16_t i = 0; i < _touchTraceCount; ++i) {
+        const auto& e = _touchTrace[(_touchTraceHead + i) % kTouchTraceCapacity];
+        auto kind = (TouchTraceKind)e.kind;
+        if (kind == TouchTraceKind::Raw) {
+            Serial.printf("TRACE t=%lu kind=%s screen=%u contact=%u int_low=%u x=%d y=%d gap=%u read_us=%u\n",
+                          (unsigned long)e.atMs, touchTraceKindName(kind), e.screen,
+                          (e.flags & 1) != 0, (e.flags & 2) != 0, e.x, e.y,
+                          e.sampleGapMs, e.readUs);
+        } else if (kind == TouchTraceKind::End) {
+            Serial.printf("TRACE t=%lu kind=%s screen=%u x=%d y=%d captured=%d released=%d elapsed=%u reason=%s\n",
+                          (unsigned long)e.atMs, touchTraceKindName(kind), e.screen, e.x, e.y,
+                          e.target, e.other, e.elapsedMs, touchEndReasonName((TouchEndReason)e.flags));
+        } else if (kind == TouchTraceKind::Screen) {
+            Serial.printf("TRACE t=%lu kind=%s from=%d to=%d cause=%d\n", (unsigned long)e.atMs,
+                          touchTraceKindName(kind), e.target, e.other, e.flags);
+        } else {
+            Serial.printf("TRACE t=%lu kind=%s screen=%u x=%d y=%d target=%d elapsed=%u\n",
+                          (unsigned long)e.atMs, touchTraceKindName(kind), e.screen, e.x, e.y,
+                          e.target, e.elapsedMs);
+        }
+    }
+    Serial.println("TRACE end");
+    Serial.flush();
+}
 
 static bool hit(int16_t x, int16_t y, int16_t left, int16_t top, int16_t width, int16_t height) {
     return x >= left && x < left + width && y >= top && y < top + height;
@@ -323,7 +467,9 @@ static void showManualMood(botux::BotUx::Mood mood) {
 static void enterSettings() {
     resetUiPointer();
     _ambientCycle.postpone(millis());
+    Screen prior = _screen;
     _screen = Screen::Settings;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
     _editor = Editor::None;
     _menu = MenuItem::Time;
     _settingsList.configure(kMenuCount, kVisibleRows);
@@ -339,7 +485,9 @@ static void enterPersonalize(Screen parent = Screen::Settings) {
     resetUiPointer();
     _ambientCycle.postpone(millis());
     _personalParent = parent;
+    Screen prior = _screen;
     _screen = Screen::Personalize;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
     _editor = Editor::None;
     _personal = PersonalItem::Expression;
     _personalList.configure(kPersonalCount, kVisibleRows);
@@ -350,9 +498,12 @@ static void enterPersonalize(Screen parent = Screen::Settings) {
     confirmSound();
 }
 
-static void leavePersonalize() {
+static void leavePersonalize(int cause = watchcontrols::None) {
     resetUiPointer();
+    Screen prior = _screen;
     _screen = _personalParent;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen,
+                   0, 0, 0, (uint8_t)cause);
     _editor = Editor::None;
     _uiDirty = true;
     if (_screen == Screen::Face) {
@@ -362,9 +513,12 @@ static void leavePersonalize() {
     clickSound();
 }
 
-static void leaveSettings() {
+static void leaveSettings(int cause = watchcontrols::None) {
     resetUiPointer();
+    Screen prior = _screen;
     _screen = Screen::Face;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen,
+                   0, 0, 0, (uint8_t)cause);
     _editor = Editor::None;
     settings.save();
     _faceNeedsClear = true;
@@ -374,7 +528,9 @@ static void leaveSettings() {
 
 static void enterEditor(Editor editor, Screen parent = Screen::Settings) {
     resetUiPointer();
+    Screen prior = _screen;
     _screen = Screen::Editor;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
     _editor = editor;
     _originalSettings = settings.data();
     _originalManualPreset = _manualPreset; _originalManualCombo = _manualCombo;
@@ -400,7 +556,9 @@ static void cancelEditor() {
     _manualPreset = _originalManualPreset; _manualCombo = _originalManualCombo;
     settings.data() = _originalSettings;
     applySettings();
+    Screen prior = _screen;
     _screen = _editorParent;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
     _editor = Editor::None;
     _uiDirty = true;
     clickSound();
@@ -412,13 +570,15 @@ static void returnHome() {
         settings.data()=_originalSettings; applySettings();
     }
     _dozing=false; _clockDoubleTap.reset(); consumeWakeInput();
+    Screen prior=_screen;
     _screen=Screen::Face; _editor=Editor::None;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
     _faceNeedsClear=true; face.invalidate(); _uiDirty=true;
     power.applyLevel(settings.data().brightness);
     _sounds.play(ux::sound::Cue::Back);
 }
 
-static void saveEditor() {
+static void saveEditor(int cause = watchcontrols::None) {
     resetUiPointer();
     if (_editor == Editor::Name) {
         _nameEditor.press(ux::NameEditor::Done);
@@ -441,7 +601,10 @@ static void saveEditor() {
     } else {
         settings.save();
     }
+    Screen prior = _screen;
     _screen = _editorParent;
+    pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen,
+                   0, 0, 0, (uint8_t)cause);
     _editor = Editor::None;
     _uiDirty = true;
     confirmSound();
@@ -641,7 +804,7 @@ static void updateColorPicker(int16_t x, int16_t y) {
 static void activateUiControl(int target) {
     using namespace watchcontrols;
     if(_screen==Screen::Settings || _screen==Screen::Personalize) {
-        if(target==Done) { if(_screen==Screen::Personalize) leavePersonalize(); else leaveSettings(); return; }
+        if(target==Done) { if(_screen==Screen::Personalize) leavePersonalize(target); else leaveSettings(target); return; }
     }
     if (_screen == Screen::Settings && target >= MenuRow) {
         _settingsList.select(target-MenuRow); _menu=(MenuItem)_settingsList.selected(); selectMenuItem(); return;
@@ -650,11 +813,11 @@ static void activateUiControl(int target) {
         _personalList.select(target-PersonalRow); _personal=(PersonalItem)_personalList.selected(); selectPersonalItem(); return;
     }
     if (_screen != Screen::Editor) return;
-    if (target == Done) { saveEditor(); return; }
+    if (target == Done) { saveEditor(target); return; }
     int field=target-First;
     if (_editor == Editor::Name && target >= NameKey && target < NameKey+30) {
         bool done=_nameEditor.press(target-NameKey); clickSound(); _uiDirty=true;
-        if(done) saveEditor();
+        if(done) saveEditor(target);
     } else if (_editor == Editor::Language) {
         settings.data().language=field; applySettings(); clickSound();
     } else if (_editor == Editor::Layout || _editor == Editor::Preview || _editor == Editor::Gaze
@@ -699,13 +862,18 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
         auto target=watchcontrols::at(_screen,_editor,scroll?scroll->offset():0,x,y);
         _capturedTarget=target.id;
         _pointer.begin(target.id,target.bounds,x,y,now,scroll&&y>=scrollLayout.y&&y<scrollLayout.y+scrollLayout.h);
+        pushTouchTrace(TouchTraceKind::Down, now, x, y, target.id);
         _colorDrag=target.id==watchcontrols::ColorPad?1:target.id==watchcontrols::HueBar?2:0;
     }
     if(_pointer.active() && (held||up)) {
         bool wasScrolling=_pointer.scrolling();
         _pointer.move(x,y);
         if(scroll && _pointer.scrolling()) {
-            if(!wasScrolling) scroll->begin(_pointer.startY(),_pointer.startedAt());
+            if(!wasScrolling) {
+                scroll->begin(_pointer.startY(),_pointer.startedAt());
+                pushTouchTrace(TouchTraceKind::Scroll, now, x, y, _capturedTarget,
+                               watchcontrols::None, now-_pointer.startedAt());
+            }
             float before=scroll->offset(); scroll->move(y,now);
             if(before!=scroll->offset()) markListMoved();
         }
@@ -715,8 +883,18 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
         bool dragged=_pointer.scrolling();
         auto releasedBounds=_pointer.bounds();
         auto releasedTarget=watchcontrols::at(_screen,_editor,scroll?scroll->offset():0,x,y);
+        uint32_t elapsed=now-_pointer.startedAt();
+        int captured=_capturedTarget;
+        TouchEndReason reason=TouchEndReason::Accepted;
+        if(captured==watchcontrols::None) reason=TouchEndReason::NoTarget;
+        else if(dragged) reason=TouchEndReason::Scrolled;
+        else if(releasedTarget.id!=captured) reason=TouchEndReason::TargetChanged;
+        else if(elapsed>1000) reason=TouchEndReason::Timeout;
         if(!dragged&&releasedTarget.id!=_capturedTarget) _pointer.cancel();
         int clicked=_pointer.end(x,y,now);
+        if(clicked<0&&reason==TouchEndReason::Accepted) reason=TouchEndReason::Outside;
+        pushTouchTrace(TouchTraceKind::End, now, x, y, captured, releasedTarget.id,
+                       elapsed, 0, 0, (uint8_t)reason);
         if(clicked>=0) { _clickRect=releasedBounds; _clickUntil=now+90; }
         if(scroll && dragged) scroll->end(now);
         _colorDrag=0;
@@ -733,8 +911,32 @@ static void handleInputs(uint32_t now) {
     bool contact=_contact.isPressed(); int32_t x=_contact.x,y=_contact.y;
     if(_diagnosticContact) { contact=_diagnosticDown; x=_diagnosticX; y=_diagnosticY; }
     else if(now-_contactReadMs>=8) {
+        uint32_t previousReadMs=_contactReadMs;
         _contactReadMs=now;
+        uint32_t readStartUs=micros();
         contact=M5.Display.getTouch(&x,&y);
+        uint32_t readUs=micros()-readStartUs;
+        uint32_t sampleGapMs=previousReadMs?now-previousReadMs:0;
+        if(_touchTraceEnabled) {
+            ++_traceAcquireCount;
+            if(sampleGapMs>_traceMaxSampleGapMs) _traceMaxSampleGapMs=traceClamp16(sampleGapMs);
+            if(readUs>_traceMaxReadUs) _traceMaxReadUs=traceClamp16(readUs);
+            bool changed=!_traceRawKnown||contact!=_traceRawContact;
+            bool heldCheckpoint=contact&&(now-_traceLastHeldMs>=100);
+            // M5GFX's StopWatch board setup maps CST820 INT to GPIO13. Low means
+            // the controller signalled an event; it does not identify an I2C error.
+            bool intLow=digitalRead(13)==LOW;
+            bool delayed=sampleGapMs>=24&&(contact||intLow||now-_traceLastDelayMs>=1000);
+            if(changed||heldCheckpoint||delayed) {
+                uint8_t flags=(contact?1:0)|(intLow?2:0);
+                pushTouchTrace(TouchTraceKind::Raw,now,x,y,watchcontrols::None,
+                               watchcontrols::None,0,sampleGapMs,readUs,flags);
+                if(contact) _traceLastHeldMs=now;
+                if(sampleGapMs>=24) _traceLastDelayMs=now;
+            }
+            _traceRawKnown=true;
+            _traceRawContact=contact;
+        }
     }
     _contact.sample(contact,x,y);
     const auto& touch=_contact;
@@ -954,7 +1156,8 @@ static void drawPersonalizeList(bool chrome = true) {
             canvas.setFont(&fonts::FreeSansBold9pt7b);
             canvas.setTextDatum(middle_right);
             canvas.setTextColor(settings.muted());
-            watchText(canvas,value,382,cy,i!=(uint8_t)PersonalItem::Name);
+            if(i==(uint8_t)PersonalItem::Name) watchEllipsizedText(canvas,value,382,cy,214);
+            else watchText(canvas,value,382,cy);
         }
     }
     canvas.clearClipRect();
@@ -1014,7 +1217,7 @@ static void drawFormatEditor() {
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.muted());
-    watchText(canvas, "Choose whether seconds appear in the clock", 233, 330);
+    watchText(canvas, "Show seconds on the clock", 233, 330);
     drawFooter();
 }
 
@@ -1120,10 +1323,10 @@ static void drawNameEditor() {
     canvas.setTextDatum(middle_center);
     canvas.setFont(&fonts::FreeSansBold12pt7b);
     canvas.setTextColor(settings.ink());
-    watchText(canvas, _nameEditor.text(), 233, 128,false);
+    watchEllipsizedText(canvas, _nameEditor.text(), 233, 128, 310);
     static const ux::NameKeyboardLabels zhKeys={"删除","空格","Aa","确定"};
     ux::drawNameKeyboard(canvas, _nameEditor, ux::Rect{78,170,310,205},
-                         settings.panel(), settings.ink(), settings.data().language?ux::Cjk18:ux::Latin14,
+                         settings.panel(), settings.ink(), watchKeyboardFont(settings.data().language),
                          _namePressedKey,settings.data().language?&zhKeys:nullptr);
     drawFooter();
 }
@@ -1421,6 +1624,10 @@ static void handleSerialCommands() {
             _diagnosticContact=true; _diagnosticDown=down!=0;
             _diagnosticX=x; _diagnosticY=y; _contactReplyPending=true;
         } else if(!strcmp(line,"physical")) { _diagnosticContact=false; printUiState(); }
+        else if(!strcmp(line,"trace on")) { setTouchTraceEnabled(true); Serial.println("TRACE armed"); Serial.flush(); }
+        else if(!strcmp(line,"trace off")) { stopTouchTrace(); Serial.println("TRACE disarmed"); Serial.flush(); }
+        else if(!strcmp(line,"trace clear")) { bool enabled=_touchTraceEnabled; setTouchTraceEnabled(enabled); Serial.println("TRACE cleared"); Serial.flush(); }
+        else if(!strcmp(line,"trace dump")) dumpTouchTrace();
         else if(!strncmp(line,"locale ",7)) { settings.data().language=atoi(line+7)==1; applySettings(); printUiState(); }
         else if(!strcmp(line,"home")) { returnHome(); printUiState(); }
         else if(!strcmp(line,"power")) {
@@ -1489,7 +1696,7 @@ void setup() {
     _personalList.configure(kPersonalCount, kVisibleRows);
     _ambientCycle.begin(millis());
     showStatusPanel(millis(), 1800);
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, sound N\n",
+    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, trace on/off/clear/dump, sound N\n",
                   M5.Imu.isEnabled());
 }
 

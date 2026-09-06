@@ -2,6 +2,7 @@
 
 #include "AudioFeedback.h"
 #include "AnalogInput.h"
+#include "BatteryDoubleTap.h"
 #include "BotUx.h"
 #include "BottomLeds.h"
 #include "CodexLink.h"
@@ -26,7 +27,7 @@ constexpr uint16_t kRed = botux::rgb565(215, 53, 53);
 
 enum class Page : uint8_t { Agents, Control };
 enum class TargetType : uint8_t {
-    None, Settings, PageAgents, PageControl, Agent, Command, Reasoning, Joystick
+    None, Battery, PageAgents, PageControl, Agent, Command, Reasoning, Joystick
 };
 struct Target {
     Target(TargetType targetType = TargetType::None, int8_t targetIndex = -1)
@@ -42,6 +43,7 @@ Settings settings;
 AudioFeedback audio;
 BottomLeds bottomLeds;
 CodexLink codexLink;
+BatteryDoubleTap batteryDoubleTap;
 Page page = Page::Agents;
 Target pressed;
 bool touching = false;
@@ -56,8 +58,6 @@ uint32_t lastPowerMs = 0;
 int8_t battery = -1;
 bool charging = false;
 Settings::Data appliedSettings{};
-int16_t lastTouchX = 0;
-int16_t lastTouchY = 0;
 CodexLink::State lastLinkState = CodexLink::State::Starting;
 bool lastControlReady = false;
 uint32_t lastLightingRevision = 0;
@@ -85,7 +85,7 @@ bool sameTarget(const Target& a, const Target& b)
 Target hitTarget(int16_t x, int16_t y)
 {
     if (x < 0 || x >= kScreenW || y < 0 || y >= kScreenH) return {};
-    if (y < 40 && x >= 272) return {TargetType::Settings, 0};
+    if (y < 40 && x >= 224) return {TargetType::Battery, 0};
     if (y >= 200) return {x < 160 ? TargetType::PageAgents : TargetType::PageControl, 0};
     if (page == Page::Agents && y >= 44 && y < 174)
     {
@@ -155,7 +155,9 @@ void activate(const Target& target)
     static const char* actionKeys[] = {"ACT06", "ACT07", "ACT08", "ACT09", "ACT10", "ACT12"};
     switch (target.type)
     {
-        case TargetType::Settings: settings.open(); audio.select(); break;
+        case TargetType::Battery:
+            if (batteryDoubleTap.tap(nowMs)) { settings.open(); audio.select(); }
+            break;
         case TargetType::PageAgents: page = Page::Agents; audio.select(); break;
         case TargetType::PageControl: page = Page::Control; audio.select(); break;
         case TargetType::Agent:
@@ -199,10 +201,16 @@ void touchBegin(int16_t x, int16_t y)
 {
     touching = true;
     screenTouchGesture = x >= 0 && x < kScreenW && y >= 0 && y < kScreenH;
-    lastTouchX = x;
-    lastTouchY = y;
-    if (settings.isOpen()) { settings.touchBegin(x, y); uiDirty = true; return; }
+    if (settings.isOpen())
+    {
+        batteryDoubleTap.cancel();
+        settings.touchBegin(x, y);
+        syncSettings();
+        uiDirty = true;
+        return;
+    }
     pressed = hitTarget(x, y);
+    if (pressed.type != TargetType::Battery) batteryDoubleTap.cancel();
     joystickMoved = false;
     joystickActive = false;
     if (pressed.type == TargetType::Command && pressed.index == 4)
@@ -218,11 +226,13 @@ void touchBegin(int16_t x, int16_t y)
 void touchMove(int16_t x, int16_t y)
 {
     if (!touching) return;
-    lastTouchX = x;
-    lastTouchY = y;
     if (settings.isOpen())
     {
-        if (settings.touchMove(x, y)) uiDirty = true;
+        if (settings.touchMove(x, y))
+        {
+            syncSettings();
+            uiDirty = true;
+        }
         return;
     }
     if (pressed.type == TargetType::Joystick)
@@ -251,6 +261,7 @@ void touchMove(int16_t x, int16_t y)
     if (pressed.type != TargetType::None && !sameTarget(pressed, hitTarget(x, y)))
     {
         if (pttSent) finishPtt();
+        if (pressed.type == TargetType::Battery) batteryDoubleTap.cancel();
         pressed = {};
         uiDirty = true;
     }
@@ -298,7 +309,7 @@ bool handleTouch()
     if (detail.wasReleased())
     {
         const bool screenEvent = screenTouchGesture;
-        touchEnd(lastTouchX, lastTouchY);
+        touchEnd(detail.x, detail.y);
         return screenEvent;
     }
     return false;
@@ -309,39 +320,83 @@ void handleButtons(bool screenTouchEvent)
     if (screenTouchEvent || touching) return;
     if (settings.isOpen())
     {
-        if (M5.BtnB.wasClicked()) { settings.close(); audio.select(); uiDirty = true; }
+        if (M5.BtnB.wasClicked())
+        {
+            batteryDoubleTap.cancel();
+            settings.close();
+            audio.select();
+            uiDirty = true;
+        }
         return;
     }
-    if (M5.BtnA.wasClicked()) { selectedAgent = (selectedAgent + 5) % 6; audio.select(); uiDirty = true; }
-    else if (M5.BtnB.wasClicked()) { page = page == Page::Agents ? Page::Control : Page::Agents; audio.select(); uiDirty = true; }
-    else if (M5.BtnC.wasClicked()) { selectedAgent = (selectedAgent + 1) % 6; audio.select(); uiDirty = true; }
+    if (M5.BtnA.wasClicked())
+    {
+        batteryDoubleTap.cancel();
+        selectedAgent = (selectedAgent + 5) % 6;
+        audio.select();
+        uiDirty = true;
+    }
+    else if (M5.BtnB.wasClicked())
+    {
+        batteryDoubleTap.cancel();
+        page = page == Page::Agents ? Page::Control : Page::Agents;
+        audio.select();
+        uiDirty = true;
+    }
+    else if (M5.BtnC.wasClicked())
+    {
+        batteryDoubleTap.cancel();
+        selectedAgent = (selectedAgent + 1) % 6;
+        audio.select();
+        uiDirty = true;
+    }
 }
 
 void drawHeader()
 {
     const botux::BotUx::Style style = Settings::themeStyle(settings.data().theme);
     botSprite.pushSprite(&canvas, 0, 0);
-    canvas.setTextDatum(middle_left);
-    canvas.setTextColor(foreground());
-    canvas.drawString("CODEX MICRO", 43, 11);
-    const char* badge = codexLink.controlReady() ? "CODEX" : (codexLink.connected() ? "BLE" : "PAIR");
-    const int16_t badgeWidth = codexLink.controlReady() ? 50 : 38;
-    canvas.fillRoundRect(43, 22, badgeWidth, 15, 5, codexLink.controlReady() ? kGreen : style.accentColor);
-    canvas.setTextDatum(middle_center);
-    canvas.setTextColor(kWhite);
-    canvas.drawString(badge, 43 + badgeWidth / 2, 29);
-    char power[12];
-    if (battery >= 0) snprintf(power, sizeof(power), "%d%%%s", battery, charging ? "+" : "");
-    else snprintf(power, sizeof(power), "--%%");
+    const bool ble = codexLink.connected();
+    const bool ready = codexLink.controlReady();
+    const uint16_t bleColor = ble ? style.accentColor : mutedText();
+    canvas.fillRoundRect(47, 5, 30, 30, 8, ble ? bleColor : surface());
+    if (!ble) canvas.drawRoundRect(47, 5, 30, 30, 8, kLine);
+    const uint16_t bleInk = ble ? kWhite : bleColor;
+    canvas.drawFastVLine(62, 10, 20, bleInk);
+    canvas.drawLine(62, 10, 70, 17, bleInk);
+    canvas.drawLine(70, 17, 55, 27, bleInk);
+    canvas.drawLine(62, 30, 70, 23, bleInk);
+    canvas.drawLine(70, 23, 55, 13, bleInk);
+
+    canvas.fillRoundRect(84, 7, 32, 25, 6, ready ? kGreen : surface());
+    canvas.drawRoundRect(84, 7, 32, 25, 6, ready ? kGreen : kLine);
+    const uint16_t appInk = ready ? kWhite : mutedText();
+    canvas.drawRoundRect(91, 12, 18, 12, 3, appInk);
+    canvas.drawFastVLine(100, 24, 4, appInk);
+    canvas.drawFastHLine(95, 28, 10, appInk);
+
+    const bool down = pressed.type == TargetType::Battery;
+    if (down) canvas.fillRoundRect(224, 4, 92, 32, 8, surface());
+    char power[5];
+    if (battery >= 0) snprintf(power, sizeof(power), "%d", battery);
+    else snprintf(power, sizeof(power), "--");
     canvas.setTextDatum(middle_right);
-    canvas.setTextColor(mutedText());
-    canvas.drawString(power, 267, 20);
-    const bool down = pressed.type == TargetType::Settings;
-    canvas.fillRoundRect(272, 2, 46, 36, 8, down ? style.accentColor : surface());
-    canvas.drawRoundRect(272, 2, 46, 36, 8, kLine);
-    canvas.setTextDatum(middle_center);
-    canvas.setTextColor(down ? kWhite : foreground());
-    canvas.drawString("SET", 295, 20);
+    canvas.setTextColor(down ? foreground() : mutedText());
+    canvas.drawString(power, 272, 20);
+    const uint16_t powerColor = charging ? style.accentColor : foreground();
+    canvas.drawRoundRect(279, 12, 28, 16, 3, powerColor);
+    canvas.fillRect(307, 17, 3, 6, powerColor);
+    if (battery > 0)
+    {
+        const int16_t width = static_cast<int16_t>((static_cast<int32_t>(battery) * 22) / 100);
+        canvas.fillRect(282, 15, width, 10, powerColor);
+    }
+    if (charging)
+    {
+        canvas.drawLine(293, 13, 289, 21, kWhite);
+        canvas.drawLine(289, 21, 295, 19, kWhite);
+        canvas.drawLine(295, 19, 292, 27, kWhite);
+    }
 }
 
 void drawAgentCard(uint8_t index)
@@ -371,25 +426,23 @@ void drawAgentCard(uint8_t index)
 void drawTabs()
 {
     const uint16_t accent = Settings::themeStyle(settings.data().theme).accentColor;
-    const bool agentOn = page == Page::Agents || pressed.type == TargetType::PageAgents;
-    const bool controlOn = page == Page::Control || pressed.type == TargetType::PageControl;
-    canvas.fillRoundRect(4, 201, 154, 37, 8, agentOn ? accent : surface());
-    canvas.fillRoundRect(162, 201, 154, 37, 8, controlOn ? accent : surface());
+    if (pressed.type == TargetType::PageAgents) canvas.fillRect(0, 201, 160, 39, surface());
+    if (pressed.type == TargetType::PageControl) canvas.fillRect(160, 201, 160, 39, surface());
+    canvas.drawFastHLine(0, 200, 320, accent);
     canvas.setTextDatum(middle_center);
-    canvas.setTextColor(agentOn ? kWhite : foreground());
-    canvas.drawString("AGENTS  1/2", 81, 220);
-    canvas.setTextColor(controlOn ? kWhite : foreground());
-    canvas.drawString("CONTROL  2/2", 239, 220);
+    canvas.setTextColor(foreground());
+    canvas.drawString("<", 34, 220);
+    canvas.drawString(page == Page::Agents ? "1 / 2" : "2 / 2", 160, 220);
+    canvas.drawString(">", 286, 220);
 }
 
 void drawAgentsPage()
 {
     for (uint8_t i = 0; i < LightingState::kSlotCount; ++i) drawAgentCard(i);
-    char detail[44];
-    snprintf(detail, sizeof(detail), "SLOT %u  %s", static_cast<unsigned>(selectedAgent + 1),
-             codexLink.controlReady() ? "CODEX READY" : "PAIR AND OPEN CODEX");
+    char detail[16];
+    snprintf(detail, sizeof(detail), "SLOT %u / 6", static_cast<unsigned>(selectedAgent + 1));
     canvas.setTextDatum(middle_center);
-    canvas.setTextColor(codexLink.controlReady() ? kGreen : mutedText());
+    canvas.setTextColor(mutedText());
     canvas.drawString(detail, 160, 183);
     drawTabs();
 }
@@ -471,7 +524,7 @@ void handleSerial()
                     serialLength = 0;
                     return;
                 }
-                else if (serialLength == 1 && serialCommand[0] >= '0' && serialCommand[0] <= '3')
+                else if (serialLength == 1 && serialCommand[0] >= '0' && serialCommand[0] <= '5')
                 {
                     if (serialCommand[0] == '0') { settings.close(); page = Page::Agents; }
                     else if (serialCommand[0] == '1') { settings.close(); page = Page::Control; }
@@ -611,7 +664,7 @@ void loop()
         ++fullPushCount;
         uiDirty = false;
     }
-    else if (settings.isOpen()) botSprite.pushSprite(0, 0);
+    else if (settings.isOpen()) botSprite.pushSprite(2, 0);
     else
     {
         M5.Display.pushImage(0, 0, kScreenW, 40, static_cast<uint16_t*>(canvas.getBuffer()));

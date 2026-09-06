@@ -192,3 +192,13 @@ Done trial. Only a later explicit `cal save`, after that independent trial succe
 writes one versioned coefficient blob in the dedicated `watch-touch` namespace;
 `cal reset` clears it and restores identity. No coefficient from the earlier probe is
 reused or compiled as a default.
+
+The calibration firmware at `bc06505` passed 24 host-runner products and built with
+48,448 B RAM and 1,016,617 B flash. Its 1,016,976 B image has SHA-256
+`f1ca595aedfdef526beebfb1c54afc28ac4c7bb6603e90e619337316857da36f`; upload to
+`/dev/cu.usbmodem214201` completed with hash verification while preserving NVS.
+Runtime readback before training reported `stored=0`, no RAM candidate, and the exact
+identity matrix. All six `cal map` anchors, including separate x/y axes and the former
+bottom probe, converted identically. The native 466 by 466 TRAIN 1/5 framebuffer in
+`tmp/done-debug/affine-train.png` passed layout review. Physical training, independent
+holdout acceptance, a normal Done trial, and any subsequent profile save remain pending.

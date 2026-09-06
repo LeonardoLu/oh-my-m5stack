@@ -1,8 +1,9 @@
 # September 6 interaction iteration — validation
 
-Status: implementation and on-device rendering checks are substantially complete;
-**Codex end-to-end HID connection is still under validation**. Bluetooth discovery
-alone is not proof of app interoperability. See [requirements](interaction-iteration.md).
+Status: the requirement audit is complete. Implementation, native rendering,
+real Codex connection, physical HID input and host lighting feedback are verified.
+The final touch fix passed host checks/review and was flashed with automatic
+reconnection confirmed. See [requirements](interaction-iteration.md).
 
 ## Verified implementation
 
@@ -31,7 +32,7 @@ errors. Temporary diagnostics and reference extraction stay in ignored `tmp/`.
 | Device | Previous measured FPS | New measured FPS | Evidence |
 | --- | ---: | ---: | --- |
 | StopWatch | 17.79 | 39.0 | Five-second physical-device timing windows |
-| Core2 | 18.11 | 30.30 | Final candidate, Bluetooth advertising |
+| Core2 | 18.11 | 30.30 | Bluetooth connected to Codex, initialized RPC transport |
 
 StopWatch steady averages: update 0.208 ms, drawing 8.7 ms, partial display push
 14.464 ms, maximum frame 25.7 ms. The orb's visible area is approximately 2.25×
@@ -44,24 +45,51 @@ capture was fixed and recaptured. These are actual M5GFX font pixels from the
 firmware canvas, not panel photographs; they establish raster layout, not outdoor
 readability or physical panel color accuracy.
 
-Core2 steady drawing maximum was 3.65 ms and partial push maximum was 5.54 ms,
-with 120,480 bytes free heap and 4,030,639 bytes free PSRAM. These measurements
-were collected while advertising; connected HID traffic remains to be measured.
+Core2 connected steady drawing maximum was 3.77 ms and partial push maximum
+was 5.53 ms, with 114,468 bytes free heap and 4,030,639 bytes free PSRAM. The
+firmware reported BLE connected, RPC ready, MTU 67, and three initialization RPCs.
+Steady FPS remained 30.30 after initialization; the reconnect window was 29.78.
 The final native 320×240 Agents, Control and Settings page captures have correct
 RGB565 byte order and readable native Font2 text. Both devices were flashed successfully with image
 hash verification and booted without reset loops in the observed timing windows.
 
 Final build sizes: StopWatch RAM 24,096 bytes, flash 596,429 bytes; Core2 RAM
-46,696 bytes, flash 1,395,657 bytes.
+46,696 bytes, flash 1,395,737 bytes.
 
-## Connection evidence and remaining checks
+## Connection and interaction evidence
 
 - macOS Bluetooth discovers `Core2 Codex Micro` with keyboard appearance.
 - The HID descriptor has an idle keyboard collection and a vendor collection;
   application commands use only the vendor report.
 - DIS PnP values account for the pinned BLE library's byte-order implementation.
-- Real OS HID enumeration, Codex initialization/lighting RPCs, harmless manual
-  control, and disconnect/reconnect validation remain pending pairing.
+- macOS HID enumeration reports VID 0x303A, PID 0x8360, usage page 0xFF00,
+  release 257 and Bluetooth transport for `Core2 Codex Micro`.
+- Actual CodexMicroService logs on September 6 at 03:52 UTC show successful
+  `v.oai.rgbcfg`, `v.oai.thstatus` and `device.status` responses. Status contains
+  firmware version `core2-emulator-0.1.0`, numeric battery and boolean charging.
+  No diagnostic status probe was used to establish this handshake evidence.
+- After a device reset, Bluetooth and Codex automatically reconnect. Firmware
+  transitions from BLE-only to ready with MTU 67 and receives three initialization
+  RPCs again. The connected native capture shows the CODEX badge and host colors.
+- macOS initially denied HID open with error 0xE00002E2 even though Codex Input
+  Monitoring was enabled. Fully restarting Codex applied the permission; the
+  next process established the connection successfully.
+- In a physical interaction window, firmware event count increased from 0 to 63
+  and host RPC count from 3 to 12. No diagnostic key command was sent by the
+  assistant. The SDK does not log each handled HID notification, so handler
+  registration messages were not used as input-delivery evidence.
+- A final independent Sol/high read-only audit matched RPC types, light payloads,
+  AG/ACT/encoder events and normalized analog coordinates against the installed
+  SDK. No protocol-shape mismatch was found.
+- Continuous dragging exposed redundant full-screen rendering (20.78 FPS with
+  49 full transfers in a five-second window). A focused fix removes unchanged
+  drag redraws and sends a neutral joystick event immediately on center return;
+  the final Core2 build, framing/analog host tests, and an independent touch-state
+  path review pass. Center return preserves the drag flag, so lifting afterward
+  cannot emit an accidental encoder press. The final image was flashed with hash
+  verification; after reset it reconnected to Codex, initialized three RPCs and
+  sustained 30.30 FPS. The final drag path was checked by code review and host
+  tests; a separate post-fix continuous-drag FPS value is not claimed.
 - Official Micro DFU commands are rejected; its firmware cannot run on Core2.
 
 ## Design references
@@ -92,3 +120,20 @@ Capture is an explicit diagnostic operation and pauses the device during transfe
 `micro_hid_probe.py` enumerates by default. Its optional `--status` requests only
 `device.status`; it sends no key action. A successful probe response alone does
 not establish that Codex is connected.
+
+## Requirement audit
+
+| Requested outcome | Evidence |
+| --- | --- |
+| Core2 connects to Codex as Micro HID | OS vendor-interface enumeration; actual Codex status/lighting RPC responses; automatic reconnect; physical input counter and subsequent host updates |
+| Larger centered watch companion; no stopwatch | 310×310 centered sprite, approximately 242 px orb; watch-only RTC/date/settings implementation and native captures |
+| Borrow factory battery/charging/settings behavior | Pinned factory-source review; top-edge battery overlay, charge transition view, native text and saved settings |
+| More expressions and behaviors | Shared renderer's 10 expression and eight animation modes; actual-renderer sequence/regression checks |
+| Direct interaction, transitions, IMU and settings | Watch touch/button selectors and live editors; both apps' motion input, reduced-motion and NVS settings; cross review |
+| Readable fonts | Native 466×466 watch and 320×240 Core2 framebuffer inspection, including both settings pages |
+| Better rendering performance | Physical baseline and final timing windows; partial rendering/static caching; removal of redundant drag redraws |
+
+Verification limits: framebuffer captures are not photographs or outdoor panel
+measurements. Destructive command actions and microphone recording were not
+triggered by the assistant; their mappings and press/release semantics were
+reviewed against the installed app protocol.

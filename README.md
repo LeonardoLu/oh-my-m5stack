@@ -71,6 +71,11 @@ Codex app's default mappings; the app can remap them. Pair **Core2 Codex Micro**
 macOS Bluetooth settings, then enable/connect Micro in Codex. Core2's USB connector
 is a serial bridge, so host HID communication uses Bluetooth.
 
+On macOS, Codex needs Input Monitoring permission to open this composite HID
+interface. After enabling it in Privacy & Security, fully quit and reopen Codex.
+If the device is paired but stays at `BLE`, check this permission and restart;
+`CODEX` indicates that the RPC transport has initialized.
+
 The header distinguishes advertising (`PAIR`), Bluetooth connection, and a ready
 RPC transport. Agent colors and the ten Bottom2 LEDs reflect host lighting data;
 there are no invented task names or simulated progress. End-to-end connection

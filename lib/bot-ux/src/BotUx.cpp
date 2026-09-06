@@ -932,7 +932,10 @@ void BotUx::_drawEyes() {
     float facingX = gazeX * _directionPose, facingY = gazeY * _directionPose;
     float dx = _m.eyeDX * (1.0f - 0.08f * fabsf(facingX));
     float baseEr = (float)_m.eyeRadius;
-    float eyeAngle = _eyeAngle * (1.0f - _directionPose) + facingX * 0.40f;
+    // Along either side arc, pitch turns the eye axis through vertical.
+    // The bilinear field stays continuous for held/touch gaze and mirrors in x.
+    float eyeAngle = _eyeAngle * (1.0f - _directionPose)
+        - facingX * facingY * (0.34f / (0.85f * 0.85f));
 
     float twist = _eyeTwist + _animEyeTwist;
     float twistCos = cosf(twist), twistSin = sinf(twist);

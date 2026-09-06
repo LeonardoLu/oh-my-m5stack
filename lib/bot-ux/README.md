@@ -377,8 +377,10 @@ remained identical. This is host rendering evidence, not hardware acceptance.
 Right-facing poses now keep the screen-right eye slightly larger, matching the
 actual Idle face; left-facing poses mirror that relationship. The old depth
 coefficient shrank the right eye strongly when looking right. It is now a small
-positive 0.03 coefficient. Directional spacing compression is 0.08, pitch changes
-openness by 0.04, and the signed slant gives UpRight the same 0.34 slope as Idle.
+positive 0.03 coefficient. Directional spacing compression is 0.08 and pitch changes
+openness by 0.04. Slant is a continuous bilinear field of horizontal and vertical
+gaze: UpRight matches Idle at +0.34, Right is vertical, and DownRight reaches
+−0.34. Left-facing poses mirror these signs.
 Eye-group placement is unchanged, including the closer 0.16r downward extent.
 
 ![Actual Idle, UpRight and mirrored UpLeft](docs/idle-up-right-raster.png)
@@ -391,3 +393,11 @@ position and transition checks. All 1,040 combinations and sleep/thinking motion
 checks pass. `render.sh` emits `idle-up-right.ppm`; catalog packaging converts
 this and the updated nine-direction mosaic to the checked-in PNGs. Default Auto
 catalog examples are regenerated from source; the catalog still has 31 entries.
+
+
+The side-arc regression measures the actual ink axis in all six side poses:
+right upper/middle/lower slopes are approximately +0.31 / 0 / −0.31, and left
+poses have matching opposite signs. Continuous `gazeAt()` paths follow a unit
+circle arc through each side; their maximum 16ms ink-axis changes are 0.0127 and
+0.0131, below the 0.055 continuity bound. The tests explicitly defer blinking so
+an unrelated eyelid closure cannot contaminate the orientation measurement.

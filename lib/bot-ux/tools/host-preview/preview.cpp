@@ -782,6 +782,17 @@ struct EyeBox {
     int height() const { return y1-y0+1; }
 };
 struct DirectionRaster { std::vector<uint16_t> pixels; EyeBox eyes[2]; };
+static DirectionRaster captureDirectionRaster(const M5Canvas& canvas, uint16_t eyeColor) {
+    DirectionRaster result; result.pixels.resize(40000); EyeBox group;
+    for (int y=0;y<200;++y) for(int x=0;x<200;++x) {
+        uint16_t c=canvas.readPixel(x,y); result.pixels[y*200+x]=c;
+        if(c==eyeColor) group.add(x,y);
+    }
+    for (int y=0;y<200;++y) for(int x=0;x<200;++x)
+        if(result.pixels[y*200+x]==eyeColor) result.eyes[x<group.cx()?0:1].add(x,y);
+    assert(result.eyes[0].pixels && result.eyes[1].pixels);
+    return result;
+}
 static DirectionRaster directionRaster(botux::BotUx::GazeDirection direction, bool tap = false, bool autoFace = false) {
     using Bot = botux::BotUx;
     gNow = 1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
@@ -790,15 +801,7 @@ static DirectionRaster directionRaster(botux::BotUx::GazeDirection direction, bo
     for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
     if (tap) bot.gazeAt(-0.85f,0.85f,5000); else bot.setGazeDirection(direction);
     for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
-    bot.draw(); DirectionRaster result; result.pixels.resize(40000); EyeBox group;
-    for (int y=0;y<200;++y) for(int x=0;x<200;++x) {
-        uint16_t c=canvas.readPixel(x,y); result.pixels[y*200+x]=c;
-        if(c==style.eyeColor) group.add(x,y);
-    }
-    for (int y=0;y<200;++y) for(int x=0;x<200;++x)
-        if(result.pixels[y*200+x]==style.eyeColor) result.eyes[x<group.cx()?0:1].add(x,y);
-    assert(result.eyes[0].pixels && result.eyes[1].pixels);
-    return result;
+    bot.draw(); return captureDirectionRaster(canvas, style.eyeColor);
 }
 static void checkNineDirectionPerspective() {
     using Bot=botux::BotUx; using G=Bot::GazeDirection;
@@ -860,6 +863,64 @@ static void checkIdleAndUpperRightProportions() {
     float idleSpacing = idle.eyes[1].cx()-idle.eyes[0].cx();
     float directedSpacing = upperRight.eyes[1].cx()-upperRight.eyes[0].cx();
     assert(std::fabs(directedSpacing/idleSpacing-1) < 0.12f);
+}
+
+// Least-squares ink axis, measured from native pixels rather than pose scalars.
+static float eyeInkSlope(const DirectionRaster& raster, int eye) {
+    const auto& box = raster.eyes[eye];
+    double xSum=0, ySum=0, xySum=0, yySum=0, count=0;
+    const uint16_t ink=botux::rgb565(32,36,41);
+    for(int y=box.y0;y<=box.y1;++y) for(int x=box.x0;x<=box.x1;++x) {
+        if(raster.pixels[y*200+x]!=ink) continue;
+        xSum+=x; ySum+=y; xySum+=x*y; yySum+=y*y; ++count;
+    }
+    return (float)((xySum-xSum*ySum/count)/(yySum-ySum*ySum/count));
+}
+
+static void checkSideArcTilt() {
+    using Bot=botux::BotUx; using G=Bot::GazeDirection;
+    const G right[]={G::UpRight,G::Right,G::DownRight};
+    const G left[]={G::UpLeft,G::Left,G::DownLeft};
+    const uint16_t ink=botux::rgb565(32,36,41);
+    for(int pose=0;pose<3;++pose) {
+        auto r=directionRaster(right[pose]), l=directionRaster(left[pose]);
+        for(int eye=0;eye<2;++eye) {
+            float rSlope=eyeInkSlope(r,eye), lSlope=eyeInkSlope(l,1-eye);
+            if(pose==0) assert(rSlope>0.20f && lSlope<-.20f);
+            if(pose==1) assert(std::fabs(rSlope)<0.02f && std::fabs(lSlope)<0.02f);
+            if(pose==2) assert(rSlope<-.20f && lSlope>0.20f);
+            assert(std::fabs(rSlope+lSlope)<0.025f);
+            std::cout << "Side arc pose " << pose << " eye " << eye << " right/left slope " << rSlope << "/" << lSlope << "\n";
+        }
+        unsigned mismatch=0, total=0;
+        for(int y=0;y<200;++y) for(int x=1;x<200;++x) {
+            bool a=r.pixels[y*200+x]==ink,b=l.pixels[y*200+200-x]==ink;
+            if(a||b) ++total;
+            if(a!=b) ++mismatch;
+        }
+        assert(mismatch<total*0.12f);
+    }
+    for(int side:{-1,1}) {
+        gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+        auto style=bot.style(); style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(1234);
+        bot.setMotionAmount(0); bot.setExpression(Bot::Expression::Neutral);
+        bot.gazeAt(side*0.707107f,-0.707107f,10000);
+        for(int i=0;i<100;++i) {gNow+=16;bot.update(gNow);}
+        float previous=0, maxStep=0;
+        for(int frame=0;frame<=240;++frame) {
+            float angle=-0.785398f+1.570796f*std::min(frame,180)/180.0f;
+            gNow+=16; bot.gazeAt(side*cosf(angle),sinf(angle),10000); bot.update(gNow); canvas.clear(); bot.draw();
+            assert(!canvas.outOfBounds());
+            float slope=eyeInkSlope(captureDirectionRaster(canvas,style.eyeColor),1);
+            if(frame) maxStep=std::max(maxStep,std::fabs(slope-previous));
+            if(frame==0) assert(slope*side>0.15f);
+            if(frame==90) assert(std::fabs(slope)<0.06f);
+            if(frame==240) assert(slope*side<-.15f);
+            previous=slope;
+        }
+        std::cout << "Continuous side arc " << side << " maximum 16ms ink-axis step " << maxStep << "\n";
+        assert(maxStep<0.055f);
+    }
 }
 
 static void writeIdleComparison(const std::string& path) {
@@ -1032,6 +1093,7 @@ int main(int argc, char** argv) {
     checkReducedMotionAmplitude();
     checkNineDirectionPerspective();
     checkIdleAndUpperRightProportions();
+    checkSideArcTilt();
     checkDirectionTransitionContinuity();
     checkThinkingTravelAndContinuity();
     checkSleepContinuity();

@@ -51,6 +51,16 @@ be distinguished. Slot numbers 1–6 are physical assignments, not task IDs.
 
 `service-readable.js:1` `applyInactivityLightingOff` sends six off slots when the
 lighting timeout expires. All-off does not establish unassignment or task ending.
+The host setting schema names this preference `codex-micro-lighting-auto-off`,
+offers `off`, 30 seconds, 1/3/10/30 minutes and 1 hour, and defaults to 3 minutes.
+The public Codex Micro settings screen labels it **Auto-dim**; choosing **Off**
+maps `inactivityTimeoutMs` to null, so the host does not schedule the all-off RPC.
+Core2 has no handshake capability that can override this host preference and must
+not guess that an all-off packet was auto-dim or emit fake HID activity to reset it.
+The inspected bundle evidence is `app-initial-86767c3d23e5.js:1`, offsets 1998301
+and 2158504 (duration mapping and persisted setting schema),
+`codex-micro-settings-2a601a7f9b9a.js:1`, offset 64940 (public selector), and
+`service-readable.js:1`, offset 24590 (timer and all-off RPC path).
 
 `webview/assets/codex-micro-bridge-7749dc2a7114.js:1`, offset 12022, permits
 onboarding, mini-game and composer-navigation overrides of slots. `Ft` (offset
@@ -83,12 +93,18 @@ reliable identities, distinct needs-input reasons, and completion events.
   silent. Unknown/Off-to-known transitions also establish evidence silently.
 
 For UI color interpolation, retain the previous rendered color when a new local
-revision arrives. Use the snapshot's original host color for the card background;
+revision arrives. Use the snapshot's original host color for its status marker;
 select contrasting text and a separate selected border/slot badge. Bot follows
 only the selected slot: Working → Working/slow Orbit; NeedsInput → Waiting;
 Error → Blocked; Idle → Idle/Calm; Off → neutral or Sleepy. NewReply may receive
 a short happy visual acknowledgment followed by a settled pose. That visual is
 not evidence of completion. Choosing another slot is not a task-state transition.
+
+The six card backgrounds are fixed local slot-identity colors, with separate
+light, warm and dark sets. A bordered dot keeps the exact host RGB status visible,
+the label keeps its protocol name, and the selected outline and pressed fill are
+independent interaction layers. Thus six simultaneous Working slots remain easy
+to distinguish without changing or hiding the authoritative blue status signal.
 
 ## Notification behavior
 

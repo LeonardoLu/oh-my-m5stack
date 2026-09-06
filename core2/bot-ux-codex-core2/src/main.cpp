@@ -10,6 +10,7 @@
 #include "FreshReplyAttention.h"
 #include "Settings.h"
 #include "AgentSignal.h"
+#include "AgentCardPalette.h"
 #include <UxText.h>
 #include <UxRender.h>
 
@@ -484,21 +485,26 @@ void drawAgentCard(uint8_t index)
 {
     const int16_t x = 4 + (index % 3) * 106, y = 44 + (index / 3) * 65;
     const auto& state = agentSignals.slot(index);
-    const bool known = codexLink.controlReady() && codexLink.threadLightingFresh() && state.zone.color;
-    const uint32_t rgb = known ? state.zone.color : 0x626A76;
-    uint16_t fill = rgb24to565(rgb), ink = contrastingInk(rgb);
+    const agentcard::Colors identity = agentcard::colors(settings.data().theme, index);
+    uint16_t fill = rgb24to565(identity.fill);
+    const uint16_t ink = rgb24to565(identity.ink);
+    const uint32_t statusRgb = state.signal == agentsignal::Signal::Unknown
+        ? 0x626A76 : state.zone.color;
+    const uint16_t statusColor = rgb24to565(statusRgb);
     bool down = pressed.type == TargetType::Agent && pressed.index == index;
-    if (down) fill = ux::blend565(fill, ink, 48);
     const bool freshReply = freshReplyMask & (1u << index);
-    if (freshReply) fill = ux::blend565(fill, kWhite, 42);
+    if (freshReply) fill = ux::blend565(fill, kWhite, 30);
     if (alertUntil[index] && (int32_t)(alertUntil[index] - nowMs) > 0 && !settings.data().reducedMotion) {
         float t = (1600 - (alertUntil[index] - nowMs)) / 1600.0f;
         float envelope = sinf(3.14159265f * t);
-        fill = ux::blend565(fill, ink, (uint8_t)(envelope * 60));
+        fill = ux::blend565(fill, statusColor, (uint8_t)(envelope * 54));
     }
+    if (down) fill = ux::blend565(fill, ink, 48);
     ux::roundRect(canvas, x, y, 100, 60, 9, fill);
-    if (freshReply) ux::strokeRoundRect(canvas, x, y, 100, 60, 9, ink, 2.8f);
+    if (freshReply) ux::strokeRoundRect(canvas, x, y, 100, 60, 9, statusColor, 2.8f);
     if (index == selectedAgent) ux::strokeRoundRect(canvas, x+2, y+2, 96, 56, 7, ink, 1.7f);
+    ux::circle(canvas, x+14, y+13, 8, ink);
+    ux::circle(canvas, x+14, y+13, 5, statusColor);
     ux::circle(canvas, x+85, y+13, 9, ux::blend565(fill, ink, 26));
     char badge[2] = {(char)('1'+index),0};
     canvas.setTextDatum(middle_center); canvas.setTextColor(ink);

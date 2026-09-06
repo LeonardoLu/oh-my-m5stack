@@ -10,9 +10,9 @@ integrated into two device apps:
 
 ```
 lib/bot-ux/                      shared bot animation component (PlatformIO library)
-lib/ux-components/               selective native text, shapes, input and keyboard products
   src/BotUx.{h,cpp}          the component: face, moods, animation
   examples/standalone/       minimal demo
+lib/ux-components/               selective native text, shapes, pointer, keyboard and sound products
 stopwatch/bot-ux-watch/      watch app (PlatformIO project)
 core2/bot-ux-codex-core2/    core2 app (PlatformIO project)
 specs/                       task specs (source of truth)
@@ -31,6 +31,7 @@ tmp/                         scratch / research notes (gitignored)
 - `setStyle(Style)` — personalization (colors, eye/body style, sizes).
 - `setMood(Mood)` — persistent mood; use header enum/count helpers for the complete current set.
 - `setTalking(bool)`, `setBattery(pct)`, `setSignal(bars)`, `setTime(h,m,s,pm)`, `setLabel(text)`.
+- `setGazeDirection(GazeDirection)` — Auto/Center/Left/Right/Up/Down, temporary `gazeAt` overrides expire.
 - `poke()` — transient surprise→happy reaction.
 - Naming, bilingual `describe`, curated presets and temporary `gazeAt` are additive APIs.
   Counts/name helpers drive independent device combination previews.
@@ -39,7 +40,7 @@ tmp/                         scratch / research notes (gitignored)
 ## Working rules
 
 - Match existing code style; keep comments purposeful.
-- The user's current goal and `specs/ux-components-iteration.md` supersede older
+- The user's current goal and `specs/interaction-dynamics.md` supersede older
   app notes. Core2 now targets a real Codex Micro-compatible Bluetooth HID link;
   distinguish pairing, app handshake, host feedback, and local animation previews.
 - Keep durable implementation and validation notes in `specs/`; `tmp/` is scratch,

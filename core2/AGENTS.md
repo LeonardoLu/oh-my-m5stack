@@ -47,8 +47,13 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   settings entry: two valid taps within 420 ms open settings; one tap is inert.
 - Settings provide continuous RGB editing for the bot body, eyes, and accent,
   plus style, English naming, English/Chinese descriptions and independent
-  12×10×8 previews in a separate checked 112 px canvas. Preview selector values
+  12×10×8 previews in a separate checked 112 px canvas. Motion also selects
+  Auto/Center/Left/Right/Up/Down gaze. Preview selector values
   do not change NVS or overwrite the actual host Bot. Save valid edits in NVS.
+- Command surfaces use semantic colors and pressed feedback. Fast is an action
+  that requests a toggle; the protocol does not report its on/off value. Only a
+  successfully sent PTT press shows MIC ACTIVE until release.
+- Paper/Warm/Dark use Settings::themePalette across deck and settings.
 - Reject bootloader/firmware operations; incompatible hardware firmware must
   never be accepted by the Core2 emulator.
 
@@ -58,7 +63,8 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   targets are at least 40 px high. Push-to-talk also releases on drag-off.
 - Bottom pagers use their full left and right halves as touch targets. Serial
   capture selectors are 0 Agents, 1 Control, 2 General, 3 Bot, 4 Color, 5 Motion,
-  6 Identity, 7 Preview, 8 Lights, 9 naming keyboard.
+  6 Identity, 7 Preview, 8 Lights, 9 naming keyboard. `sound` previews a cue;
+  `ui-tap x y` only operates an already-open Settings page, never HID controls.
 - Avoid allocation in update/draw and BLE framing paths. Cache static UI and
   bound frame pacing so BLE callbacks stay responsive.
 - BLE callbacks only latch connection/MTU state. The main loop owns reconnect,
@@ -80,6 +86,6 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
 - Bottom2 offers Off/Host/Alive. Alive preserves status hue with gentle breathing,
   traveling emphasis and bounded interaction. Reduced Motion is static. Both
   mode Off and brightness zero immediately clear LEDs; notify(0) cancels notices.
-- Current contracts: specs/ux-components-iteration.md, specs/agent-signal-contract.md
+- Current contracts: specs/interaction-dynamics.md, specs/agent-signal-contract.md
   and specs/core2-alive-lighting.md. Validate with tools/check_host.sh and native
   capture/telemetry; never confuse serial transfer FPS with steady animation.

@@ -7,7 +7,7 @@ with a Grok Bot-inspired orb and state-driven motion.
 |---|---|---|---|
 | **watch** | `stopwatch/bot-ux-watch/` | M5Stack StopWatch (ESP32-S3) | RTC watch, date, battery/charging, companion and settings; no stopwatch |
 | **codex** | `core2/bot-ux-codex-core2/` | M5Stack Core2 + M5GO Battery Bottom2 v1.3 | Codex Micro-compatible Bluetooth HID controller with host RGB feedback |
-| **ux-components** | `lib/ux-components/` | (shared) | Native coverage text/shapes, continuous scrolling and naming keyboard; fonts link selectively |
+| **ux-components** | `lib/ux-components/` | (shared) | Native text/shapes, pointer gestures, scrolling, keyboard and synthesized/PCM sound; products link selectively |
 | **bot-ux** | `lib/bot-ux/` | (shared) | The bot animation component — expressions, behaviors, eased transitions, IMU motion and personalization |
 
 ## Layout
@@ -56,6 +56,8 @@ the next touch/button press wakes it without activating a control.
 Swipe down from the top edge for the compact battery/charging panel. Settings
 lists follow the finger with continuous pixel scrolling and inertia. Editors
 have Back/Done controls, native antialiased text and a live HSV body-color picker.
+Settings capture one pointer target, tolerate small finger drift and slow holds,
+and show a pressed state; a scroll gesture never also clicks a row.
 Time and `yyyy/mm/dd {weekday}` share one region. A hideable Bot description
 occupies the opposite region; Layout swaps the two. Time/date use the RTC;
 preferences use NVS. Auto expression slowly shuffles calm moods, while interaction
@@ -65,7 +67,9 @@ on shake reactions.
 The companion is **Milo** by default. Both devices support a 16-character English
 name, English/Chinese descriptions, and independent live selectors for all
 12 moods × 10 expressions × 8 animations (960 combinations). Preview choices do
-not overwrite the persistent expression/action or Core2 host state.
+not overwrite the persistent expression/action or Core2 host state. Gaze can be
+Auto, Center, Left, Right, Up or Down. Temporary screen-directed gaze returns to
+that preference; normal presets retain continuous motion.
 
 ## The bot
 
@@ -112,6 +116,11 @@ Bottom2 uses ten SK6812 LEDs on GPIO25 and replaces the stock Core2 bottom. Scre
 LEDs and optional sound provide feedback. Official Micro firmware updates are
 unsupported because Core2 is different hardware.
 
+Both devices share 16 synthesized cues with six timbres, envelopes, glides and
+scales; optional signed/unsigned 8-bit PCM is a separate product. A fixed-buffer
+sender isolates the SDK playback queue from the UI loop. Sound preferences apply
+to new cues, and queued audio drains smoothly. See [the sound guide](lib/ux-components/SOUND.md).
+
 ## Host checks and previews
 
 These checks require a C++11 compiler, without an attached device:
@@ -120,11 +129,13 @@ These checks require a C++11 compiler, without an attached device:
 sh tools/check_host.sh
 ```
 
-The suite runs 11 standalone C++ contracts plus the real BotUx renderer checks.
+The suite runs 15 standalone C++ contracts plus the real BotUx renderer checks.
 It covers input timing, continuous scrolling, native font/shape coverage, naming,
-960 combinations, HID framing, exact host status projection and LED envelopes.
+960 combinations at multiple late time windows, gaze and dot antialiasing, HID
+framing, exact host status projection, LED envelopes, sound waveforms/PCM and
+playback-thread stalls.
 Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
-[native firmware acceptance](specs/ux-components-validation.md) records that separately.
+[native firmware acceptance](specs/interaction-dynamics-validation.md) records that separately.
 
 ## Design docs
 
@@ -134,9 +145,11 @@ Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
 [HID iteration requirements](specs/interaction-iteration.md),
 [HID validation](specs/interaction-validation.md),
 [previous UX validation](specs/ux-polish-validation.md),
-[current requirements](specs/ux-components-iteration.md),
+[previous shared UX requirements](specs/ux-components-iteration.md),
+[current requirements](specs/interaction-dynamics.md),
 [shared UX library](specs/ux-components-library.md),
-[current validation](specs/ux-components-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
+[previous shared UX validation](specs/ux-components-validation.md),
+[current validation](specs/interaction-dynamics-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
 research, generated previews and validation logs.
 
 ## License

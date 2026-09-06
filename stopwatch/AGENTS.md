@@ -12,7 +12,7 @@ stopwatch mode in this app.
   the primary input; buttons are shortcuts.
 - Power: **M5PM1** through M5Unified. Battery is derived from filtered VBAT; charging
   requires VIN plus the active-low M5PM1 GPIO2 charge state.
-- Audio: ES8311 codec + 1 W speaker via `M5.Speaker.tone()`.
+- Audio: ES8311 codec + 1 W speaker via shared `ux::sound::Synth` and the M5 PCM sender.
 - RTC: RX8130CE via `M5.Rtc`.
 
 ## Module layout
@@ -23,7 +23,8 @@ stopwatch/bot-ux-watch/
   include/CalendarMath.h   # deterministic date helpers
   include/WatchFace.h      # owns botux::BotUx + RTC/power face
   include/Settings.h       # NVS-backed preferences
-  include/WatchInteraction.h # chord, scroll, motion filter and ambient timing
+  include/WatchInteraction.h # chord, motion filter and ambient timing
+  include/WatchControls.h    # shared render/input target geometry
   include/Power.h          # M5PM1 readings + brightness
   src/main.cpp             # face/settings/editors + input/frame loop
   src/WatchFace.cpp
@@ -66,8 +67,11 @@ official bot treatment uses dark pill eyes.
 - Settings and Bot Personality show a 288 px continuous list viewport. Shared
   ScrollModel follows finger displacement in pixels and applies bounded inertia;
   draw and hit tests use the same offset, and a drag cannot activate a row. Every editor has touch controls plus Back/Done;
-  buttons remain
-  optional shortcuts.
+  buttons remain optional shortcuts.
+  `ux::PointerSession` owns each settings sequence: 14 px vertical travel promotes
+  list scrolling, drag never clicks, buttons allow slow holds and 6 px release
+  slop. Cancel inertia before target capture; use WatchControls for hit geometry.
+  Color surfaces retain the pointer through drag and cannot activate Done.
 - Any touch or A/B press wakes from doze and is consumed, so it cannot trigger the
   control underneath.
 
@@ -83,7 +87,7 @@ official bot treatment uses dark pill eyes.
   picker previews live and Done persists it.
 - NVS persists 12/24-hour format, seconds, theme, shape, eye style, custom HSV body
   color, expression, animation, wrist response, motion amount/speed, brightness and
-  sound, name, language, caption visibility and swapped layout. RTC hardware
+  sound, name, language, gaze direction, caption visibility and swapped layout. RTC hardware
   persists time/date.
 - BMI270 tilt passes through a low-pass filter and dead zone. Shake uses hysteresis and
   a seven-second cooldown before poke. Auto expression shuffles among calm ambient moods
@@ -97,7 +101,10 @@ official bot treatment uses dark pill eyes.
   0 face, 1 settings, 2 personality, 3 expression, 4 appearance, 5 motion, 6 color,
   7 display, 8 scrolled settings, 9 scrolled personality, 10 battery panel, 11 format,
   12 name, 13 combinations, 14 layout, 15 language, 16 Chinese face, 17 swapped
-  face, 18 fractional scroll, 19 animated scroll timing, 20 Happy/Joy/Wave preview.
+  face, 18 fractional scroll, 19 animated scroll timing, 20 Happy/Joy/Wave preview, 21 gaze, 22 Thinking dots.
+  `td/tm/tu x y` exercises the same UI pointer path; optional `@N` is echoed in
+  the `UI seq=N` acknowledgement. `ui` reads state; `sound N` previews a cue.
+  Serial pointer replay is separate from hardware touch-controller acceptance.
   Language/layout diagnostics restore settings when leaving; no NVS write.
   Single digits remain accepted for compatibility; page selection never saves NVS.
 
@@ -106,4 +113,4 @@ official bot treatment uses dark pill eyes.
 - Match existing code style; keep comments purposeful. No per-frame heap allocation.
 - Keep the state machine in `main.cpp`; modules are plain classes.
 - Persist settings with `Preferences` (NVS). Do not over-engineer edge cases.
-- The user's current goal and `specs/ux-components-iteration.md` supersede older stopwatch notes.
+- The user's current goal and `specs/interaction-dynamics.md` supersede older stopwatch notes.

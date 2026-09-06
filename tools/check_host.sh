@@ -5,8 +5,8 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 OUT="$ROOT/tmp/host-checks"
 mkdir -p "$OUT"
-for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls; do
-  c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include \
+for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls test_ui_controls; do
+  c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
     "stopwatch/bot-ux-watch/test/$name.cpp" -o "$OUT/$name"
   "$OUT/$name"
   echo "PASS $name"
@@ -26,5 +26,18 @@ c++ -std=c++11 -Wall -Wextra -Werror -Ilib/ux-components/src \
   lib/ux-components/test/components_test.cpp lib/ux-components/src/Font*.cpp -o "$OUT/ux-components"
 "$OUT/ux-components" "$OUT/ux-components.ppm"
 echo 'PASS ux-components'
+c++ -std=c++11 -Wall -Wextra -Werror -Ilib/ux-components/src lib/ux-components/test/pointer_test.cpp -o "$OUT/pointer"
+"$OUT/pointer"
+echo 'PASS pointer'
+mkdir -p "$OUT/sound"
+c++ -std=c++11 -O2 -Wall -Wextra -Werror -Ilib/ux-components/src \
+  lib/ux-components/test/sound/sound_test.cpp lib/ux-components/src/UxSound.cpp \
+  lib/ux-components/src/UxSoundPcm.cpp -o "$OUT/sound/test"
+"$OUT/sound/test" "$OUT/sound"
+echo 'PASS sound'
+c++ -std=c++11 -O2 -Wall -Wextra -Werror -pthread -Ilib/ux-components/src \
+  lib/ux-components/test/sound/sender_test.cpp -o "$OUT/sound/sender"
+"$OUT/sound/sender"
+echo 'PASS sound-sender'
 sh lib/bot-ux/tools/host-preview/render.sh "$OUT/bot-preview"
 echo 'PASS bot-preview'

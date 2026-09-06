@@ -180,7 +180,7 @@ const int16_t kTouchRepeatTargets[kTouchRepeatCount][2] = {
     {321,321}, {233,399}, {233,233},
     {233,399}, {233,233}, {321,321}
 };
-enum class TouchCalibrationMode : uint8_t { Probe, Train, Verify, Repeat, Passed, Failed };
+enum class TouchCalibrationMode : uint8_t { Probe, Train, Verify, Passed, Failed, Repeat };
 TouchCalibrationResult _touchCalibrationResults[kTouchCalibrationCount];
 TouchCalibrationResult _touchValidationResults[kTouchCalibrationCount];
 TouchCalibrationResult _touchRepeatResults[kTouchRepeatCount];

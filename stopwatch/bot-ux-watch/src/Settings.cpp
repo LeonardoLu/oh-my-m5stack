@@ -38,6 +38,10 @@ const char* kNamespace = "watch";
 void Settings::begin() {
     Preferences prefs;
     prefs.begin(kNamespace, false);
+    prefs.getString("botName", "Milo").toCharArray(_data.botName, sizeof(_data.botName));
+    _data.language = prefs.getUChar("language", 0) == 1 ? 1 : 0;
+    _data.showDescription = prefs.getBool("description", true);
+    _data.swapLayout = prefs.getBool("swapLayout", false);
     _data.hour24      = prefs.getBool("hour24", _data.hour24);
     _data.showSeconds = prefs.getBool("seconds", _data.showSeconds);
     _data.sound       = prefs.getBool("sound", _data.sound);
@@ -74,6 +78,10 @@ void Settings::begin() {
 void Settings::save() {
     Preferences prefs;
     prefs.begin(kNamespace, false);
+    prefs.putString("botName", _data.botName);
+    prefs.putUChar("language", _data.language);
+    prefs.putBool("description", _data.showDescription);
+    prefs.putBool("swapLayout", _data.swapLayout);
     prefs.putBool("hour24", _data.hour24);
     prefs.putBool("seconds", _data.showSeconds);
     prefs.putBool("sound", _data.sound);

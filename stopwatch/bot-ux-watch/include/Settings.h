@@ -17,6 +17,10 @@ public:
     static const uint8_t ANIMATION_COUNT = 8;
 
     struct Data {
+        char    botName[17] = "Milo";
+        uint8_t language = 0;
+        bool showDescription = true;
+        bool swapLayout = false;
         bool    hour24      = true;
         bool    showSeconds = false;
         bool    sound       = true;

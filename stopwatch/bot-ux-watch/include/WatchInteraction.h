@@ -163,3 +163,21 @@ private:
 };
 
 } // namespace watchinteraction
+
+namespace watchinteraction {
+class SingleDoubleClick {
+public:
+    enum class Event { None, Single, Double };
+    Event poll(bool release, uint32_t now) {
+        if (release && _pending && now - _at <= 320) { _pending = false; return Event::Double; }
+        bool single = _pending && now - _at > 320;
+        if (single) _pending = false;
+        if (release) { _pending = true; _at = now; }
+        return single ? Event::Single : Event::None;
+    }
+    void cancel() { _pending = false; }
+private:
+    bool _pending = false;
+    uint32_t _at = 0;
+};
+}

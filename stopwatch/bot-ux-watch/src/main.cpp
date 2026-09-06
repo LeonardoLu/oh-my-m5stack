@@ -10,6 +10,9 @@
 #include "TimedState.h"
 #include "WatchFace.h"
 #include "WatchInteraction.h"
+#include "WatchUi.h"
+#include <UxInput.h>
+#include <UxKeyboard.h>
 
 #include <esp_heap_caps.h>
 #include <math.h>
@@ -17,17 +20,17 @@
 #include <string.h>
 
 enum class Screen : uint8_t { Face, Settings, Personalize, Editor };
-enum class Editor : uint8_t { None, Time, Date, Format, Expression, Appearance, Motion, Color, Display };
-enum class MenuItem : uint8_t { Time, Date, Format, Personalize, Display, Done, Count };
-enum class PersonalItem : uint8_t { Expression, Action, Appearance, Color, Intensity, Speed, Back, Count };
+enum class Editor : uint8_t { None, Time, Date, Format, Expression, Appearance, Motion, Color, Display, Name, Preview, Layout, Language };
+enum class MenuItem : uint8_t { Time, Date, Format, Personalize, Display, Layout, Done, Count };
+enum class PersonalItem : uint8_t { Expression, Action, Appearance, Color, Name, Language, Preview, Intensity, Speed, Back, Count };
 using watchinput::Gesture;
 
 namespace {
 constexpr int16_t kW = 466;
 constexpr int16_t kH = 466;
-constexpr int16_t kBotSize = 310;
+constexpr int16_t kBotSize = 286;
 constexpr int16_t kBotX = (kW - kBotSize) / 2;
-constexpr int16_t kBotY = 66;
+constexpr int16_t kBotY = 90;
 constexpr int16_t kPreviewSize = 178;
 constexpr int16_t kPreviewX = (kW - kPreviewSize) / 2;
 constexpr int16_t kPreviewY = 62;
@@ -40,10 +43,10 @@ constexpr uint32_t kDozeFrameMs = 250;
 constexpr uint8_t kLowBattery = 15;
 
 const char* const kMenuLabels[(uint8_t)MenuItem::Count] = {
-    "TIME", "DATE", "FORMAT", "BOT", "DISPLAY", "DONE"
+    "TIME", "DATE", "FORMAT", "BOT", "DISPLAY", "LAYOUT", "DONE"
 };
 const char* const kPersonalLabels[(uint8_t)PersonalItem::Count] = {
-    "EXPRESSION", "ACTION", "APPEARANCE", "COLOR", "INTENSITY", "SPEED", "BACK"
+    "EXPRESSION", "ACTION", "APPEARANCE", "COLOR", "NAME", "LANGUAGE", "COMBINATIONS", "INTENSITY", "SPEED", "BACK"
 };
 const char* const kMonths[12] = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                                   "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
@@ -68,9 +71,22 @@ Screen _personalParent = Screen::Settings;
 watchinput::ButtonGesture _buttonA;
 watchinput::ButtonGesture _buttonB;
 watchinput::TouchGesture _touch;
+watchinteraction::SingleDoubleClick _bClick;
+bool _listTouch = false;
+bool _diagnosticScroll = false;
+int _namePressedKey = -1;
 watchinteraction::SettingsChord _settingsChord;
 watchinteraction::ScrollList _settingsList;
 watchinteraction::ScrollList _personalList;
+ux::ScrollModel _settingsScroll, _personalScroll;
+ux::NameEditor _nameEditor;
+uint32_t _scrollMs = 0;
+uint8_t _previewMood = 0, _previewExpression = 0, _previewAnimation = 0;
+bool _manualPreset = false;
+botux::BotUx::Preset _manualCombo{botux::BotUx::Mood::Idle, botux::BotUx::Expression::Auto, botux::BotUx::Animation::Auto};
+uint32_t _gazeUntil = 0;
+bool _originalManualPreset = false;
+botux::BotUx::Preset _originalManualCombo = _manualCombo;
 watchinteraction::MotionFilter _motionFilter;
 watchinteraction::AmbientCycle _ambientCycle;
 int16_t _tapX = 0, _tapY = 0;
@@ -85,6 +101,7 @@ uint32_t _statusPanelUntilMs = 0;
 bool _dozing = false;
 bool _renderReady = false;
 bool _uiDirty = true;
+bool _listBandOnly = false;
 bool _faceNeedsClear = true;
 uint32_t _lastFrameMs = 0;
 uint32_t _lastImuReadMs = 0;
@@ -114,6 +131,22 @@ static bool hit(int16_t x, int16_t y, int16_t left, int16_t top, int16_t width, 
     return x >= left && x < left + width && y >= top && y < top + height;
 }
 
+static bool tapHit(int16_t left, int16_t top, int16_t width, int16_t height) {
+    return hit(_tapX, _tapY, left, top, width, height)
+        && hit(_touch.startX(), _touch.startY(), left, top, width, height);
+}
+
+static void markListMoved() {
+    if (!_uiDirty) _listBandOnly = true;
+    _uiDirty = true;
+}
+
+static void revealRow(ux::ScrollModel& scroll, uint8_t index) {
+    float top = index * kMenuStep;
+    if (top < scroll.offset()) scroll.setOffset(top);
+    else if (top + kMenuStep > scroll.offset() + 288) scroll.setOffset(top + kMenuStep - 288);
+}
+
 static void playTone(uint16_t frequency, uint16_t duration) {
     if (settings.data().sound) M5.Speaker.tone(frequency, duration);
 }
@@ -132,11 +165,14 @@ static void applySettings() {
     settings.rebuildStyle();
     settings.apply(face.bot());
     settings.apply(previewBot);
+    face.bot().setName(settings.data().botName);
+    previewBot.setName(settings.data().botName);
+    face.setLayout(settings.data().swapLayout, settings.data().showDescription, settings.data().language);
     auto expression = (botux::BotUx::Expression)settings.data().expression;
     auto animation = (botux::BotUx::Animation)settings.data().animation;
-    face.bot().setExpression(expression, 500);
+    face.bot().setExpression(_manualPreset ? _manualCombo.expression : expression, 500);
     previewBot.setExpression(expression, 500);
-    face.bot().setAnimation(animation);
+    face.bot().setAnimation(_manualPreset ? _manualCombo.animation : animation);
     previewBot.setAnimation(animation);
     face.bot().setReducedMotion(!settings.data().motion);
     previewBot.setReducedMotion(!settings.data().motion);
@@ -218,6 +254,8 @@ static botux::BotUx::Mood faceMood(uint32_t now) {
     if (_happyAcknowledgment.active(now)) return botux::BotUx::Mood::Happy;
     if (_battery <= kLowBattery) return botux::BotUx::Mood::Sleepy;
     if (_screen != Screen::Face) return botux::BotUx::Mood::Listening;
+    if (_manualPreset) return _manualCombo.mood;
+    if ((int32_t)(_gazeUntil - now) > 0) return botux::BotUx::Mood::Idle;
     return settings.data().expression == 0 ? _ambientMood : botux::BotUx::Mood::Idle;
 }
 
@@ -228,6 +266,8 @@ static void enterSettings() {
     _menu = MenuItem::Time;
     _settingsList.configure((uint8_t)MenuItem::Count, kVisibleRows);
     _settingsList.select(0);
+    _settingsScroll.setBounds((uint8_t)MenuItem::Count * kMenuStep, 288);
+    _settingsScroll.setOffset(0);
     _uiDirty = true;
     confirmSound();
 }
@@ -240,6 +280,8 @@ static void enterPersonalize(Screen parent = Screen::Settings) {
     _personal = PersonalItem::Expression;
     _personalList.configure((uint8_t)PersonalItem::Count, kVisibleRows);
     _personalList.select(0);
+    _personalScroll.setBounds((uint8_t)PersonalItem::Count * kMenuStep, 288);
+    _personalScroll.setOffset(0);
     _uiDirty = true;
     confirmSound();
 }
@@ -268,6 +310,7 @@ static void enterEditor(Editor editor, Screen parent = Screen::Settings) {
     _screen = Screen::Editor;
     _editor = editor;
     _originalSettings = settings.data();
+    _originalManualPreset = _manualPreset; _originalManualCombo = _manualCombo;
     _editorParent = parent;
     _editField = 0;
     _uiDirty = true;
@@ -281,6 +324,7 @@ static void enterEditor(Editor editor, Screen parent = Screen::Settings) {
 }
 
 static void cancelEditor() {
+    _manualPreset = _originalManualPreset; _manualCombo = _originalManualCombo;
     settings.data() = _originalSettings;
     applySettings();
     _screen = _editorParent;
@@ -290,6 +334,11 @@ static void cancelEditor() {
 }
 
 static void saveEditor() {
+    if (_editor == Editor::Name) {
+        _nameEditor.press(ux::NameEditor::Done);
+        snprintf(settings.data().botName, sizeof(settings.data().botName), "%s", _nameEditor.text());
+        applySettings();
+    }
     if (_editor == Editor::Time) {
         auto dt = M5.Rtc.getDateTime();
         dt.time.hours = (int8_t)_editHour;
@@ -312,14 +361,6 @@ static void saveEditor() {
     confirmSound();
 }
 
-static void toggleSeconds() {
-    settings.data().showSeconds = !settings.data().showSeconds;
-    face.setShowSeconds(settings.data().showSeconds);
-    settings.save();
-    _uiDirty = true;
-    clickSound();
-}
-
 static void pokeBot() {
     face.bot().poke();
     pokeSound();
@@ -331,9 +372,11 @@ static void startDoze() {
 }
 
 static void cycleExpression(int8_t delta, bool persist = false) {
+    _manualPreset = false;
     settings.data().expression = (uint8_t)((settings.data().expression
         + Settings::EXPRESSION_COUNT + delta) % Settings::EXPRESSION_COUNT);
     auto expression = (botux::BotUx::Expression)settings.data().expression;
+    face.bot().setAnimation((botux::BotUx::Animation)settings.data().animation);
     face.bot().setExpression(expression, 500);
     previewBot.setExpression(expression, 500);
     _uiDirty = true;
@@ -392,6 +435,16 @@ static void changeEditorValue(int8_t delta) {
         if (_editField == 0) settings.data().hour24 = !settings.data().hour24;
         else settings.data().showSeconds = !settings.data().showSeconds;
         applySettings();
+    } else if (_editor == Editor::Layout) {
+        if (_editField == 0) settings.data().showDescription = !settings.data().showDescription;
+        else settings.data().swapLayout = !settings.data().swapLayout;
+        applySettings();
+    } else if (_editor == Editor::Language) {
+        settings.data().language ^= 1; applySettings();
+    } else if (_editor == Editor::Preview) {
+        uint8_t* value = _editField == 0 ? &_previewMood : _editField == 1 ? &_previewExpression : &_previewAnimation;
+        uint8_t count = _editField == 0 ? botux::BotUx::moodCount() : _editField == 1 ? botux::BotUx::expressionCount() : botux::BotUx::animationCount();
+        *value = (*value + count + delta) % count;
     } else if (_editor == Editor::Expression) {
         cycleExpression(delta);
     } else if (_editor == Editor::Appearance) {
@@ -403,6 +456,7 @@ static void changeEditorValue(int8_t delta) {
         applySettings();
     } else if (_editor == Editor::Motion) {
         if (_editField == 0) {
+            _manualPreset = false;
             settings.data().animation = (uint8_t)((settings.data().animation
                 + Settings::ANIMATION_COUNT + delta) % Settings::ANIMATION_COUNT);
         } else if (_editField == 1) {
@@ -436,6 +490,7 @@ static void selectMenuItem() {
         case MenuItem::Format:     enterEditor(Editor::Format); break;
         case MenuItem::Personalize: enterPersonalize(); break;
         case MenuItem::Display:    enterEditor(Editor::Display); break;
+        case MenuItem::Layout:     enterEditor(Editor::Layout); break;
         case MenuItem::Done:       leaveSettings(); break;
         default: break;
     }
@@ -447,6 +502,9 @@ static void selectPersonalItem() {
         case PersonalItem::Action:     enterEditor(Editor::Motion, Screen::Personalize); break;
         case PersonalItem::Appearance: enterEditor(Editor::Appearance, Screen::Personalize); break;
         case PersonalItem::Color:      enterEditor(Editor::Color, Screen::Personalize); break;
+        case PersonalItem::Name: enterEditor(Editor::Name, Screen::Personalize); _nameEditor.begin(settings.data().botName); break;
+        case PersonalItem::Language: enterEditor(Editor::Language, Screen::Personalize); break;
+        case PersonalItem::Preview: enterEditor(Editor::Preview, Screen::Personalize); _previewMood = _previewExpression = _previewAnimation = 0; break;
         case PersonalItem::Intensity:  enterEditor(Editor::Motion, Screen::Personalize); _editField = 2; break;
         case PersonalItem::Speed:      enterEditor(Editor::Motion, Screen::Personalize); _editField = 3; break;
         case PersonalItem::Back:       leavePersonalize(); break;
@@ -456,27 +514,28 @@ static void selectPersonalItem() {
 
 static void handleFaceInput(Gesture gesture) {
     if (gesture == Gesture::Tap) {
-        if (_statusPanelUntilMs && hit(_tapX, _tapY, 128, 0, 210, 72)) {
+        if (_statusPanelUntilMs && tapHit(128, 0, 210, 72)) {
             _statusPanelUntilMs = 0;
-        } else if (hit(_tapX, _tapY, 88, 370, 290, 96)) toggleSeconds();
-        else if (hit(_tapX, _tapY, kBotX, kBotY, kBotSize, kBotSize)) pokeBot();
+        } else if (!_manualPreset || _manualCombo.mood == botux::BotUx::Mood::Idle) {
+            _gazeUntil = millis() + 2000;
+            face.bot().setMood(botux::BotUx::Mood::Idle);
+            _drawMood = botux::BotUx::Mood::Idle;
+            face.bot().gazeAt((_tapX - 233) / 180.0f, (_tapY - 233) / 180.0f);
+        }
     } else if (gesture == Gesture::Long) {
-        if (hit(_tapX, _tapY, kBotX, kBotY, kBotSize, kBotSize)) enterPersonalize(Screen::Face);
-    } else if (gesture == Gesture::SwipeDown) {
-        if (_touch.startY() <= 20) showStatusPanel(millis());
-    } else if (gesture == Gesture::SwipeLeft) {
-        cycleExpression(1, true);
-    } else if (gesture == Gesture::SwipeRight) {
-        cycleExpression(-1, true);
+        if (tapHit(kBotX, kBotY, kBotSize, kBotSize)) enterPersonalize(Screen::Face);
+    } else if (gesture == Gesture::SwipeDown && _touch.startY() <= 20
+               && _tapY - _touch.startY() > 50) {
+        showStatusPanel(millis());
     }
 }
 
 static void handleSettingsTouch() {
-    for (uint8_t row = 0; row < kVisibleRows; ++row) {
-        uint8_t i = _settingsList.first() + row;
-        if (i >= (uint8_t)MenuItem::Count) break;
-        int16_t cy = kMenuY + row * kMenuStep;
-        if (hit(_tapX, _tapY, 50, cy - 31, 366, 62)) {
+    if (_tapY < 76 || _tapY >= 364) return;
+    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; ++i) {
+        int16_t cy = kMenuY + i * kMenuStep - (int16_t)_settingsScroll.offset();
+        if (cy + 29 < 76 || cy - 29 >= 364) continue;
+        if (tapHit(50, cy - 31, 366, 62)) {
             _settingsList.select(i);
             _menu = (MenuItem)_settingsList.selected();
             selectMenuItem();
@@ -486,11 +545,11 @@ static void handleSettingsTouch() {
 }
 
 static void handlePersonalTouch() {
-    for (uint8_t row = 0; row < kVisibleRows; ++row) {
-        uint8_t i = _personalList.first() + row;
-        if (i >= (uint8_t)PersonalItem::Count) break;
-        int16_t cy = kMenuY + row * kMenuStep;
-        if (hit(_tapX, _tapY, 50, cy - 31, 366, 62)) {
+    if (_tapY < 76 || _tapY >= 364) return;
+    for (uint8_t i = 0; i < (uint8_t)PersonalItem::Count; ++i) {
+        int16_t cy = kMenuY + i * kMenuStep - (int16_t)_personalScroll.offset();
+        if (cy + 29 < 76 || cy - 29 >= 364) continue;
+        if (tapHit(50, cy - 31, 366, 62)) {
             _personalList.select(i);
             _personal = (PersonalItem)_personalList.selected();
             selectPersonalItem();
@@ -514,10 +573,24 @@ static void updateColorPicker(int16_t x, int16_t y) {
 }
 
 static void handleEditorTouch() {
-    if (hit(_tapX, _tapY, 84, 374, 138, 50)) { cancelEditor(); return; }
-    if (hit(_tapX, _tapY, 244, 374, 138, 50)) { saveEditor(); return; }
+    if (tapHit(84, 374, 138, 50)) { cancelEditor(); return; }
+    if (tapHit(244, 374, 138, 50)) { saveEditor(); return; }
 
-    if (_editor == Editor::Color && hit(_tapX, _tapY, 163, 207, 140, 34)) {
+    if (_editor == Editor::Language) {
+        if (tapHit(72, 160, 152, 70)) { settings.data().language = 0; applySettings(); }
+        if (tapHit(242, 160, 152, 70)) { settings.data().language = 1; applySettings(); }
+        return;
+    }
+    if (_editor == Editor::Layout || _editor == Editor::Preview) {
+        const int16_t rows[] = { _editor == Editor::Layout ? (int16_t)170 : (int16_t)250,
+                                _editor == Editor::Layout ? (int16_t)250 : (int16_t)296, 342 };
+        uint8_t count = _editor == Editor::Layout ? 2 : 3;
+        for (uint8_t i = 0; i < count; ++i) if (tapHit(58, rows[i] - 22, 350, 44)) {
+            _editField = i; changeEditorValue(_tapX < 233 ? -1 : 1); return;
+        }
+        return;
+    }
+    if (_editor == Editor::Color && tapHit(163, 207, 140, 34)) {
         settings.data().customColor = false;
         applySettings();
         clickSound();
@@ -527,39 +600,39 @@ static void handleEditorTouch() {
     if (_editor == Editor::Time) {
         const int16_t centers[2] = { 157, 309 };
         for (uint8_t i = 0; i < 2; ++i) {
-            if (hit(_tapX, _tapY, centers[i] - 50, 115, 100, 54)) { _editField = i; changeEditorValue(-1); return; }
-            if (hit(_tapX, _tapY, centers[i] - 50, 255, 100, 54)) { _editField = i; changeEditorValue(1); return; }
-            if (hit(_tapX, _tapY, centers[i] - 55, 175, 110, 72)) { _editField = i; clickSound(); return; }
+            if (tapHit(centers[i] - 50, 115, 100, 54)) { _editField = i; changeEditorValue(-1); return; }
+            if (tapHit(centers[i] - 50, 255, 100, 54)) { _editField = i; changeEditorValue(1); return; }
+            if (tapHit(centers[i] - 55, 175, 110, 72)) { _editField = i; clickSound(); return; }
         }
     } else if (_editor == Editor::Date) {
         const int16_t centers[3] = { 108, 233, 358 };
         for (uint8_t i = 0; i < 3; ++i) {
-            if (hit(_tapX, _tapY, centers[i] - 43, 115, 86, 52)) { _editField = i; changeEditorValue(-1); return; }
-            if (hit(_tapX, _tapY, centers[i] - 43, 255, 86, 52)) { _editField = i; changeEditorValue(1); return; }
-            if (hit(_tapX, _tapY, centers[i] - 46, 175, 92, 72)) { _editField = i; clickSound(); return; }
+            if (tapHit(centers[i] - 43, 115, 86, 52)) { _editField = i; changeEditorValue(-1); return; }
+            if (tapHit(centers[i] - 43, 255, 86, 52)) { _editField = i; changeEditorValue(1); return; }
+            if (tapHit(centers[i] - 46, 175, 92, 72)) { _editField = i; clickSound(); return; }
         }
     } else if (_editor == Editor::Format) {
-        if (hit(_tapX, _tapY, 78, 128, 146, 76)) {
+        if (tapHit(78, 128, 146, 76)) {
             _editField = 0;
             settings.data().hour24 = false; applySettings(); clickSound();
-        } else if (hit(_tapX, _tapY, 242, 128, 146, 76)) {
+        } else if (tapHit(242, 128, 146, 76)) {
             _editField = 0;
             settings.data().hour24 = true; applySettings(); clickSound();
-        } else if (hit(_tapX, _tapY, 100, 242, 266, 58)) {
+        } else if (tapHit(100, 242, 266, 58)) {
             _editField = 1;
             settings.data().showSeconds = !settings.data().showSeconds;
             applySettings(); clickSound();
         }
     } else if (_editor == Editor::Expression) {
-        if (hit(_tapX, _tapY, 48, 126, 76, 96)) cycleExpression(-1);
-        else if (hit(_tapX, _tapY, 342, 126, 76, 96)) cycleExpression(1);
-        else if (hit(_tapX, _tapY, kPreviewX, kPreviewY, kPreviewSize, kPreviewSize)) {
+        if (tapHit(48, 126, 76, 96)) cycleExpression(-1);
+        else if (tapHit(342, 126, 76, 96)) cycleExpression(1);
+        else if (tapHit(kPreviewX, kPreviewY, kPreviewSize, kPreviewSize)) {
             previewBot.poke(); pokeSound();
         }
     } else if (_editor == Editor::Appearance) {
         const int16_t rows[2] = { 278, 340 };
         for (uint8_t i = 0; i < 2; ++i) {
-            if (hit(_tapX, _tapY, 58, rows[i] - 23, 350, 46)) {
+            if (tapHit(58, rows[i] - 23, 350, 46)) {
                 _editField = i;
                 int8_t delta = (_tapX < 233) ? -1 : 1;
                 changeEditorValue(delta);
@@ -569,7 +642,7 @@ static void handleEditorTouch() {
     } else if (_editor == Editor::Motion) {
         const int16_t rows[4] = { 218, 262, 306, 350 };
         for (uint8_t i = 0; i < 4; ++i) {
-            if (hit(_tapX, _tapY, 58, rows[i] - 24, 350, 48)) {
+            if (tapHit(58, rows[i] - 24, 350, 48)) {
                 _editField = i;
                 int8_t delta = (_tapX < 233) ? -1 : 1;
                 changeEditorValue(delta);
@@ -579,7 +652,7 @@ static void handleEditorTouch() {
     } else if (_editor == Editor::Display) {
         const int16_t rows[3] = { 170, 250, 330 };
         for (uint8_t i = 0; i < 3; ++i) {
-            if (hit(_tapX, _tapY, 58, rows[i] - 30, 350, 60)) {
+            if (tapHit(58, rows[i] - 30, 350, 60)) {
                 _editField = i;
                 changeEditorValue(_tapX < 233 ? -1 : 1);
                 return;
@@ -605,6 +678,7 @@ static void handleInputs(uint32_t now) {
     if (_screen == Screen::Face) {
         bool entered = _settingsChord.poll(M5.BtnA.isPressed(), M5.BtnB.isPressed(), now);
         if (_settingsChord.tracking()) {
+            _bClick.cancel();
             _buttonA.consume(M5.BtnA.isPressed());
             _buttonB.consume(M5.BtnB.isPressed());
             if (entered) enterSettings();
@@ -619,9 +693,48 @@ static void handleInputs(uint32_t now) {
     if (gt == Gesture::Tap) {
         _tapX = _touch.tapX();
         _tapY = _touch.tapY();
-    } else if (gt == Gesture::Long) {
+    } else if (gt != Gesture::None) {
         _tapX = (int16_t)touch.x;
         _tapY = (int16_t)touch.y;
+    }
+
+    ux::ScrollModel* scroll = _screen == Screen::Settings ? &_settingsScroll
+        : _screen == Screen::Personalize ? &_personalScroll : nullptr;
+    if (scroll) {
+        if (touch.wasPressed()) {
+            _listTouch = hit(touch.x, touch.y, 50, 76, 366, 288);
+            if (_listTouch) scroll->begin(touch.y, now);
+        }
+        if (_listTouch && (touch.isPressed() || touch.wasReleased())) {
+            float before = scroll->offset();
+            scroll->move(touch.y, now);
+            if (before != scroll->offset()) markListMoved();
+        }
+        if (touch.wasReleased()) {
+            if (!_listTouch || !scroll->end(now)) gt = Gesture::None;
+            _listTouch = false;
+        }
+        if (gt != Gesture::Tap) gt = Gesture::None;
+    }
+    if (_screen == Screen::Editor && _editor == Editor::Name) {
+        const ux::Rect keys{78, 170, 310, 205};
+        if (touch.wasPressed()) {
+            _namePressedKey = ux::nameKeyAt(keys, touch.x, touch.y);
+            _uiDirty = true;
+        }
+        if (touch.wasReleased() && gt == Gesture::Tap) {
+            int key = ux::nameKeyAt(keys, _tapX, _tapY);
+            if (key >= 0 && key == _namePressedKey) {
+                bool done = _nameEditor.press(key);
+                _uiDirty = true;
+                if (done) {
+                    snprintf(settings.data().botName, sizeof(settings.data().botName), "%s", _nameEditor.text());
+                    applySettings(); saveEditor();
+                }
+                gt = Gesture::None;
+            }
+        }
+        if (touch.wasReleased()) { _namePressedKey = -1; _uiDirty = true; }
     }
 
     if (_screen == Screen::Editor && _editor == Editor::Color) {
@@ -637,13 +750,32 @@ static void handleInputs(uint32_t now) {
     }
 
     if (_screen == Screen::Face) {
-        if (ga == Gesture::Tap) pokeBot();
-        if (gb == Gesture::Tap) cycleExpression(1, true);
-        else if (gb == Gesture::Long) startDoze();
+        if (ga == Gesture::Tap) {
+            _manualPreset = true;
+            _manualCombo = botux::BotUx::preset(face.bot().randomPreset());
+            _drawMood = face.bot().mood();
+            face.invalidate(); clickSound();
+        }
+        if (gb == Gesture::Long) { _bClick.cancel(); startDoze(); }
+        auto click = _bClick.poll(gb == Gesture::Tap, now);
+        if (click == watchinteraction::SingleDoubleClick::Event::Single) {
+            _manualPreset = true;
+            _manualCombo = botux::BotUx::preset(face.bot().nextPreset());
+            _drawMood = face.bot().mood();
+            face.invalidate(); clickSound();
+        } else if (click == watchinteraction::SingleDoubleClick::Event::Double) {
+            _manualPreset = false;
+            settings.data().expression = settings.data().animation = 0;
+            face.bot().resetToIdle();
+            _ambientMood = _drawMood = botux::BotUx::Mood::Idle;
+            _ambientCycle.postpone(now);
+            face.invalidate(); confirmSound();
+        }
         if (gt != Gesture::None) handleFaceInput(gt);
         if (ga != Gesture::None || gb != Gesture::None || gt != Gesture::None) _ambientCycle.postpone(now);
         return;
     }
+    _bClick.cancel();
 
     if (_screen == Screen::Settings) {
         if (ga == Gesture::Tap) selectMenuItem();
@@ -651,6 +783,7 @@ static void handleInputs(uint32_t now) {
         if (gb == Gesture::Tap) {
             _settingsList.move(1);
             _menu = (MenuItem)_settingsList.selected();
+            revealRow(_settingsScroll, (uint8_t)_menu);
             _uiDirty = true;
             clickSound();
         }
@@ -658,6 +791,7 @@ static void handleInputs(uint32_t now) {
         else if (gt == Gesture::SwipeUp || gt == Gesture::SwipeDown) {
             _settingsList.move(gt == Gesture::SwipeUp ? 1 : -1);
             _menu = (MenuItem)_settingsList.selected();
+            revealRow(_settingsScroll, (uint8_t)_menu);
             _uiDirty = true;
         }
         return;
@@ -668,12 +802,14 @@ static void handleInputs(uint32_t now) {
         if (gb == Gesture::Tap) {
             _personalList.move(1);
             _personal = (PersonalItem)_personalList.selected();
+            revealRow(_personalScroll, (uint8_t)_personal);
             _uiDirty = true;
         }
         if (gt == Gesture::Tap) handlePersonalTouch();
         else if (gt == Gesture::SwipeUp || gt == Gesture::SwipeDown) {
             _personalList.move(gt == Gesture::SwipeUp ? 1 : -1);
             _personal = (PersonalItem)_personalList.selected();
+            revealRow(_personalScroll, (uint8_t)_personal);
             _uiDirty = true;
         }
         return;
@@ -693,14 +829,14 @@ static void drawPill(int16_t x, int16_t y, int16_t w, int16_t h,
                      const char* label, bool selected, bool accentFill = false) {
     uint16_t fill = accentFill ? settings.style().accentColor : settings.panel();
     int16_t radius = ((w < h) ? w : h) / 2;
-    canvas.fillRoundRect(x, y, w, h, radius, fill);
-    canvas.drawRoundRect(x, y, w, h, radius,
+    ux::roundRect(canvas, x, y, w, h, radius, fill);
+    ux::strokeRoundRect(canvas, x, y, w, h, radius,
                          selected ? settings.style().accentColor : settings.muted());
     canvas.setTextDatum(middle_center);
     canvas.setFont(&fonts::FreeSansBold9pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(accentFill ? settings.style().bgColor : settings.ink());
-    canvas.drawString(label, x + w / 2, y + h / 2);
+    watchText(canvas, label, x + w / 2, y + h / 2);
 }
 
 static void drawTitle(const char* title) {
@@ -708,68 +844,71 @@ static void drawTitle(const char* title) {
     canvas.setFont(&fonts::FreeSansBold12pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.ink());
-    canvas.drawString(title, kW / 2, 48);
+    watchText(canvas, title, kW / 2, 48);
 }
 
-static void drawSettingsList() {
-    drawTitle("SETTINGS");
-    for (uint8_t row = 0; row < kVisibleRows; ++row) {
-        uint8_t i = _settingsList.first() + row;
-        if (i >= (uint8_t)MenuItem::Count) break;
-        int16_t cy = kMenuY + row * kMenuStep;
+static void drawSettingsList(bool chrome = true) {
+    if (chrome) drawTitle("SETTINGS");
+    canvas.setClipRect(50, 76, 366, 288);
+    for (uint8_t i = 0; i < (uint8_t)MenuItem::Count; ++i) {
+        int16_t cy = kMenuY + i * kMenuStep - (int16_t)_settingsScroll.offset();
+        if (cy + 29 < 76 || cy - 29 >= 364) continue;
         bool selected = i == (uint8_t)_menu;
-        canvas.fillRoundRect(58, cy - 29, 350, 58, 25, selected ? settings.panel() : settings.style().bgColor);
-        if (selected) canvas.drawRoundRect(58, cy - 29, 350, 58, 25, settings.style().accentColor);
+        ux::roundRect(canvas, 62, cy - 29, 342, 58, 25, selected ? settings.panel() : settings.style().bgColor);
+        if (selected) ux::strokeRoundRect(canvas, 62, cy - 29, 342, 58, 25, settings.style().accentColor);
 
         canvas.setTextDatum(middle_left);
         canvas.setFont(&fonts::FreeSansBold12pt7b);
         canvas.setTextSize(1.0f);
         canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
-        canvas.drawString(kMenuLabels[i], 88, cy);
+        watchText(canvas, kMenuLabels[i], 88, cy);
 
         char value[24] = {};
         switch ((MenuItem)i) {
             case MenuItem::Time: snprintf(value, sizeof(value), "%02u:%02u", face.hour(), face.minute()); break;
             case MenuItem::Date: {
-                uint8_t month = face.month();
-                const char* name = month >= 1 && month <= 12 ? kMonths[month - 1] : "---";
-                snprintf(value, sizeof(value), "%02u %s", face.day(), name);
+                snprintf(value, sizeof(value), "%04d/%02u/%02u", face.year(), face.month(), face.day());
                 break;
             }
             case MenuItem::Format: snprintf(value, sizeof(value), settings.data().hour24 ? "24 H" : "12 H"); break;
             case MenuItem::Personalize: snprintf(value, sizeof(value), ">"); break;
             case MenuItem::Display: snprintf(value, sizeof(value), "%u / 5", settings.data().brightness); break;
+            case MenuItem::Layout: snprintf(value, sizeof(value), settings.data().swapLayout ? "TIME TOP" : "BOT TOP"); break;
             default: break;
         }
         if (value[0]) {
             canvas.setFont(&fonts::FreeSansBold9pt7b);
             canvas.setTextDatum(middle_right);
             canvas.setTextColor(settings.muted());
-            canvas.drawString(value, 378, cy);
+            watchText(canvas, value, 378, cy);
         }
     }
-    canvas.fillRoundRect(221, 410, 24, 8, 4, settings.muted());
+    canvas.clearClipRect();
+    if (chrome) ux::roundRect(canvas, 221, 410, 24, 5, 2.5f, settings.muted());
 }
 
-static void drawPersonalizeList() {
-    drawTitle("BOT PERSONALITY");
-    for (uint8_t row = 0; row < kVisibleRows; ++row) {
-        uint8_t i = _personalList.first() + row;
-        if (i >= (uint8_t)PersonalItem::Count) break;
-        int16_t cy = kMenuY + row * kMenuStep;
+static void drawPersonalizeList(bool chrome = true) {
+    if (chrome) drawTitle("BOT PERSONALITY");
+    canvas.setClipRect(50, 76, 366, 288);
+    for (uint8_t i = 0; i < (uint8_t)PersonalItem::Count; ++i) {
+        int16_t cy = kMenuY + i * kMenuStep - (int16_t)_personalScroll.offset();
+        if (cy + 29 < 76 || cy - 29 >= 364) continue;
         bool selected = i == (uint8_t)_personal;
-        canvas.fillRoundRect(58, cy - 29, 350, 58, 25, selected ? settings.panel() : settings.style().bgColor);
-        if (selected) canvas.drawRoundRect(58, cy - 29, 350, 58, 25, settings.style().accentColor);
+        ux::roundRect(canvas, 62, cy - 29, 342, 58, 25, selected ? settings.panel() : settings.style().bgColor);
+        if (selected) ux::strokeRoundRect(canvas, 62, cy - 29, 342, 58, 25, settings.style().accentColor);
         canvas.setFont(&fonts::FreeSansBold12pt7b);
         canvas.setTextDatum(middle_left);
         canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
-        canvas.drawString(kPersonalLabels[i], 78, cy);
+        watchText(canvas, kPersonalLabels[i], 78, cy);
         char value[20] = {};
         switch ((PersonalItem)i) {
             case PersonalItem::Expression: snprintf(value, sizeof(value), "%s", Settings::expressionName(settings.data().expression)); break;
             case PersonalItem::Action: snprintf(value, sizeof(value), "%s", Settings::animationName(settings.data().animation)); break;
             case PersonalItem::Appearance: snprintf(value, sizeof(value), "%s", Settings::appearanceName(settings.data().appearance)); break;
             case PersonalItem::Color: snprintf(value, sizeof(value), settings.data().customColor ? "CUSTOM" : "THEME"); break;
+            case PersonalItem::Name: snprintf(value, sizeof(value), "%s", settings.data().botName); break;
+            case PersonalItem::Language: snprintf(value, sizeof(value), settings.data().language ? "中文" : "English"); break;
+            case PersonalItem::Preview: snprintf(value, sizeof(value), "960"); break;
             case PersonalItem::Intensity: snprintf(value, sizeof(value), "%u / 5", settings.data().motionAmount); break;
             case PersonalItem::Speed: snprintf(value, sizeof(value), "%u / 5", settings.data().animationSpeed); break;
             default: break;
@@ -778,10 +917,11 @@ static void drawPersonalizeList() {
             canvas.setFont(&fonts::FreeSansBold9pt7b);
             canvas.setTextDatum(middle_right);
             canvas.setTextColor(settings.muted());
-            canvas.drawString(value, 390, cy);
+            watchText(canvas, value, 390, cy);
         }
     }
-    canvas.fillRoundRect(221, 410, 24, 8, 4, settings.muted());
+    canvas.clearClipRect();
+    if (chrome) ux::roundRect(canvas, 221, 410, 24, 5, 2.5f, settings.muted());
 }
 
 static void drawFooter() {
@@ -795,10 +935,10 @@ static void drawStepper(int16_t cx, const char* label, const char* value, bool s
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.muted());
-    canvas.drawString(label, cx, 190);
+    watchText(canvas, label, cx, 190);
     canvas.setFont(&fonts::FreeSansBold18pt7b);
     canvas.setTextColor(selected ? settings.style().accentColor : settings.ink());
-    canvas.drawString(value, cx, 220);
+    watchText(canvas, value, cx, 220);
     drawPill(cx - width / 2, 256, width, 52, "+", selected);
 }
 
@@ -812,7 +952,7 @@ static void drawTimeEditor() {
     canvas.setTextDatum(middle_center);
     canvas.setFont(&fonts::FreeSansBold18pt7b);
     canvas.setTextColor(settings.muted());
-    canvas.drawString(":", 233, 220);
+    watchText(canvas, ":", 233, 220);
     drawFooter();
 }
 
@@ -837,23 +977,23 @@ static void drawFormatEditor() {
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.muted());
-    canvas.drawString("Tap the time on the watch face to toggle", 233, 330);
+    watchText(canvas, "Choose whether seconds appear in the clock", 233, 330);
     drawFooter();
 }
 
 static void drawArrowRow(int16_t cy, const char* label, const char* value, bool selected) {
-    if (selected) canvas.fillRoundRect(58, cy - 22, 350, 44, 17, settings.panel());
+    if (selected) ux::roundRect(canvas, 58, cy - 22, 350, 44, 17, settings.panel());
     canvas.setTextDatum(middle_left);
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextSize(1.0f);
     canvas.setTextColor(settings.muted());
-    canvas.drawString(label, 76, cy);
+    watchText(canvas, label, 76, cy);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(settings.ink());
-    canvas.drawString(value, 270, cy);
+    watchText(canvas, value, 270, cy);
     canvas.setTextColor(settings.style().accentColor);
-    canvas.drawString("<", 205, cy);
-    canvas.drawString(">", 388, cy);
+    watchText(canvas, "<", 205, cy);
+    watchText(canvas, ">", 388, cy);
 }
 
 static void drawAppearanceEditor() {
@@ -874,10 +1014,10 @@ static void drawExpressionEditor() {
     canvas.setFont(&fonts::FreeSansBold12pt7b);
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(settings.ink());
-    canvas.drawString(Settings::expressionName(settings.data().expression), 233, 274);
+    watchText(canvas, Settings::expressionName(settings.data().expression), 233, 274);
     canvas.setFont(&fonts::FreeSans9pt7b);
     canvas.setTextColor(settings.muted());
-    canvas.drawString("Swipe or tap arrows; tap the bot to react", 233, 326);
+    watchText(canvas, "Swipe or tap arrows; tap the bot to react", 233, 326);
     drawFooter();
 }
 
@@ -913,7 +1053,7 @@ static void drawColorEditor() {
     int16_t sy = 354 - settings.data().colorValue * 108 / 100;
     int16_t hy = 246 + settings.data().colorHue * 108 / 359;
     canvas.drawCircle(sx, sy, 8, settings.ink());
-    canvas.drawRoundRect(340, hy - 5, 64, 10, 4, settings.ink());
+    ux::strokeRoundRect(canvas, 340, hy - 5, 64, 10, 4, settings.ink());
     drawFooter();
 }
 
@@ -927,6 +1067,41 @@ static void drawDisplayEditor() {
     drawFooter();
 }
 
+static void drawNameEditor() {
+    drawTitle("BOT NAME");
+    canvas.setTextDatum(middle_center);
+    canvas.setFont(&fonts::FreeSansBold12pt7b);
+    canvas.setTextColor(settings.ink());
+    watchText(canvas, _nameEditor.text(), 233, 128);
+    ux::drawNameKeyboard(canvas, _nameEditor, ux::Rect{78,170,310,205},
+                         settings.panel(), settings.ink(), ux::Latin14, _namePressedKey);
+    drawFooter();
+}
+
+static void drawLanguageEditor() {
+    drawTitle("LANGUAGE");
+    drawPill(72, 160, 152, 70, "English", settings.data().language == 0);
+    drawPill(242, 160, 152, 70, "中文", settings.data().language == 1);
+    drawFooter();
+}
+
+static void drawLayoutEditor() {
+    drawTitle("WATCH LAYOUT");
+    drawArrowRow(170, "BOT TEXT", settings.data().showDescription ? "SHOW" : "HIDE", _editField == 0);
+    drawArrowRow(250, "TOP", settings.data().swapLayout ? "TIME" : "BOT TEXT", _editField == 1);
+    drawFooter();
+}
+
+static void drawCombinationEditor() {
+    drawTitle("COMBINATIONS");
+    previewBot.draw();
+    previewSprite.pushSprite(&canvas, kPreviewX, 62);
+    drawArrowRow(250, "STATE", botux::BotUx::moodName((botux::BotUx::Mood)_previewMood), _editField == 0);
+    drawArrowRow(296, "FACE", botux::BotUx::expressionName((botux::BotUx::Expression)_previewExpression), _editField == 1);
+    drawArrowRow(342, "ACTION", botux::BotUx::animationName((botux::BotUx::Animation)_previewAnimation), _editField == 2);
+    drawFooter();
+}
+
 static void drawEditor() {
     switch (_editor) {
         case Editor::Time:       drawTimeEditor(); break;
@@ -937,13 +1112,17 @@ static void drawEditor() {
         case Editor::Motion:     drawMotionEditor(); break;
         case Editor::Color:      drawColorEditor(); break;
         case Editor::Display:    drawDisplayEditor(); break;
+        case Editor::Name: drawNameEditor(); break;
+        case Editor::Preview: drawCombinationEditor(); break;
+        case Editor::Layout: drawLayoutEditor(); break;
+        case Editor::Language: drawLanguageEditor(); break;
         default: break;
     }
 }
 
 static bool previewIsAnimated() {
     return _screen == Screen::Editor
-        && (_editor == Editor::Expression || _editor == Editor::Appearance
+        && (_editor == Editor::Preview || _editor == Editor::Expression || _editor == Editor::Appearance
             || _editor == Editor::Motion || _editor == Editor::Color);
 }
 
@@ -989,13 +1168,23 @@ static void render(uint32_t now) {
         _drawMood = mood;
     }
     auto selectedExpression = (botux::BotUx::Expression)settings.data().expression;
-    face.bot().setExpression((_dozing || _battery <= kLowBattery)
+    if (!_manualPreset) face.bot().setExpression((_dozing || _battery <= kLowBattery)
         ? botux::BotUx::Expression::Auto : selectedExpression);
     face.update(now);
     face.bot().update(now);
 
     if (previewIsAnimated()) {
-        previewBot.setMood(botux::BotUx::Mood::Listening);
+        if (_editor == Editor::Preview) {
+            previewBot.setMood((botux::BotUx::Mood)_previewMood);
+            previewBot.setTalking(_previewMood == (uint8_t)botux::BotUx::Mood::Speaking);
+            previewBot.setExpression((botux::BotUx::Expression)_previewExpression);
+            previewBot.setAnimation((botux::BotUx::Animation)_previewAnimation);
+        } else {
+            previewBot.setTalking(false);
+            previewBot.setMood(botux::BotUx::Mood::Listening);
+            previewBot.setExpression((botux::BotUx::Expression)settings.data().expression);
+            previewBot.setAnimation((botux::BotUx::Animation)settings.data().animation);
+        }
         previewBot.update(now);
     }
     uint32_t t1 = micros();
@@ -1018,19 +1207,23 @@ static void render(uint32_t now) {
     }
 
     if (!_uiDirty && !previewIsAnimated()) return;
-    canvas.fillSprite(settings.style().bgColor);
+    bool bandOnly = _listBandOnly && (_screen == Screen::Settings || _screen == Screen::Personalize);
+    if (bandOnly) canvas.fillRect(0, 76, kW, 288, settings.style().bgColor);
+    else canvas.fillSprite(settings.style().bgColor);
     if (_screen == Screen::Settings) {
-        drawSettingsList();
+        drawSettingsList(!bandOnly);
     } else if (_screen == Screen::Personalize) {
-        drawPersonalizeList();
+        drawPersonalizeList(!bandOnly);
     } else {
         drawEditor();
     }
     uint32_t t2 = micros();
-    canvas.pushSprite(0, 0);
+    if (bandOnly) M5.Display.pushImage(0, 76, kW, 288, (uint16_t*)canvas.getBuffer() + kW*76);
+    else canvas.pushSprite(0, 0);
     M5.Display.waitDisplay();
     uint32_t t3 = micros();
     _uiDirty = false;
+    _listBandOnly = false;
     recordFrame(now, t1 - t0, t2 - t1, t3 - t2);
 }
 
@@ -1063,11 +1256,22 @@ static void emitFrameCapture() {
 }
 
 static void selectDiagnosticPage(uint8_t page) {
+    _diagnosticScroll = page == 19;
+    static bool override = false;
+    static Settings::Data prior;
+    if (override) { settings.data() = prior; applySettings(); override = false; }
+    if (page == 16 || page == 17) {
+        prior = settings.data(); override = true;
+        settings.data().language = page == 16 ? 1 : 0;
+        settings.data().swapLayout = page == 17;
+        settings.data().showDescription = true;
+        applySettings();
+    }
     _originalSettings = settings.data();
     _editor = Editor::None;
     _editorParent = Screen::Personalize;
     _personalParent = Screen::Settings;
-    if (page == 0 || page == 10) {
+    if (page == 0 || page == 10 || page == 16 || page == 17) {
         _screen = Screen::Face;
         _faceNeedsClear = true;
         face.invalidate();
@@ -1075,16 +1279,20 @@ static void selectDiagnosticPage(uint8_t page) {
             showStatusPanel(millis(), 6000);
             _statusPanelStartMs -= 300;
         }
-    } else if (page == 1 || page == 8) {
+    } else if (page == 1 || page == 8 || page == 18 || page == 19) {
         _screen = Screen::Settings;
         _settingsList.configure((uint8_t)MenuItem::Count, kVisibleRows);
         _settingsList.select(page == 8 ? (uint8_t)MenuItem::Done : 0);
         _menu = (MenuItem)_settingsList.selected();
+        _settingsScroll.setBounds((uint8_t)MenuItem::Count*kMenuStep,288);
+        _settingsScroll.setOffset(page == 8 ? 9999 : page == 18 ? 37 : 0);
     } else if (page == 2 || page == 9) {
         _screen = Screen::Personalize;
         _personalList.configure((uint8_t)PersonalItem::Count, kVisibleRows);
         _personalList.select(page == 9 ? (uint8_t)PersonalItem::Back : 0);
         _personal = (PersonalItem)_personalList.selected();
+        _personalScroll.setBounds((uint8_t)PersonalItem::Count*kMenuStep,288);
+        _personalScroll.setOffset(page == 9 ? 9999 : 0);
     } else {
         _screen = Screen::Editor;
         _editor = page == 3 ? Editor::Expression
@@ -1092,7 +1300,17 @@ static void selectDiagnosticPage(uint8_t page) {
                 : page == 5 ? Editor::Motion
                 : page == 6 ? Editor::Color
                 : page == 7 ? Editor::Display
-                : page == 11 ? Editor::Format : Editor::Time;
+                : page == 11 ? Editor::Format
+                : page == 12 ? Editor::Name
+                : (page == 13 || page == 20) ? Editor::Preview
+                : page == 14 ? Editor::Layout
+                : page == 15 ? Editor::Language : Editor::Time;
+        if (page == 12) _nameEditor.begin(settings.data().botName);
+        if (page == 20) {
+            _previewMood = (uint8_t)botux::BotUx::Mood::Happy;
+            _previewExpression = (uint8_t)botux::BotUx::Expression::Joy;
+            _previewAnimation = (uint8_t)botux::BotUx::Animation::Wave;
+        }
         _editField = 0;
     }
     _uiDirty = true;
@@ -1162,7 +1380,8 @@ void setup() {
         return;
     }
 
-    face.begin(&botSprite);
+    _renderReady = face.begin(&botSprite);
+    if (!_renderReady) { Serial.println("HUD allocation failed"); return; }
     previewBot.begin(&previewSprite);
     applySettings();
     refreshPower(millis());
@@ -1170,7 +1389,7 @@ void setup() {
     _personalList.configure((uint8_t)PersonalItem::Count, kVisibleRows);
     _ambientCycle.begin(millis());
     showStatusPanel(millis(), 1800);
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v11\\n diagnostic pages\n",
+    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v20\\n diagnostic pages\n",
                   M5.Imu.isEnabled());
 }
 
@@ -1182,7 +1401,7 @@ void loop() {
     refreshPower(now);
     updateMotion(now);
     handleInputs(now);
-    if (_screen == Screen::Face && !_gestureActive
+    if (_screen == Screen::Face && !_manualPreset && !_gestureActive
         && settings.data().expression == 0 && _ambientCycle.update(now)) {
         static const botux::BotUx::Mood moods[6] = {
             botux::BotUx::Mood::Idle, botux::BotUx::Mood::Listening,
@@ -1192,6 +1411,13 @@ void loop() {
         _ambientMood = moods[_ambientCycle.index()];
     }
     handleSerialCommands();
+    if (_diagnosticScroll && _screen == Screen::Settings) {
+        _settingsScroll.setOffset((sinf(now * 0.001f) + 1) * 0.5f * ((uint8_t)MenuItem::Count*kMenuStep - 288));
+        markListMoved();
+    }
+    uint32_t scrollDt = _scrollMs ? now - _scrollMs : 0; _scrollMs = now;
+    if (_screen == Screen::Settings && _settingsScroll.update(scrollDt)) markListMoved();
+    if (_screen == Screen::Personalize && _personalScroll.update(scrollDt)) markListMoved();
 
     if (_screen != Screen::Face && !_uiDirty && !previewIsAnimated()) {
         delay(2);

@@ -42,6 +42,7 @@ public:
         uint8_t ledMode;
         uint8_t notifications;
         uint8_t gaze;
+        uint8_t volume;
     };
 
     static constexpr uint8_t kThemeCount = 3;
@@ -83,7 +84,7 @@ private:
     void _commitName();
 
     Data _data{0, 1, 3, 0, 2, 0, 2, 0, 0,
-               252, 252, 250, 33, 36, 42, 60, 124, 232, "Milo", 0, 2, 1, 0};
+               252, 252, 250, 33, 36, 42, 60, 124, 232, "Milo", 0, 2, 1, 0, 3};
     bool _open = false;
     uint8_t _page = 0;
     uint8_t _colorPart = 0;

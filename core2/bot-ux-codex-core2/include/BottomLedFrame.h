@@ -124,12 +124,12 @@ inline void frame(const LightingState& lighting, const Events& events,
         for (uint8_t i = 0; i < kCount; ++i)
         {
             const float angle = reduced ? 0.0f
-                : (nowMs % 7600u) * (6.2831853f / 7600.0f) - i * 0.62831853f;
+                : (nowMs % 6800u) * (6.2831853f / 6800.0f) - i * 0.62831853f;
             const float wave = reduced ? 0.5f : 0.5f + 0.5f * cosf(angle);
-            const uint32_t color = mixColor(0x71869A, 0x8B7898,
-                static_cast<uint8_t>(wave * 96.0f));
-            const uint8_t level = static_cast<uint8_t>(28.0f + 24.0f * breath
-                                                       + 8.0f * wave);
+            const uint32_t color = mixColor(0x6287A4, 0x8B729F,
+                static_cast<uint8_t>(wave * 128.0f));
+            const uint8_t level = static_cast<uint8_t>(52.0f + 42.0f * breath
+                                                       + 18.0f * wave);
             colors[i] = scaleColor(color, level);
         }
         return;
@@ -164,26 +164,26 @@ inline void frame(const LightingState& lighting, const Events& events,
                             : 0x84909C);
         const uint8_t hostLevel = zone.active() ? zone.brightness
             : (localAmbient ? 150 : 52);
-        float gain = 112.0f + 48.0f * breath;
-        if (slot == selected) gain += 30.0f;
+        float gain = 96.0f + 64.0f * breath;
+        if (slot == selected) gain += 34.0f;
         if (!reduced)
         {
             const float angle = (nowMs % 8000u) * (6.2831853f / 8000.0f) - i * 0.62831853f;
             const float wave = 0.5f + 0.5f * cosf(angle);
-            gain += 30.0f * wave * wave;
+            gain += 45.0f * wave * wave;
         }
         if (interacting)
         {
             const float distance = fabsf(i - sweepHead);
             if (distance < 2.5f)
-                gain += 48.0f * (1.0f - distance / 2.5f) * hump(interactionPhase);
+                gain += 64.0f * (1.0f - distance / 2.5f) * hump(interactionPhase);
         }
-        if (slot >= 0 && (events.notificationMask & (1u << slot))) gain += 80.0f * notice;
+        if (slot >= 0 && (events.notificationMask & (1u << slot))) gain += 92.0f * notice;
         if (events.controlHeld)
         {
             const float heldBreath = reduced ? 0.55f
                 : 0.5f - 0.5f * cosf((nowMs % 1700u) * (6.2831853f / 1700.0f));
-            gain += (slot < 0 ? 52.0f : 26.0f) * heldBreath;
+            gain += (slot < 0 ? 90.0f : 36.0f) * heldBreath;
         }
         if (controlPulse)
         {
@@ -191,7 +191,7 @@ inline void frame(const LightingState& lighting, const Events& events,
             if (distance < 2.5f)
             {
                 const float motion = (1.0f - distance / 2.5f) * hump(controlPhase);
-                gain += (slot < 0 ? 92.0f : 48.0f) * motion;
+                gain += (slot < 0 ? 118.0f : 64.0f) * motion;
             }
         }
         if (gain > 255.0f) gain = 255.0f;

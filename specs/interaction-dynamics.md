@@ -5,12 +5,14 @@ This user goal supersedes conflicting earlier interaction notes.
 - Watch: every A preset remains visibly alive; settings rows and Back/Done respond
   reliably. One pointer owner arbitrates taps/scrolling, with visible pressed
   feedback. Buttons have no implicit long-press rejection. Dragging never clicks.
-- Bot: configurable gaze directions including left; audit long time windows of
-  mood/expression/animation combinations for frozen-looking poses. Stable faces
-  receive appropriate motion, respecting explicit reduced-motion/zero settings.
+- Bot: configurable Auto plus nine explicit cardinal/diagonal gaze directions;
+  audit long time windows of mood/expression/animation combinations for
+  frozen-looking poses. Stable faces receive appropriate motion, respecting
+  explicit reduced-motion/zero settings.
   Thinking dots use native antialiasing.
-- Core2: meaningful command backgrounds, pressed/held/toggle affordances, coherent
-  themes and contextual breathing/flow LED effects. Do not invent host toggle
+- Core2: meaningful command backgrounds, pressed/held/toggle affordances,
+  higher-contrast vivid themes, an independently persisted six-step sound
+  volume, and contextual breathing/flow LED effects. Do not invent host toggle
   values or confirmed actions from a local key press.
 - Shared UX: reusable sound synthesis, richer timbres/scales/cues and optional
   small 8-bit PCM playback. Bounded buffers, nonblocking scheduling, smooth

@@ -45,15 +45,19 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
   Clear cached lighting on connection changes and await fresh thread lighting.
 - The top bar uses separate Bluetooth and app-ready icons. The battery is the
   settings entry: two valid taps within 420 ms open settings; one tap is inert.
-- Settings provide continuous RGB editing for the bot body, eyes, and accent,
+- Settings provide independent audio enable and six-step volume controls; mute
+  preserves the selected volume. Settings also provide continuous RGB editing
+  for the bot body, eyes, and accent,
   plus style, English naming, English/Chinese descriptions and independent
   12×10×8 previews in a separate checked 112 px canvas. Motion also selects
-  Auto/Center/Left/Right/Up/Down gaze. Preview selector values
+  Auto plus nine explicit gaze directions: Center/Left/Right/Up/Down and the
+  four diagonals. Preview selector values
   do not change NVS or overwrite the actual host Bot. Save valid edits in NVS.
 - Command surfaces use semantic colors and pressed feedback. Fast is an action
   that requests a toggle; the protocol does not report its on/off value. Only a
   successfully sent PTT press shows MIC ACTIVE until release.
-- Paper/Warm/Dark use Settings::themePalette across deck and settings.
+- Paper/Warm/Dark use Settings::themePalette across deck and settings, with
+  readable muted text and vivid accents on each palette's surfaces.
 - Reject bootloader/firmware operations; incompatible hardware firmware must
   never be accepted by the Core2 emulator.
 
@@ -70,8 +74,8 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
 - BLE callbacks only latch connection/MTU state. The main loop owns reconnect,
   RPC state, and pending event cleanup.
 - Check both sprite allocations before binding or drawing BotUx.
-- Settings persist with Preferences; keep display, audio, theme, bot animation,
-  IMU motion, reduced motion, and Bottom2 LED brightness.
+- Settings persist with Preferences; keep display, audio enable, audio volume,
+  theme, bot animation, IMU motion, reduced motion, and Bottom2 LED brightness.
 - Keep UI text colors independent of BotUx eyeColor; the shared bot's default
   eyes are intentionally dark.
 - Prefer host tests, PlatformIO builds, serial metrics/capture, hidapi

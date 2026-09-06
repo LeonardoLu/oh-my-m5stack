@@ -6,6 +6,7 @@
 #include "BotUx.h"
 #include "BottomLeds.h"
 #include "CodexLink.h"
+#include "FeedbackLevel.h"
 #include "Settings.h"
 #include "AgentSignal.h"
 #include <UxText.h>
@@ -193,6 +194,7 @@ void syncSettings()
     const Settings::Data& data = settings.data();
     if (memcmp(&data, &appliedSettings, sizeof(data)) == 0) return;
     settings.apply(bot);
+    audio.setVolume(corefeedback::synthVolume(data.volume));
     audio.setEnabled(data.audio != 0);
     bottomLeds.setBrightness(data.ledBrightness);
     bottomLeds.setMode(data.ledMode);
@@ -684,6 +686,7 @@ void setup()
     bot.setBatteryVisible(false);
     bot.setSignal(-1);
     settings.apply(bot);
+    audio.setVolume(corefeedback::synthVolume(settings.data().volume));
     audio.setEnabled(settings.data().audio != 0);
     bottomLeds.begin();
     bottomLeds.setBrightness(settings.data().ledBrightness);

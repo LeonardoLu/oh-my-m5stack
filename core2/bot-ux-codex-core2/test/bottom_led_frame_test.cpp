@@ -25,6 +25,11 @@ static bool equal(const bottomled::Color (&a)[10], const bottomled::Color (&b)[1
     return true;
 }
 
+static uint16_t energy(const bottomled::Color& color)
+{
+    return color.r + color.g + color.b;
+}
+
 static void offAndHost()
 {
     LightingState lighting = sample();
@@ -62,7 +67,14 @@ static void aliveAndReducedMotion()
     assert(first[0].r == 0 && first[0].g == 0 && first[0].b == 0);
     bottomled::frame(lighting, events, 1000, false, false, 0, 2, true, first);
     assert(first[0].r > 0 && first[0].g > 0 && first[0].b > 0);
-    assert(first[0].r < 40 && first[0].b < 40); // quiet neutral presence
+    assert(first[0].r < 80 && first[0].b < 80); // visible but bounded presence
+    uint16_t minimum = energy(first[0]), maximum = minimum;
+    for (uint8_t i = 1; i < bottomled::kCount; ++i)
+    {
+        if (energy(first[i]) < minimum) minimum = energy(first[i]);
+        if (energy(first[i]) > maximum) maximum = energy(first[i]);
+    }
+    assert(maximum > minimum); // the cool presence travels across the strip
     bottomled::frame(lighting, events, 3700, false, false, 0, 2, true, later);
     assert(!equal(first, later));
     bottomled::frame(lighting, events, 1000, true, false, 0, 2, true, first);
@@ -135,10 +147,14 @@ static void heldControlIsKnownAndReducedMotionIsStatic()
     held.controlHeld = true;
     held.holdColor = 0xF59E32;
     bottomled::Color first[10], later[10];
+    bottomled::Events empty;
+    bottomled::Color idle[10];
     bottomled::frame(lighting, held, 1000, false, true, 0, 2, true, first);
+    bottomled::frame(lighting, empty, 1000, false, true, 0, 2, true, idle);
     bottomled::frame(lighting, held, 1500, false, true, 0, 2, true, later);
     assert(!equal(first, later));
     assert(first[3].r > first[3].g && first[3].g > first[3].b);
+    assert(energy(first[3]) > energy(idle[3]));
     bottomled::frame(lighting, held, 1000, true, true, 0, 2, true, first);
     bottomled::frame(lighting, held, 3700, true, true, 0, 2, true, later);
     assert(equal(first, later));

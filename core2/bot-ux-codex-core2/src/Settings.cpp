@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "FeedbackLevel.h"
 #include "UxText.h"
 #include "UxRender.h"
 
@@ -140,18 +141,18 @@ const char* Settings::themeName(uint8_t value)
 Settings::ThemePalette Settings::themePalette(uint8_t value)
 {
     static constexpr ThemePalette palettes[kThemeCount] = {
-        {botux::rgb565(244, 242, 235), botux::rgb565(255, 254, 250),
-         botux::rgb565(235, 232, 223), botux::rgb565(190, 188, 180),
-         botux::rgb565(28, 32, 38), botux::rgb565(101, 102, 105),
-         botux::rgb565(43, 103, 215)},
-        {botux::rgb565(247, 237, 222), botux::rgb565(255, 248, 238),
-         botux::rgb565(237, 217, 196), botux::rgb565(201, 174, 145),
-         botux::rgb565(53, 39, 32), botux::rgb565(121, 91, 73),
-         botux::rgb565(220, 100, 45)},
-        {botux::rgb565(28, 31, 38), botux::rgb565(45, 49, 58),
-         botux::rgb565(61, 66, 78), botux::rgb565(92, 98, 112),
-         botux::rgb565(244, 244, 239), botux::rgb565(174, 178, 188),
-         botux::rgb565(117, 170, 255)},
+        {botux::rgb565(243, 239, 229), botux::rgb565(255, 253, 247),
+         botux::rgb565(230, 225, 213), botux::rgb565(170, 166, 156),
+         botux::rgb565(23, 29, 38), botux::rgb565(88, 91, 96),
+         botux::rgb565(36, 95, 224)},
+        {botux::rgb565(249, 231, 206), botux::rgb565(255, 246, 231),
+         botux::rgb565(242, 204, 157), botux::rgb565(189, 143, 101),
+         botux::rgb565(59, 39, 30), botux::rgb565(128, 86, 62),
+         botux::rgb565(184, 55, 13)},
+        {botux::rgb565(21, 25, 35), botux::rgb565(40, 46, 60),
+         botux::rgb565(57, 68, 90), botux::rgb565(104, 118, 144),
+         botux::rgb565(250, 248, 242), botux::rgb565(187, 195, 208),
+         botux::rgb565(115, 167, 255)},
     };
     return palettes[value < kThemeCount ? value : 0];
 }
@@ -236,6 +237,7 @@ void Settings::begin()
     _data.ledMode = prefs.getUChar("ledmode", 2);
     _data.notifications = prefs.getUChar("notify", 1);
     _data.gaze = prefs.getUChar("gaze", 0);
+    _data.volume = prefs.getUChar("volume", corefeedback::kDefaultLevel);
     prefs.end();
     // Reuse BotUx's public sanitizer so persisted and displayed names agree.
     _preview.setName(_data.botName);
@@ -244,6 +246,7 @@ void Settings::begin()
     if (_data.ledMode > 2) _data.ledMode = 2;
     if (_data.notifications > 1) _data.notifications = 1;
     if (_data.gaze >= botux::BotUx::gazeDirectionCount()) _data.gaze = 0;
+    _data.volume = corefeedback::normalizeLevel(_data.volume);
     if (!_previewAttempted)
     {
         _previewAttempted = true;
@@ -294,6 +297,7 @@ void Settings::_save() const
     prefs.putUChar("ledmode", _data.ledMode);
     prefs.putUChar("notify", _data.notifications);
     prefs.putUChar("gaze", _data.gaze);
+    prefs.putUChar("volume", _data.volume);
     prefs.end();
 }
 
@@ -458,8 +462,8 @@ void Settings::_activate(int8_t target)
     {
         if (target == 1) _data.brightness = (_data.brightness % 5) + 1;
         else if (target == 2) _data.audio ^= 1;
-        else if (target == 3) _data.theme = (_data.theme + 1) % kThemeCount;
-        else if (target == 4) _data.ledBrightness = (_data.ledBrightness + 1) % 4;
+        else if (target == 3) _data.volume = (_data.volume + 1) % corefeedback::kLevelCount;
+        else if (target == 4) _data.theme = (_data.theme + 1) % kThemeCount;
     }
     else if (_page == 1)
     {
@@ -596,10 +600,12 @@ void Settings::draw(M5Canvas& cv, M5Canvas& botSprite)
     if (_page == 0)
     {
         char level[2] = {static_cast<char>('0' + _data.brightness), 0};
+        char volume[6];
+        snprintf(volume, sizeof(volume), "%u / 5", static_cast<unsigned>(_data.volume));
         drawRow(cv, kRowY[0], "DISPLAY", level, _pressed == 1, rowBg, fg, accent, line);
         drawRow(cv, kRowY[1], "AUDIO FEEDBACK", onOff(_data.audio), _pressed == 2, rowBg, fg, accent, line);
-        drawRow(cv, kRowY[2], "THEME", themeName(_data.theme), _pressed == 3, rowBg, fg, accent, line);
-        drawRow(cv, kRowY[3], "BOTTOM LEDs", ledName(_data.ledBrightness), _pressed == 4, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[2], "VOLUME", volume, _pressed == 3, rowBg, fg, accent, line);
+        drawRow(cv, kRowY[3], "THEME", themeName(_data.theme), _pressed == 4, rowBg, fg, accent, line);
     }
     else if (_page == 1)
     {

@@ -33,6 +33,12 @@ strip immediately instead of waiting for the next scheduled animation frame.
   six-bit slot mask. The UI supplies the AgentSignal model's deduplicated mask;
   no task state or completion is inferred inside this driver. A zero mask cancels
   active notification feedback immediately.
+- `control(color, nowMs)`: one 900 ms traveling response to a locally sent
+  control. The supplied semantic control color may fill otherwise unused ambient
+  pixels in Alive; active host zones retain their own hue.
+- `hold(color, active, nowMs)`: a breathing ambient response while a real local
+  press is held. Releasing the hold finishes with the same bounded control flow.
+  It describes only the known press lifecycle and does not infer a host toggle.
 - `update(lighting, nowMs, reducedMotion, connected, selectedAgent = 0)` remains
   source-compatible with old callers. The connection argument should represent
   the app-ready connection used for the UI's lighting mirror.
@@ -40,7 +46,9 @@ strip immediately instead of waiting for the next scheduled animation frame.
 ## Motion language
 
 Alive uses a cosine breathing envelope over 5.4 seconds and a broad traveling
-brightness highlight over 8 seconds. Selection adds a small steady emphasis;
+brightness highlight over 8 seconds. The disconnected cool blue-violet presence
+flows over 6.8 seconds so it remains visible at the default hardware brightness
+without resembling an agent status. Selection adds a small steady emphasis;
 interaction and notification feedback have smooth sine-squared envelopes.
 Colors are scaled by a single brightness factor per pixel, so a working blue,
 input-needed orange, or unread green stays the host's hue. Local effects do not
@@ -48,8 +56,9 @@ turn status colors white or invent a completion color. Values never exceed the
 zone's host brightness before the existing global user brightness cap is applied.
 
 Inactive agent slots stay black. If the connected host has no active ambient
-zone, only the four ambient LEDs can show a quiet neutral device presence.
-Disconnected Alive uses a low-intensity cool-gray breath on the strip; this
+zone, only the four ambient LEDs can show a quiet neutral device presence or a
+known local control response. Disconnected Alive uses a bounded cool blue-violet
+breath and flow on the strip; this
 indicates a powered controller waiting for a link, not an active agent. Thus
 Alive is an explicit local presence mode and may glow while host lighting is off;
 Host mode is available when the user wants only the existing host mirror.
@@ -76,6 +85,7 @@ c++ -std=c++11 -Wall -Wextra -Werror \
 Checks cover Off and brightness-zero black output, Host solid color preservation,
 Host disconnection and ignoring local events, Alive time variation while retaining
 host hue, static Reduced Motion and selection emphasis, inactive-slot blackness,
-low-intensity disconnected neutral presence, notification/sweep expiry, time wrap,
-and bounded changes between 50 ms samples (including simultaneous feedback).
+visible bounded disconnected presence and spatial flow, local hold emphasis,
+notification/sweep expiry, time wrap, and bounded changes between 50 ms samples
+(including simultaneous feedback).
 The root integration owns firmware build and actual Bottom2 hardware acceptance.

@@ -36,11 +36,15 @@ inline int nameKeyAt(Rect area,int x,int y) {
     for(int k=0;k<30;++k) if(nameKeyRect(area,k).contains(x,y)) return k;
     return -1;
 }
-template<class Canvas> void drawNameKeyboard(Canvas& c,const NameEditor& editor,Rect area,uint16_t keyColor,uint16_t textColor,const Font& font=Latin14,int pressed=-1) {
+struct NameKeyboardLabels {
+    const char* backspace; const char* space; const char* letterCase; const char* done;
+};
+template<class Canvas> void drawNameKeyboard(Canvas& c,const NameEditor& editor,Rect area,uint16_t keyColor,uint16_t textColor,const Font& font=Latin14,int pressed=-1,const NameKeyboardLabels* labels=nullptr) {
     for(int k=0;k<30;++k) {
         Rect r=nameKeyRect(area,k); roundRect(c,r.x,r.y,r.w,r.h,6,k==pressed?blend565(keyColor,textColor,65):keyColor);
         char letter[2]={(char)((editor.upper()?'A':'a')+k),0};
         const char* label=k<26?letter:k==26?"Del":k==27?"_":k==28?"Aa":"OK";
+        if(labels && k>=26) label=k==26?labels->backspace:k==27?labels->space:k==28?labels->letterCase:labels->done;
         drawText(c,label,r.x+(r.w-textWidth(label,font))/2,r.y+(r.h-lineHeight(font))/2,textColor,font);
     }
 }

@@ -62,14 +62,24 @@ int main(int argc,char** argv) {
     const char* corpus="空闲聆听思考说话开心难过困倦惊讶工作等待受阻完成自动自然好奇专注喜悦怀疑害羞眨眼眩晕警觉平静环绕弹跳闪动波浪闪耀";
     while(*corpus) { uint32_t cp=nextCodepoint(corpus);assert(glyph(Cjk18,cp)->code==cp); }
     // Track the actual semantic source, not only a copied list of expected labels.
-    std::ifstream botSource("lib/bot-ux/src/BotUx.cpp");
-    assert(botSource.good());
-    std::string semanticSource((std::istreambuf_iterator<char>(botSource)), std::istreambuf_iterator<char>());
-    const char* semanticCursor=semanticSource.c_str();
-    while(*semanticCursor) {
-        uint32_t cp=nextCodepoint(semanticCursor);
-        if(cp>=0x4e00 && cp<=0x9fff) assert(glyph(Cjk18,cp)->code==cp);
+    const char* sources[]={"lib/bot-ux/src/BotUx.cpp",
+        "stopwatch/bot-ux-watch/include/WatchStrings.h",
+        "stopwatch/bot-ux-watch/src/main.cpp",
+        "stopwatch/bot-ux-watch/src/WatchFace.cpp",
+        "core2/bot-ux-codex-core2/src/Settings.cpp"};
+    for(const char* source:sources) {
+        std::ifstream file(source);assert(file.good());
+        std::string semanticSource((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const char* cursor=semanticSource.c_str();
+        while(*cursor) {
+            uint32_t cp=nextCodepoint(cursor);
+            if((cp>=0x4e00 && cp<=0x9fff)||cp==0xff0c||cp==0x3002) assert(glyph(Cjk18,cp)->code==cp);
+        }
     }
+    const NameKeyboardLabels zhKeys={"删除","空格","Aa","确定"};
+    for(const char* label:{zhKeys.backspace,zhKeys.space,zhKeys.letterCase,zhKeys.done})
+        assert(textWidth(label,Cjk18)<=46);
+    drawNameKeyboard(c,e,area,0x2126,0xffff,Cjk18,-1,&zhKeys);
     Canvas textCanvas(320,30); drawText(textCanvas,"Milo 正在休息",2,0,0xffff,Cjk18);
     partial=0; for(auto p:textCanvas.p) if(p!=0x0841&&p!=0xffff) ++partial; assert(partial>50);
     drawText(c,"Milo 正在休息",10,53,0xffff,Cjk18);

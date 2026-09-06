@@ -328,3 +328,28 @@ straight scanline; the physical round edge supplies the remaining boundary. Labe
 content geometry stay unchanged. This change includes the earlier rejected points near
 `(236,448)` and `(241,458)` in the visible control, but their prior trace is only design
 input. Acceptance must be established by new natural use of this final geometry.
+
+The final round-edge source combines shared geometry commit `54507c9` with Watch
+integration commit `139d9bb`. The exhaustive WatchControls check passed the equivalence
+of every scanline pixel in `doneRowSpan`, `doneContains`, and target lookup. The final
+Watch build used 48,840 B RAM and 1,018,789 B flash; its 1,019,152 B image has SHA-256
+`6363337b4a45962b3fe4fdff42d5889ff774d6983a0e2acdfb162d47af200b1c`.
+Upload to `/dev/cu.usbmodem214201` completed with hash verification while preserving
+NVS. The native Settings framebuffer at
+`tmp/done-debug/edge-done-pages/settings.png` passed visual review for the visible
+round-edge fill, label, list clearance, and exact shared boundary. Runtime readback
+reported `stored=0`, no candidate, and the identity touch matrix before the new trial.
+
+The user then made two casual near-bottom Done presses and reported that each worked on
+the first attempt. The device trace corroborates exactly two contacts in the trial
+window. `(223,458)` was accepted after 95 ms and `(235,459)` was accepted after 77 ms;
+each began on Settings with target Done and immediately produced a Settings-to-Face
+transition. Sensor and logical coordinates were identical. There were no `no_target`,
+`target_changed`, or other rejected contacts. The trace retained all seven detail and
+seven critical events with zero drops; all 15 IRQ timestamps were retained. The full
+log is `tmp/done-debug/edge-done-final.log`, SHA-256
+`6c463b8b6fabd5e90d14caaaa007606c10b09826991f86968184aaa516f9fe4b`.
+The session ended on the automatic Face with `manual=0` and `language=1`; the identity
+profile remained unsaved and unchanged. This passes the requested two-press physical
+check for the final visible geometry on this device. The sample is intentionally small,
+so longer-term natural use remains the broader reliability evidence.

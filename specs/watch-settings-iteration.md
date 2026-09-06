@@ -248,3 +248,19 @@ label `normal` or `turned` and retain raw, converted, range, count, and hold dur
 The probe never fits, applies, or saves a profile. Balancing both orientations across
 early, middle, and late samples reduces time-order bias; three taps per orientation
 remain an initial direction check rather than a definitive attribution of the error.
+
+The balanced physical direction run completed all six points. Normal-orientation
+contacts were `(241,246)`, `(254,243)`, and `(243,246)`, averaging `(246,245)` or
+`(+13,+12)` from the center target. Turned contacts were `(221,223)`, `(220,228)`,
+and `(222,226)`, averaging `(221,225.67)` or `(-12,-7.33)`. Every held contact again
+had a zero-pixel raw range; maximum same-orientation distances were 13.34 px normal
+and 5.10 px turned. The two orientation means differ by `(25,19.33)` px and the
+offset reverses sign in display coordinates when the physical device rotates. Under
+the preliminary symmetric interpretation `dNormal=b+q`, `dTurned=b-q`, the fixed
+midpoint is only `b=(+0.5,+2.33)` while the direction-linked component is
+`q=(+12.5,+9.67)`. The balanced early/middle/late order makes a fixed device-coordinate
+affine error a poor explanation for most of this center-target shift and supports a
+user/contact-direction effect. With three taps per orientation and 13 px normal spread,
+the result remains an initial discriminator and does not identify a specific finger,
+occlusion, or controller-centroid mechanism. It ended at identity with no profile,
+candidate, NVS write, or reboot.

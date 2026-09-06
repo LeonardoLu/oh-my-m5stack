@@ -297,3 +297,22 @@ clearance, four-row Display layout, preview clipping, and enlarged text. These a
 firmware-rendered framebuffers rather than optical photographs. A fresh physical trace
 is armed on ordinary Settings, but the five-click natural flat-finger result is still
 pending and is not claimed by the build or screenshot evidence.
+
+The user reported that five natural flat-finger presses each succeeded on the first
+attempt. The complete device trace preserves eight Settings contacts during the trial
+window, so the firmware evidence does not establish five consecutive first-attempt
+successes. Six contacts were accepted and each immediately changed Settings to Face:
+`(210,425)` in 72 ms, `(255,444)` in 90 ms, `(262,405)` in 351 ms, `(249,443)` in
+435 ms, `(266,431)` in 189 ms, and `(226,444)` in 72 ms. Two additional contacts were
+rejected as `no_target`: `(251,458)` moving to `(241,458)` over 495 ms, and `(236,448)`
+over 81 ms. Both occurred on Settings immediately before a successful retry. Their y
+coordinates are below the capsule's half-open bottom at 447; the accepted coordinates
+are inside the same visible rounded geometry. Sensor and logical coordinates were
+identical throughout. The trace retained 32 detail and 27 critical events with zero
+event drops; the separate 64-entry IRQ history dropped 71 older IRQ timestamps and does
+not affect the contact or screen-transition record. The session ended on the automatic
+Face with `manual=0` and the persisted Chinese preference. Its startup profile was
+`stored=0`, no candidate and identity, and no calibration mutation command occurred,
+so no profile was saved. The enlarged visible target materially improved acceptance but
+the captured lower-edge contacts leave intermittent natural acceptance as a remaining
+risk rather than a completed five-for-five physical acceptance result.

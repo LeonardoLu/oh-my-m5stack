@@ -879,9 +879,11 @@ static void checkSleepContinuity() {
     using Bot = botux::BotUx;
     static_assert((int)Bot::Mood::Done == 11 && (int)Bot::Mood::Asleep == 12, "append-only moods");
     double totals[3] = {};
+    for (int body=0; body<4; ++body) {
     for (int mode = 0; mode < 3; ++mode) {
         gNow = 1000; M5Canvas canvas(120,120); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
-        auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style);
+        auto style = bot.style(); style.bodyStyle = (Bot::BodyStyle)body;
+        style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style);
         bot.setMood(Bot::Mood::Asleep, 0); bot.setReducedMotion(mode == 1); bot.setMotionAmount(mode == 2 ? 0 : 1);
         std::vector<uint16_t> prior(14400); double wrapMax=0, ordinaryMax=0;
         for (int frame=0; frame<=610; ++frame) {
@@ -898,8 +900,9 @@ static void checkSleepContinuity() {
                 if(frame%100<=1) wrapMax=std::max(wrapMax,diff); else ordinaryMax=std::max(ordinaryMax,diff);
             }
         }
-        std::cout << "sleep wrap/ordinary " << mode << ": " << wrapMax << "/" << ordinaryMax << "\n";
+        std::cout << "sleep wrap/ordinary body " << body << " mode " << mode << ": " << wrapMax << "/" << ordinaryMax << "\n";
         assert(wrapMax <= ordinaryMax * 1.5 + 1);
+    }
     }
     assert(totals[0]>0 && totals[1]<totals[0]*0.65 && totals[2]==0);
     std::cout << "Asleep RGB565 temporal difference full/reduced/zero: " << totals[0] << "/" << totals[1] << "/" << totals[2] << "\n";

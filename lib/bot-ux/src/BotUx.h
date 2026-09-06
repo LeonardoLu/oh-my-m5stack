@@ -237,7 +237,7 @@ private:
     void _drawAnimationFx();
     void _drawOverlays(); // battery/signal/label/time
     void _fillCapsule(float cx, float cy, float halfDx, float halfDy,
-                      float radius, uint16_t color);
+                      float radius, uint16_t color, uint8_t opacity = 255);
     void _fillEyeCurve(float cx, float cy, float dx, float dy, float rise,
                        float radius, uint16_t color);
     void _fillEllipseAA(float cx, float cy, float rx, float ry, uint16_t color);

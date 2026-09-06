@@ -351,8 +351,8 @@ at 200px is 68.5px normally, 13.5px with reduced motion, and 0px at zero amount.
 Waiting is alert and patient: partly open eyes, a gentle questioning lean and
 a 5.2-second sideways search; tiny previews use the same eased capsule path.
 Asleep appends enum value 12 without moving existing values. It combines closed
-eyes, an 8.8-second breath and three vector z marks. Marks stay outside the orb
-and fade fully at their 4.8-second cycle endpoints, avoiding visible wraps.
+eyes, an 8.8-second breath and three vector z marks. Marks sit above the orb, blend against the actual underlying RGB565 pixels
+(including rounded-square corners), and fade fully at their 4.8-second cycle endpoints, avoiding visible wraps.
 Reduced motion calms travel; zero amount freezes the marks. Explicit Neutral
 still reopens the eyes while Asleep retains its sleep indicator.
 
@@ -366,5 +366,6 @@ visible; those circles remain a simple host approximation of M5GFX rasterization
 
 Focused native checks pass with all 1,040 combinations and nine directions.
 Across two Asleep cycles the maximum phase-wrap/ordinary adjacent frame
-RGB565 differences were 1,674/4,163 normally and 380/822 reduced; zero amount
+RGB565 differences for Round were 1,041/4,172 normally and 207/828 reduced; all
+four body styles passed the wrap check and zero amount
 remained identical. This is host rendering evidence, not hardware acceptance.

@@ -20,7 +20,9 @@ Asleep is appended as Mood value 12; all earlier enum values remain unchanged.
 Counts are 13 moods × 10 expressions × 8 animations = 1,040 combinations.
 Asleep uses closed eyes, an 8.8-second breath and three vector z marks above and
 to the right of the orb. Each z fades completely at its 4.8-second cycle wrap.
-Placing marks outside the body prevents background-color holes during fading.
+Marks blend against the actual underlying RGB565 pixel, preventing cutouts
+even when a RoundedSquare corner moves underneath. Opaque eye capsules retain
+their existing fast span path; only fading marks take the alpha interior path.
 Reduced motion calms travel and zero amount freezes the marks. Explicit Neutral
 reopens the face while retaining the sleeping indicator. No new per-frame heap
 allocation or secondary framebuffer is introduced. Firmware Chinese additions
@@ -34,10 +36,14 @@ are `熟睡` and `正在熟睡`; Watch integration owns CJK corpus regeneration.
   windows; nine directions and every eye style retain the intended direction.
 - Thinking center-dot peak travel at 200px: 68.5px full, 13.5px reduced, 0px zero.
   Consecutive 16ms samples stay within 5px of the prior position.
-- Asleep is distinct from Sleepy. Across two full z cycles, maximum adjacent
-  frame RGB565 difference at wrap / elsewhere is 1,674 / 4,163 full and
-  380 / 822 reduced. Zero amount gives 0 / 0. Aggregate differences are
-  431,092 / 88,761 / 0 for full/reduced/zero.
+- Asleep is distinct from Sleepy. All four body styles are checked across two
+  complete z cycles. Round maximum adjacent RGB565 difference at wrap /
+  elsewhere is 1,041 / 4,172 full and 207 / 828 reduced. All four styles have
+  smaller wrap than ordinary maxima and zero amount gives 0 / 0. Aggregate
+  differences across all styles are about 1.09 million / 202,351 / 0 for
+  full/reduced/zero. RoundedSquare’s integer host primitive produces larger
+  ordinary body-motion differences; Hexagon’s polygon remains SVG-only in
+  this harness. The shared capsule alpha path itself is raster-backed.
 - Explicit Neutral reopens Sleepy, Waiting and Asleep at 40, 72 and 200px.
   Eye-ink measurement excludes the body's AA fringe, which can quantize to the
   same RGB565 color as the eyes. The partly-open Waiting face differs by at

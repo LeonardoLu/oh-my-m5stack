@@ -776,11 +776,10 @@ void BotUx::_drawAnimationFx() {
             float y = _m.cy - r * (0.88f + i * 0.10f + travel * 0.10f);
             float half = fmaxf(1.1f, r * (0.045f + i * 0.010f));
             float stroke = fmaxf(0.65f, r * 0.009f);
-            uint16_t color = mix565(_style.accentColor, _style.bgColor,
-                (uint8_t)(amount > 0 ? 255 * (1.0f - sinf(kPi * t) * sinf(kPi * t)) : 35));
-            _fillCapsule(x, y - half, half, 0, stroke, color);
-            _fillCapsule(x, y, -half, half, stroke, color);
-            _fillCapsule(x, y + half, half, 0, stroke, color);
+            uint8_t opacity = (uint8_t)(amount > 0 ? 255 * sinf(kPi * t) * sinf(kPi * t) : 220);
+            _fillCapsule(x, y - half, half, 0, stroke, _style.accentColor, opacity);
+            _fillCapsule(x, y, -half, half, stroke, _style.accentColor, opacity);
+            _fillCapsule(x, y + half, half, 0, stroke, _style.accentColor, opacity);
         }
         return;
     }
@@ -837,7 +836,8 @@ void BotUx::_fillEllipseAA(float cx, float cy, float rx, float ry, uint16_t colo
 }
 
 void BotUx::_fillCapsule(float cx, float cy, float halfDx, float halfDy,
-                         float radius, uint16_t color) {
+                         float radius, uint16_t color, uint8_t opacity) {
+    if (!opacity) return;
     radius = fmaxf(radius, 0.8f);
     float ax = cx - halfDx, ay = cy - halfDy;
     float vx = halfDx * 2.0f, vy = halfDy * 2.0f;
@@ -855,12 +855,18 @@ void BotUx::_fillCapsule(float cx, float cy, float halfDx, float halfDy,
             float dx = x - ax - t * vx, dy = y - ay - t * vy;
             float d2 = dx * dx + dy * dy;
             if (d2 <= inner2) {
+                // Opaque eyes retain the fast span path. Only fading z marks
+                // composite their interior against the actual underlying body.
+                if (opacity < 255) {
+                    _cv->drawPixel(x, y, mix565(_cv->readPixel(x, y), color, opacity));
+                    continue;
+                }
                 if (run < 0) run = x;
                 continue;
             }
             if (run >= 0) { _cv->fillRect(run, y, x - run, 1, color); run = -1; }
             if (d2 >= outer2) continue;
-            uint8_t coverage = (uint8_t)(clampf(radius + 0.5f - sqrtf(d2), 0.0f, 1.0f) * 255.0f);
+            uint8_t coverage = (uint8_t)(clampf(radius + 0.5f - sqrtf(d2), 0.0f, 1.0f) * opacity);
             uint16_t under = _cv->readPixel(x, y);
             _cv->drawPixel(x, y, mix565(under, color, coverage));
         }

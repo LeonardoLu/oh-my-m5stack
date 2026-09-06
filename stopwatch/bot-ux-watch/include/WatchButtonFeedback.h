@@ -24,7 +24,7 @@ struct Blob {
 constexpr Blob restingBlob(Button button) {
     return button == A ? Blob{220, 18, 24, 0xFFE0}
          : button == B ? Blob{320, 18, 24, 0x34BF}
-                       : Blob{90, 15, 20, 0xF800};
+                       : Blob{135, 15, 20, 0xF800};
 }
 
 inline Blob expandedBlob(Button button, uint8_t step) {

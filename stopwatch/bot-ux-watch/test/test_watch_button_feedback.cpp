@@ -43,7 +43,7 @@ int main() {
     Blob a = restingBlob(A), b = restingBlob(B), power = restingBlob(Power);
     assert(a.centerDegrees == 220 && a.halfDegrees == 18 && a.depth == 24 && a.color == 0xFFE0);
     assert(b.centerDegrees == 320 && b.halfDegrees == 18 && b.depth == 24 && b.color == 0x34BF);
-    assert(power.centerDegrees == 90 && power.halfDegrees == 15 && power.depth == 20 && power.color == 0xF800);
+    assert(power.centerDegrees == 135 && power.halfDegrees == 15 && power.depth == 20 && power.color == 0xF800);
     assert(blobInset(a, a.centerDegrees - a.halfDegrees) == 0.0f);
     assert(blobInset(a, a.centerDegrees + a.halfDegrees) == 0.0f);
     assert(blobInset(a, a.centerDegrees) == a.depth);

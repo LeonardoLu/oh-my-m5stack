@@ -14,6 +14,8 @@
 #include "TimedState.h"
 #include "WatchFace.h"
 #include "WatchInteraction.h"
+#include "WatchButtonFeedback.h"
+#include "WatchEdgeGeometry.h"
 #include "WatchUi.h"
 #include "WatchControls.h"
 #include <UxPointer.h>
@@ -65,6 +67,7 @@ WatchFace face;
 botux::BotUx previewBot;
 Settings settings;
 Power power;
+watchbuttons::Feedback _buttonFeedback;
 
 Screen _screen = Screen::Face;
 Editor _editor = Editor::None;
@@ -115,9 +118,17 @@ uint8_t _battery = 100;
 bool _charging = false;
 bool _powerKnown = false;
 uint32_t _powerReadMs = 0;
+uint32_t _powerButtonReadMs = 0;
+bool _powerButtonValid = false, _powerButtonPressed = false;
+bool _diagnosticButtons = false;
+uint8_t _diagnosticButtonMask = 0;
+bool _diagnosticBattery = false;
+uint8_t _diagnosticBatteryPct = 100;
 TimedState _happyAcknowledgment;
 uint32_t _statusPanelStartMs = 0;
 uint32_t _statusPanelUntilMs = 0;
+int16_t _statusPanelTouchOffset = 0;
+bool _statusPanelTouchVisible = false;
 bool _dozing = false;
 bool _renderReady = false;
 bool _uiDirty = true;
@@ -853,10 +864,40 @@ static void refreshPower(uint32_t now) {
     _powerKnown = true;
 }
 
+static void invalidateButtonFeedback() {
+    if (_screen == Screen::Face) {
+        _faceNeedsClear = true;
+        face.invalidate();
+    } else {
+        _uiDirty = true;
+        _listBandOnly = false;
+    }
+}
+
+static bool refreshButtonFeedback(uint32_t now) {
+    if (now - _powerButtonReadMs >= 8) {
+        _powerButtonReadMs = now;
+        bool pressed = false;
+        _powerButtonValid = power.readPowerButton(&pressed);
+        _powerButtonPressed = _powerButtonValid && pressed;
+    }
+    bool changed = _buttonFeedback.sample(M5.BtnA.isPressed(), M5.BtnB.isPressed(),
+                                          _powerButtonValid, _powerButtonPressed, now);
+    changed = _buttonFeedback.advance(now) || changed;
+    if (changed) {
+        invalidateButtonFeedback();
+    }
+    return changed;
+}
+
 static void showStatusPanel(uint32_t now, uint32_t duration = 6000) {
     _statusPanelStartMs = now;
     _statusPanelUntilMs = now + duration;
     _uiDirty = true;
+}
+
+static uint8_t visibleBattery() {
+    return _diagnosticBattery ? _diagnosticBatteryPct : _battery;
 }
 
 static float statusPanelProgress(uint32_t now) {
@@ -1197,7 +1238,12 @@ static void selectPersonalItem() {
 
 static void handleFaceInput(Gesture gesture) {
     if (gesture == Gesture::Tap) {
-        if (_statusPanelUntilMs && tapHit(128, 0, 210, 72)) {
+        int16_t releaseOffset=watchedge::batteryToothOffset(statusPanelProgress(millis()));
+        bool batteryTap=_statusPanelTouchVisible
+            && watchedge::batteryToothContains(_touch.startX(),_touch.startY(),_statusPanelTouchOffset)
+            && watchedge::batteryToothContains(_tapX,_tapY,releaseOffset);
+        _statusPanelTouchVisible=false;
+        if (_statusPanelUntilMs && batteryTap) {
             _statusPanelUntilMs = 0;
             _clockDoubleTap.reset();
             return;
@@ -1437,7 +1483,12 @@ static void handleInputs(uint32_t now) {
     Gesture gb = _buttonB.poll(M5.BtnB.wasPressed(), M5.BtnB.isPressed(), M5.BtnB.wasReleased(), now);
     Gesture gt = Gesture::None;
     if (_screen == Screen::Face) {
-        if(touch.wasPressed()) _faceTracking=true;
+        if(touch.wasPressed()) {
+            _faceTracking=true;
+            _statusPanelTouchOffset=watchedge::batteryToothOffset(statusPanelProgress(now));
+            _statusPanelTouchVisible=_statusPanelUntilMs
+                && watchedge::batteryToothContains(touch.x,touch.y,_statusPanelTouchOffset);
+        }
         if(touch.isPressed()&&_faceTracking&&now-_gazeTouchMs>=33) {
             _gazeTouchMs=now; directFaceGaze(touch.x,touch.y,now);
         }
@@ -1983,6 +2034,44 @@ static void drawTouchCalibration() {
     canvas.fillCircle(x,y,4,accent);
 }
 
+static uint8_t visibleButtonMask() {
+    return _diagnosticButtons ? _diagnosticButtonMask : _buttonFeedback.held();
+}
+
+template <typename Gfx>
+static void drawButtonArc(Gfx& target, watchbuttons::Button button) {
+    const auto spec = watchbuttons::arc(button);
+    constexpr float kRadians = 3.14159265358979323846f / 180.0f;
+    constexpr int16_t kRadius = 224;
+    constexpr int16_t kThickness = 7;
+    int16_t center = (spec.startDegrees + spec.endDegrees) / 2;
+    int16_t targetHalf = (spec.endDegrees - spec.startDegrees) / 2;
+    uint8_t step = _diagnosticButtons ? watchbuttons::Feedback::ExpandSteps
+                                      : _buttonFeedback.expandStep(button);
+    int16_t half = targetHalf * step / watchbuttons::Feedback::ExpandSteps;
+    auto cap = [&](int16_t degrees) {
+        float angle = degrees * kRadians;
+        int16_t x = 233 + (int16_t)lroundf(cosf(angle) * kRadius);
+        int16_t y = 233 + (int16_t)lroundf(sinf(angle) * kRadius);
+        target.fillCircle(x, y, kThickness, spec.color);
+    };
+    if (half > 0) {
+        target.fillArc(233, 233, 231, 217, center - half, center + half, spec.color);
+        cap(center - half);
+        cap(center + half);
+    } else {
+        cap(center);
+    }
+}
+
+template <typename Gfx>
+static void drawButtonFeedback(Gfx& target) {
+    uint8_t held = visibleButtonMask();
+    if (held & watchbuttons::A) drawButtonArc(target, watchbuttons::A);
+    if (held & watchbuttons::B) drawButtonArc(target, watchbuttons::B);
+    if (held & watchbuttons::Power) drawButtonArc(target, watchbuttons::Power);
+}
+
 static void render(uint32_t now) {
     if(_touchCalibration) {
         if(!_uiDirty) return;
@@ -1994,7 +2083,7 @@ static void render(uint32_t now) {
         return;
     }
     uint32_t t0 = micros();
-    face.setBattery(_battery);
+    face.setBattery(visibleBattery());
     face.setCharging(_charging);
     face.setHour24(settings.data().hour24);
     face.setShowSeconds(settings.data().showSeconds);
@@ -2045,6 +2134,7 @@ static void render(uint32_t now) {
         face.draw(&M5.Display, settings.style().bgColor, settings.ink(), settings.muted(),
                   settings.style().accentColor, settings.panel(), settings.warning(),
                   statusPanelProgress(now));
+        drawButtonFeedback(M5.Display);
         M5.Display.waitDisplay();
         uint32_t t3 = micros();
         recordFrame(now, t1 - t0, t2 - t1, t3 - t2);
@@ -2064,6 +2154,7 @@ static void render(uint32_t now) {
         drawEditor();
     }
     drawPointerFeedback();
+    drawButtonFeedback(canvas);
     uint32_t t2 = micros();
     if(bandOnly) M5.Display.pushImage(0,mainLayout.y,kW,mainLayout.h,
         (uint16_t*)canvas.getBuffer()+kW*mainLayout.y);
@@ -2092,6 +2183,7 @@ static void emitFrameCapture() {
         else drawEditor();
         drawPointerFeedback();
     }
+    if(!_touchCalibration) drawButtonFeedback(canvas);
 
     const uint8_t* pixels = (const uint8_t*)canvas.getBuffer();
     size_t bytes = canvas.bufferLength();
@@ -2178,10 +2270,11 @@ static void selectDiagnosticPage(uint8_t page) {
 
 static uint32_t _diagnosticSeq=0;
 static void printUiState() {
-    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u status=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u\n",
+    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u status=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u keys_held=%u pwr_valid=%u pwr_held=%u keys_diag=%u\n",
         (unsigned long)_diagnosticSeq,(unsigned)_screen,(unsigned)_editor,exactPressedTarget(),_pointer.scrolling(),
         _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,_statusPanelUntilMs!=0,
-        _manualPreset,(unsigned)face.bot().mood(),(unsigned)face.bot().effectiveMood(),(unsigned)face.bot().expression(),(unsigned)face.bot().effectiveExpression(),(unsigned)face.bot().animation());
+        _manualPreset,(unsigned)face.bot().mood(),(unsigned)face.bot().effectiveMood(),(unsigned)face.bot().expression(),(unsigned)face.bot().effectiveExpression(),(unsigned)face.bot().animation(),
+        (unsigned)_buttonFeedback.held(),_powerButtonValid,_powerButtonPressed,_diagnosticButtons);
     // Drain this diagnostic reply now, rather than waiting for later telemetry.
     Serial.flush();
 }
@@ -2194,11 +2287,27 @@ static void handleSerialCommands() {
         line[length]=0; length=0;
         char* seq=strchr(line,'@'); _diagnosticSeq=seq?strtoul(seq+1,nullptr,10):0;
         if(seq) { while(seq>line && seq[-1]==' ') --seq; *seq=0; }
-        int x,y,down;
+        int x,y,down,mask,pct;
         if(sscanf(line,"contact %d %d %d",&down,&x,&y)==3) {
             _diagnosticContact=true; _diagnosticDown=down!=0;
             _diagnosticX=x; _diagnosticY=y; _contactReplyPending=true;
         } else if(!strcmp(line,"physical")) { _diagnosticContact=false; printUiState(); }
+        else if(!strcmp(line,"keys off")) {
+            _diagnosticButtons=false; _diagnosticButtonMask=0;
+            invalidateButtonFeedback(); printUiState();
+        }
+        else if(sscanf(line,"keys %d",&mask)==1 && mask>=0 && mask<=7) {
+            _diagnosticButtons=true; _diagnosticButtonMask=(uint8_t)mask;
+            invalidateButtonFeedback(); printUiState();
+        }
+        else if(!strcmp(line,"battery off")) {
+            _diagnosticBattery=false;
+            _faceNeedsClear=true; face.invalidate(); showStatusPanel(millis()); printUiState();
+        }
+        else if(sscanf(line,"battery %d",&pct)==1 && pct>=0 && pct<=100) {
+            _diagnosticBattery=true; _diagnosticBatteryPct=(uint8_t)pct;
+            _faceNeedsClear=true; face.invalidate(); showStatusPanel(millis()); printUiState();
+        }
         else if(!strcmp(line,"cal on")) { _diagnosticContact=false; startTouchCalibration(); Serial.println("CAL armed 1/5"); Serial.flush(); }
         else if(!strcmp(line,"cal start")) { _diagnosticContact=false; startTouchCalibration(TouchCalibrationMode::Train); Serial.println("CAL training 1/5"); Serial.flush(); }
         else if(!strcmp(line,"cal repeat")) { _diagnosticContact=false; startTouchCalibration(TouchCalibrationMode::Repeat); Serial.println("CAL repeat 1/9"); Serial.flush(); }
@@ -2285,7 +2394,7 @@ void setup() {
     _personalList.configure(kPersonalCount, kVisibleRows);
     _ambientCycle.begin(millis());
     showStatusPanel(millis(), 1800);
-    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, trace on/off/clear/dump, cal start/repeat/direction/on/off/dump/profile/save/reset, sound N\n",
+    Serial.printf("bot-ux-watch ready; IMU=%d. Commands: e/a/m/p/s, c capture, v0..v22 diagnostic pages, td/tm/tu x y, ui, keys 0..7/off, battery 0..100/off, trace on/off/clear/dump, cal start/repeat/direction/on/off/dump/profile/save/reset, sound N\n",
                   M5.Imu.isEnabled());
 }
 
@@ -2296,6 +2405,7 @@ void loop() {
     if (!_renderReady) { delay(20); return; }
 
     refreshPower(now);
+    bool buttonFeedbackChanged = refreshButtonFeedback(now);
     if(_clickUntil && (int32_t)(now-_clickUntil)>=0) { _clickUntil=0; _uiDirty=true; _listBandOnly=false; }
     updateMotion(now);
     handleInputs(now);
@@ -2323,7 +2433,7 @@ void loop() {
     }
     uint32_t interval = _dozing ? kDozeFrameMs
                       : previewIsAnimated() ? kPreviewFrameMs : kActiveFrameMs;
-    if (now - _lastFrameMs < interval) {
+    if (!buttonFeedbackChanged && now - _lastFrameMs < interval) {
         delay(1);
         return;
     }

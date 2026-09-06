@@ -15,6 +15,7 @@ public:
     uint8_t bootOffConfig() const { return _bootOffCfg; }
     uint8_t batteryPct() const { return _batteryPct; }
     bool charging() const { return _charging; }
+    bool readPowerButton(bool* pressed);
 
     void applyLevel(uint8_t level); // 1..5 -> 0..255 -> display
     void setBrightness(uint8_t v);  // raw 0..255

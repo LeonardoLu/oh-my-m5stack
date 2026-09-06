@@ -60,3 +60,40 @@ percent and 8 percent with the native Latin24 font and shared antialiased shape
 primitives. It is a host raster for visual review, not a panel photograph or proof
 of touch behavior. Final firmware and hardware evidence must be added after Watch
 integration and upload.
+
+## Physical-button edge feedback
+
+The enclosure mapping follows the official StopWatch pin map and product layout:
+A is the yellow upper-left button on GPIO 2, B is the blue upper-right button on
+GPIO 1, and the red power button is at the bottom. While a button is physically
+held, its matching colored arc expands over 120 ms at that display edge. Each
+button owns its press timestamp, so a later button in an A+B chord starts its own
+animation. Releasing a button removes its arc on the next rendered frame. The
+overlay is visual feedback only and does not replace or synthesize the existing
+button gesture events. See the [official StopWatch documentation and pin
+map](https://docs.m5stack.com/en/core/StopWatch).
+
+A and B use M5Unified's live `Button_Class::isPressed()` state. M5Unified exposes
+the power key to the application as a click/hold IRQ event, so the pinned
+M5Unified source receives a verified, fail-closed patch that reads PM1 button
+status register `0x48` bit 0 through the same initialized PMIC object. The added
+read does not replace `getPekPress()` or the normal `M5.update()` event path. A
+failed PMIC read makes power feedback unknown and hidden; it cannot leave a red
+arc stuck on screen. The patching hook accepts only the pinned revision and exact
+original or patched file hashes, and a second build verifies the patched hashes
+without changing them.
+
+Face rendering clears and invalidates its partial-update background whenever a
+button edge changes. Static settings and editor pages force a full redraw rather
+than a list-band update. In each path the arcs render last; this lets the power arc
+temporarily cover the bottom Done segment and lets the underlying content return
+without residual pixels on release. Serial-only `keys` and battery percentage
+overrides support framebuffer geometry captures. These overrides do not prove the
+physical button signals and must be disabled after capture.
+
+`test_watch_button_feedback.cpp` covers held/released transitions, independent
+expansion clocks, simultaneous buttons and invalid power samples. The clean
+dependency build applied the PMIC patch from its original hashes; an immediate
+second build reported both M5GFX and M5Unified patches already verified. The final
+source build used 48,888 bytes RAM and 1,023,573 bytes flash. Device upload, framebuffer
+captures and physical held-button acceptance are still pending.

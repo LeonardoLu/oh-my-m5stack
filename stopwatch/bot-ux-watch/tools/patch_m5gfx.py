@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 
 
-EXPECTED_REVISION = "d91077b9a607b59404e4e4a49f775c792bfae382"
-FILES = {
+M5GFX_REVISION = "d91077b9a607b59404e4e4a49f775c792bfae382"
+M5GFX_FILES = {
     "src/M5GFX.cpp": (
         "df1b2e3882c45d1aa7743f6f30081fc753c609cdf38f352143f7f3bc3738514e",
         "494903aa46742226bdd9a8b23fa65b4cb27784ddfeb20cbff96efdcb0be92d0c",
@@ -29,6 +29,17 @@ FILES = {
         "52b919b32d61b91c8ba81c273fa878a5d84c2381e1964b7f65e703ce230c5211",
     ),
 }
+M5UNIFIED_REVISION = "8530f5377d782e4a25a6c482de2e71c3f75ca8eb"
+M5UNIFIED_FILES = {
+    "src/utility/power/M5PM1_Class.hpp": (
+        "3e55b7fac40db554cd511ae2d178b16713788e593b8cc570b104b93ba16a4016",
+        "5a9c23565340b3a83367ffefc4234d19904afc9dedcc6b28a3599f7bdd1593d6",
+    ),
+    "src/utility/power/M5PM1_Class.cpp": (
+        "5ffe085a11d139a2e1ea16b3499e23c97af82020e09aa2275ca021e8646e6f10",
+        "18650e10308e4ecff5b2b65e4ec60e38d9014077897e1ad8fd204460fb6dc270",
+    ),
+}
 
 
 def digest(path):
@@ -36,36 +47,47 @@ def digest(path):
 
 
 deps = Path(env.subst("$PROJECT_LIBDEPS_DIR")) / env.subst("$PIOENV")
-candidates = []
-for directory in deps.glob("M5GFX*"):
-    manifest = directory / "library.json"
-    if not manifest.is_file() or json.loads(manifest.read_text()).get("name") != "M5GFX":
-        continue
-    try:
-        revision = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(directory), text=True
-        ).strip()
-    except subprocess.CalledProcessError:
-        continue
-    if revision == EXPECTED_REVISION:
-        candidates.append(directory)
-if len(candidates) != 1:
-    raise RuntimeError("Expected exactly one installed M5GFX dependency, found %d" % len(candidates))
 
-library = candidates[0]
-state = [digest(library / name) for name in FILES]
-original = [hashes[0] for hashes in FILES.values()]
-patched = [hashes[1] for hashes in FILES.values()]
 
-if state == original:
-    patch = Path(env.subst("$PROJECT_DIR")) / "patches" / "m5gfx-stopwatch-cst820.patch"
-    subprocess.run(["git", "apply", "--unidiff-zero", "--check", str(patch)], cwd=str(library), check=True)
-    subprocess.run(["git", "apply", "--unidiff-zero", str(patch)], cwd=str(library), check=True)
-    state = [digest(library / name) for name in FILES]
-    if state != patched:
-        raise RuntimeError("M5GFX StopWatch patch produced unexpected content")
-    print("Applied verified M5GFX StopWatch CST820 patch")
-elif state == patched:
-    print("Verified existing M5GFX StopWatch CST820 patch")
-else:
-    raise RuntimeError("Refusing to patch modified or unexpected M5GFX sources")
+def find_dependency(name, revision):
+    candidates = []
+    for directory in deps.glob(name + "*"):
+        manifest = directory / "library.json"
+        if not manifest.is_file() or json.loads(manifest.read_text()).get("name") != name:
+            continue
+        try:
+            actual = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=str(directory), text=True
+            ).strip()
+        except subprocess.CalledProcessError:
+            continue
+        if actual == revision:
+            candidates.append(directory)
+    if len(candidates) != 1:
+        raise RuntimeError("Expected exactly one installed %s dependency, found %d" % (name, len(candidates)))
+    return candidates[0]
+
+
+def apply_verified(name, revision, files, patch_name, description):
+    library = find_dependency(name, revision)
+    state = [digest(library / filename) for filename in files]
+    original = [hashes[0] for hashes in files.values()]
+    patched = [hashes[1] for hashes in files.values()]
+    if state == original:
+        patch = Path(env.subst("$PROJECT_DIR")) / "patches" / patch_name
+        subprocess.run(["git", "apply", "--unidiff-zero", "--check", str(patch)], cwd=str(library), check=True)
+        subprocess.run(["git", "apply", "--unidiff-zero", str(patch)], cwd=str(library), check=True)
+        state = [digest(library / filename) for filename in files]
+        if state != patched:
+            raise RuntimeError("%s patch produced unexpected content" % name)
+        print("Applied verified " + description)
+    elif state == patched:
+        print("Verified existing " + description)
+    else:
+        raise RuntimeError("Refusing to patch modified or unexpected %s sources" % name)
+
+
+apply_verified("M5GFX", M5GFX_REVISION, M5GFX_FILES,
+               "m5gfx-stopwatch-cst820.patch", "M5GFX StopWatch CST820 patch")
+apply_verified("M5Unified", M5UNIFIED_REVISION, M5UNIFIED_FILES,
+               "m5unified-stopwatch-power-button.patch", "M5Unified StopWatch power-button patch")

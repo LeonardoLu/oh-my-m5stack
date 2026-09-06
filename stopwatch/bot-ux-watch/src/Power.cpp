@@ -35,6 +35,10 @@ void Power::update() {
         && M5.Power.isCharging() == m5::Power_Class::is_charging;
 }
 
+bool Power::readPowerButton(bool* pressed) {
+    return M5.Power.M5pm1.getButtonPressed(pressed);
+}
+
 uint8_t Power::levelToValue(uint8_t level) {
     if (level < 1) level = 1;
     if (level > 5) level = 5;

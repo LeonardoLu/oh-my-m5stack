@@ -13,8 +13,12 @@ struct Target { int id; ux::Rect bounds; int16_t radius; };
 struct ListLayout { int16_t x,y,w,h,step,rowHeight,radius; uint8_t visibleRows; };
 constexpr ListLayout mainList() { return {62,76,342,264,66,58,25,4}; }
 constexpr ListLayout previewList() { return {58,242,350,96,48,44,17,2}; }
-constexpr ux::Rect doneBounds() { return {154,351,158,96}; }
-constexpr int16_t doneRadius() { return 48; }
+constexpr ux::Rect doneBounds() { return {0,351,466,115}; }
+constexpr int16_t doneCircleCenterX() { return 233; }
+constexpr int16_t doneCircleCenterY() { return 233; }
+constexpr int16_t doneLabelY() { return 399; }
+constexpr int16_t doneLabelX() { return doneCircleCenterX(); }
+constexpr int16_t doneCircleRadius() { return 233; }
 constexpr ux::Rect nameKeyboardBounds() { return {78,126,310,214}; }
 constexpr ux::Rect useThemeBounds() { return {163,207,140,32}; }
 constexpr ux::Rect colorPadBounds() { return {66,242,260,96}; }
@@ -24,6 +28,32 @@ constexpr int16_t displayRowCenter(uint8_t index) {
 }
 constexpr ux::Rect displayRowBounds(uint8_t index) {
     return {58,(int16_t)(displayRowCenter(index)-22),350,44};
+}
+
+inline bool doneContains(int x, int y) {
+    const auto bounds=doneBounds();
+    if(!bounds.contains(x,y)) return false;
+    int32_t dx=x-doneCircleCenterX(),dy=y-doneCircleCenterY();
+    return dx*dx+dy*dy<=(int32_t)doneCircleRadius()*doneCircleRadius();
+}
+
+// The visible footer is the same circular segment used for hit testing. Each
+// returned row is {left, y, width, 1}, with a half-open horizontal interval.
+inline ux::Rect doneRowSpan(int16_t y) {
+    const auto bounds=doneBounds();
+    if(y<bounds.y||y>=bounds.y+bounds.h) return {0,y,0,0};
+    int32_t dy=y-doneCircleCenterY();
+    int32_t remaining=(int32_t)doneCircleRadius()*doneCircleRadius()-dy*dy;
+    int16_t low=0,high=doneCircleRadius();
+    while(low<high) {
+        int16_t mid=(int16_t)((low+high+1)/2);
+        if((int32_t)mid*mid<=remaining) low=mid;
+        else high=mid-1;
+    }
+    int16_t left=doneCircleCenterX()-low,right=doneCircleCenterX()+low;
+    if(left<bounds.x) left=bounds.x;
+    if(right>=bounds.x+bounds.w) right=bounds.x+bounds.w-1;
+    return {left,y,(int16_t)(right-left+1),1};
 }
 
 inline bool roundedContains(ux::Rect r, int16_t radius, int x, int y) {
@@ -62,8 +92,7 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
         if(result.id==None&&roundedContains(bounds,radius,x,y)) result={id,bounds,radius};
     };
     if (screen != Screen::Face) {
-        match(Done,doneBounds(),doneRadius());
-        if(result.id!=None) return result;
+        if(doneContains(x,y)) return {Done,doneBounds(),0};
     }
     if (screen == Screen::Settings || screen == Screen::Personalize) {
         const auto layout=mainList();

@@ -6,24 +6,36 @@ using namespace watchcontrols;
 int main() {
     // Every non-face screen shares the exact same single Done target.
     for(int e=(int)Editor::Time;e<=(int)Editor::Gaze;++e) {
-        assert(at(Screen::Editor,(Editor)e,0,233,399).id==Done);
-        assert(at(Screen::Editor,(Editor)e,0,154,351).id==None);
+        assert(at(Screen::Editor,(Editor)e,0,doneLabelX(),doneLabelY()).id==Done);
+        assert(at(Screen::Editor,(Editor)e,0,0,351).id==None);
     }
     for(auto screen:{Screen::Settings,Screen::Personalize}) for(int off=0;off<500;++off) {
-        assert(at(screen,Editor::None,off,233,399).id==Done);
+        assert(at(screen,Editor::None,off,doneLabelX(),doneLabelY()).id==Done);
     }
     auto done=doneBounds();
-    assert(roundedContains(done,doneRadius(),233,399));
-    assert(!roundedContains(done,doneRadius(),done.x,done.y));
-    assert(!roundedContains(done,doneRadius(),done.x+done.w-1,done.y));
-    assert(done.x+done.w/2==233&&done.y+done.h/2==399);
-    assert(done.h==96&&doneRadius()==done.h/2);
-    // The complete rounded control remains inside the 466 px round display.
-    for(int y=done.y;y<done.y+done.h;++y) for(int x=done.x;x<done.x+done.w;++x) {
-        if(!roundedContains(done,doneRadius(),x,y)) continue;
-        int dx=x-233,dy=y-233;
-        assert(dx*dx+dy*dy<=233*233);
+    assert(done.x==0&&done.y==351&&done.w==466&&done.h==115);
+    assert(doneCircleCenterX()==233&&doneCircleCenterY()==233&&doneCircleRadius()==233);
+    assert(doneLabelX()==233&&doneLabelY()==399);
+    // Exhaustively prove that every visible scanline and hit uses the same
+    // bottom segment of the mathematical 466 px display circle.
+    for(int y=-1;y<=466;++y) {
+        auto span=doneRowSpan((int16_t)y);
+        bool validRow=y>=done.y&&y<done.y+done.h;
+        assert((span.w>0)==validRow);
+        assert(span.h==(validRow?1:0));
+        if(validRow) assert(span.y==y&&span.x>=0&&span.x+span.w<=466);
+        for(int x=0;x<466;++x) {
+            int dx=x-233,dy=y-233;
+            bool expected=validRow&&dx*dx+dy*dy<=233*233;
+            assert(doneContains(x,y)==expected);
+            assert((validRow&&x>=span.x&&x<span.x+span.w)==expected);
+            assert((at(Screen::Settings,Editor::None,0,x,y).id==Done)==expected);
+        }
     }
+    assert(doneRowSpan(350).w==0);
+    assert(doneRowSpan(351).x==33&&doneRowSpan(351).w==401);
+    assert(doneRowSpan(465).x==212&&doneRowSpan(465).w==43);
+    assert(!doneContains(-1,doneLabelY())&&!doneContains(466,doneLabelY()));
     // Menu hit geometry follows arbitrary sub-row offsets, including partial rows.
     for(int off=0;off<=132;++off) {
         for(int y=76;y<340;++y) {
@@ -69,8 +81,9 @@ int main() {
     }
     assert(at(Screen::Editor,Editor::Display,0,233,345).id==None);
     // Buttons accept up-inside through 1 s; page cancellation consumes the release.
-    ux::PointerSession p; auto t=at(Screen::Editor,Editor::Format,0,233,399);
-    p.begin(t.id,t.bounds,233,399,100,false); p.move(250,409);
+    ux::PointerSession p; auto t=at(Screen::Editor,Editor::Format,0,doneLabelX(),doneLabelY());
+    p.begin(t.id,t.bounds,doneLabelX(),doneLabelY(),100,false); p.move(250,409);
     assert(p.end(250,409,1000)==Done);
-    p.begin(t.id,t.bounds,233,399,100,false); p.cancel(); assert(p.end(233,399,300)==None);
+    p.begin(t.id,t.bounds,doneLabelX(),doneLabelY(),100,false); p.cancel();
+    assert(p.end(doneLabelX(),doneLabelY(),300)==None);
 }

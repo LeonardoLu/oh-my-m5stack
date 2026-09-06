@@ -53,23 +53,33 @@ briefly moves the bot's gaze toward the tap. Hold A+B together for three seconds
 to open settings; long-press the bot for personalization. Hold B to dim the face;
 the next touch/button press wakes it without activating a control.
 
-Swipe down from the top edge for the compact battery/charging panel. Settings
-lists follow the finger with continuous pixel scrolling and inertia. Editors
-have Back/Done controls, native antialiased text and a live HSV body-color picker.
-Settings capture one pointer target, tolerate small finger drift and slow holds,
-and show a pressed state; a scroll gesture never also clicks a row.
+The watch samples raw display contacts every 8 ms and derives its own press/release
+edges. A captured control activates on release inside its original target within
+one second; 20 px of vertical list travel instead begins scrolling, and stationary
+face holds become long presses after two seconds. Lists follow the finger with
+continuous pixel scrolling and inertia, while a scroll gesture never also clicks a
+row.
+
+Swipe down from the top edge for the compact battery/charging panel. Double-tap
+the visible time to open settings. Settings, Bot Personality and every editor keep
+fixed Back/Done controls outside the scrolling content, with native antialiased
+text, pressed feedback and a live HSV body-color picker. The M5PM1 power button
+returns directly to the face and cancels unsaved editor changes. Its green status
+LED is an independent persisted display option, off by default.
 Time and `yyyy/mm/dd {weekday}` share one region. A hideable Bot description
 occupies the opposite region; Layout swaps the two. Time/date use the RTC;
 preferences use NVS. Auto expression slowly shuffles calm moods, while interaction
 delays the next change. Filtered wrist motion adds subtle movement with a cooldown
 on shake reactions.
 
-The companion is **Milo** by default. Both devices support a 16-character English
-name, English/Chinese descriptions, and independent live selectors for all
+The companion is **Milo** by default. Both devices support a 16-character name,
+English/Chinese UI and descriptions, and independent live selectors for all
 12 moods × 10 expressions × 8 animations (960 combinations). Preview choices do
-not overwrite the persistent expression/action or Core2 host state. Gaze can be
-Auto, Center, Left, Right, Up or Down. Temporary screen-directed gaze returns to
-that preference; normal presets retain continuous motion.
+not overwrite the persistent expression/action or Core2 host state. Gaze offers
+Auto plus nine explicit directions: Center, Left, Right, Up, Down and the four
+diagonals. Temporary screen-directed gaze returns to that preference; normal
+presets retain continuous motion. Watch contact and gaze validation is tracked in
+[the current validation record](specs/touch-gaze-validation.md).
 
 ## The bot
 
@@ -129,7 +139,7 @@ These checks require a C++11 compiler, without an attached device:
 sh tools/check_host.sh
 ```
 
-The suite runs 15 standalone C++ contracts plus the real BotUx renderer checks.
+The suite runs 18 standalone C++ contracts plus the real BotUx renderer checks.
 It covers input timing, continuous scrolling, native font/shape coverage, naming,
 960 combinations at multiple late time windows, gaze and dot antialiasing, HID
 framing, exact host status projection, LED envelopes, sound waveforms/PCM and
@@ -149,7 +159,8 @@ Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
 [current requirements](specs/interaction-dynamics.md),
 [shared UX library](specs/ux-components-library.md),
 [previous shared UX validation](specs/ux-components-validation.md),
-[current validation](specs/interaction-dynamics-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
+[interaction dynamics validation](specs/interaction-dynamics-validation.md),
+[current Watch touch/gaze validation](specs/touch-gaze-validation.md), and the `AGENTS.md` files document the durable contracts. `tmp/` contains ignored
 research, generated previews and validation logs.
 
 ## License

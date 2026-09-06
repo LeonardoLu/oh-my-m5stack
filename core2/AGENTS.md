@@ -90,6 +90,6 @@ connects to the Codex desktop app through a compatible BLE HID vendor report.
 - Bottom2 offers Off/Host/Alive. Alive preserves status hue with gentle breathing,
   traveling emphasis and bounded interaction. Reduced Motion is static. Both
   mode Off and brightness zero immediately clear LEDs; notify(0) cancels notices.
-- Current contracts: specs/interaction-dynamics.md, specs/agent-signal-contract.md
+- Current contracts: specs/touch-gaze-iteration.md, specs/agent-signal-contract.md
   and specs/core2-alive-lighting.md. Validate with tools/check_host.sh and native
   capture/telemetry; never confuse serial transfer FPS with steady animation.

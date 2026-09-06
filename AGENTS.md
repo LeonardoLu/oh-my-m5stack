@@ -40,7 +40,7 @@ tmp/                         scratch / research notes (gitignored)
 ## Working rules
 
 - Match existing code style; keep comments purposeful.
-- The user's current goal and `specs/interaction-dynamics.md` supersede older
+- The user's current goal and `specs/touch-gaze-iteration.md` supersede older
   app notes. Core2 now targets a real Codex Micro-compatible Bluetooth HID link;
   distinguish pairing, app handshake, host feedback, and local animation previews.
 - Keep durable implementation and validation notes in `specs/`; `tmp/` is scratch,

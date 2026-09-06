@@ -42,7 +42,7 @@ Use `textWidth` to align/center and `lineHeight` to budget vertical space.
 | Latin18 | 18 / 23 px | 5,981 | 95 |
 | Latin24 | 24 / 29 px | 10,919 | 95 |
 | Clock36 | 36 / 41 px | 4,145 | 17 |
-| Cjk18 | 18 / 23 px | 32,432 | 269 |
+| Cjk18 | 18 / 23 px | 43,097 | 339 |
 
 Glyph records also consume approximately 16 bytes each depending on target ABI.
 Clock36 includes digits, colon, slash, space, AM/PM and fallback question mark.
@@ -73,7 +73,7 @@ accepts key 0–25 (letters), Backspace=26, Space=27, Case=28, Done=29. `text()`
 fixed buffer; Done trims trailing spaces and defaults an empty name to Milo.
 Persist and update BotUx only after Done; the host owns cancellation. This is an
 English keyboard, not an IME. Existing hyphen/apostrophe names are preserved.
-`drawNameKeyboard(canvas,editor,Rect{x,y,w,h},keyColor,textColor,font,pressedKey)`
+`drawNameKeyboard(canvas,editor,Rect{x,y,w,h},keyColor,textColor,font,pressedKey,labels)`
 and `nameKeyAt(rect,x,y)` share exact 6-column × 5-row key rectangles. Gaps reject
 hits. Choose a rectangle wholly within the round display's usable chord; use
 Latin14 for small keys and reserve an independent name field above the keyboard.
@@ -126,3 +126,19 @@ UI cues, musical notes/scales, and signed/unsigned 8-bit PCM playback. The synth
 owns no hardware and uses no heap. The M5 output adapter uses three fixed buffers,
 handles the speaker's borrowed-buffer contract and tolerates 100 ms host frames.
 Sound is independently linked and has no font or graphics dependency.
+
+Keyboard labels are optional: `NameKeyboardLabels zhKeys={"删除","空格","Aa","确定"}`
+can be passed as the final pointer argument with `Cjk18`. Omit the pointer to keep
+English labels and avoid linking the Chinese atlas into Latin-only consumers.
+Name entry remains English in either UI language.
+
+## Captured pointer controls
+
+`PointerSession::begin` captures one target and its rectangle. `end(x,y,nowMs)`
+activates only that same target on release inside, within 1,000 ms. Leaving and
+re-entering a non-scroll control is allowed. In a scrollable list, 20 px of
+predominantly vertical travel permanently gives the sequence to scrolling;
+returning to the original point cannot turn that drag into a click. Hosts cancel
+inertia before capturing a fresh target, and reserve fixed footer hit regions
+outside the list. Feed contact edges independently of SDK gesture classifications;
+see the [actual M5Unified source regression probe](test/sdk_touch/README.md).

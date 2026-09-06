@@ -21,6 +21,8 @@ stopwatch mode in this app.
 stopwatch/bot-ux-watch/
   platformio.ini
   include/CalendarMath.h   # deterministic date helpers
+  include/TouchContact.h   # raw contact edges + clock double-tap
+  include/InputSemantics.h # tap, swipe and two-second hold arbitration
   include/WatchFace.h      # owns botux::BotUx + RTC/power face
   include/Settings.h       # NVS-backed preferences
   include/WatchInteraction.h # chord, motion filter and ambient timing
@@ -31,6 +33,9 @@ stopwatch/bot-ux-watch/
   src/Settings.cpp
   src/Power.cpp
   test/test_calendar_math.cpp
+  test/test_input_semantics.cpp
+  test/test_touch_contact.cpp
+  test/test_ui_controls.cpp
 ```
 
 ## Integration with bot-ux
@@ -61,19 +66,30 @@ official bot treatment uses dark pill eyes.
   within 320 ms resets idle. Idle screen taps temporarily redirect gaze. Long Bot
   opens personalization; A+B held together for 3 seconds opens settings. Chords
   consume both releases and cancel pending B single clicks. Long B enters dim doze.
-- A downward drag beginning in the top 20 px and travelling more than 50 px reveals
-  the compact battery panel. Tap the panel to dismiss it; otherwise it closes after
-  six seconds.
+- Hardware touch bypasses the SDK gesture classifier: `M5.Touch.end()` disables its
+  polling, then the app samples `M5.Display.getTouch()` every 8 ms and derives one
+  press/release edge per physical contact. A stationary face hold becomes Long at
+  two seconds; a release after more than one second cannot become a tap.
+- A downward swipe recognized from a contact beginning in the top 20 px reveals the
+  compact battery panel. Tap the panel to dismiss it; otherwise it closes after six
+  seconds. Double-tap the visible time within 420 ms to open settings; panel taps and
+  non-tap gestures cancel the pending clock tap.
 - Settings and Bot Personality show a 288 px continuous list viewport. Shared
   ScrollModel follows finger displacement in pixels and applies bounded inertia;
-  draw and hit tests use the same offset, and a drag cannot activate a row. Every editor has touch controls plus Back/Done;
-  buttons remain optional shortcuts.
-  `ux::PointerSession` owns each settings sequence: 14 px vertical travel promotes
-  list scrolling, drag never clicks, buttons allow slow holds and 6 px release
-  slop. Cancel inertia before target capture; use WatchControls for hit geometry.
+  draw and hit tests use the same offset, and a drag cannot activate a row. Fixed
+  Back/Done controls sit outside list scrolling on every non-face screen; buttons
+  remain optional shortcuts.
+  `ux::PointerSession` owns each settings sequence: 20 px vertical travel promotes
+  list scrolling. Otherwise, release inside the captured original target within
+  one second activates it, including after small drift or leaving and re-entering.
+  Cancel inertia before target capture; use WatchControls for hit geometry.
   Color surfaces retain the pointer through drag and cannot activate Done.
 - Any touch or A/B press wakes from doze and is consumed, so it cannot trigger the
   control underneath.
+- M5PM1 single-click reset is disabled without changing double-click power-off or
+  download behavior. `BtnPWR.wasClicked()` returns to the face, cancels an unsaved
+  editor snapshot and consumes the active gesture. The green PM status LED is a
+  persisted Display setting and defaults off.
 
 ## Behavior
 
@@ -83,11 +99,13 @@ official bot treatment uses dark pill eyes.
   and shows percentage, a horizontal gauge, green charging fill and bolt.
 - Settings is a scrollable hierarchy: clock, Bot Personality, display/sound and Done.
   Personality includes expression, action, shape, eye style, HSV color, action amount
-  and speed, English naming, language and all 960 independent combinations. The HSV
-  picker previews live and Done persists it.
+  and speed, naming, English/Chinese UI, all 960 independent combinations and a live
+  gaze selector. Chinese mode also localizes keyboard action labels. The HSV picker
+  previews live and Done persists it.
 - NVS persists 12/24-hour format, seconds, theme, shape, eye style, custom HSV body
   color, expression, animation, wrist response, motion amount/speed, brightness and
-  sound, name, language, gaze direction, caption visibility and swapped layout. RTC hardware
+  sound, PM status LED, name, language, gaze direction, caption visibility and swapped
+  layout. Gaze is Auto plus Center/Left/Right/Up/Down and four diagonals. RTC hardware
   persists time/date.
 - BMI270 tilt passes through a low-pass filter and dead zone. Shake uses hysteresis and
   a seven-second cooldown before poke. Auto expression shuffles among calm ambient moods
@@ -102,9 +120,11 @@ official bot treatment uses dark pill eyes.
   7 display, 8 scrolled settings, 9 scrolled personality, 10 battery panel, 11 format,
   12 name, 13 combinations, 14 layout, 15 language, 16 Chinese face, 17 swapped
   face, 18 fractional scroll, 19 animated scroll timing, 20 Happy/Joy/Wave preview, 21 gaze, 22 Thinking dots.
-  `td/tm/tu x y` exercises the same UI pointer path; optional `@N` is echoed in
+  `contact 1|0 x y` replays raw contact through `TouchContact`, gesture arbitration
+  and the current screen handler; `physical` returns to CST820B sampling.
+  `td/tm/tu x y` remains a direct UI-pointer diagnostic. Optional `@N` is echoed in
   the `UI seq=N` acknowledgement. `ui` reads state; `sound N` previews a cue.
-  Serial pointer replay is separate from hardware touch-controller acceptance.
+  Both replay paths remain separate from hardware touch-controller acceptance.
   Language/layout diagnostics restore settings when leaving; no NVS write.
   Single digits remain accepted for compatibility; page selection never saves NVS.
 
@@ -113,4 +133,6 @@ official bot treatment uses dark pill eyes.
 - Match existing code style; keep comments purposeful. No per-frame heap allocation.
 - Keep the state machine in `main.cpp`; modules are plain classes.
 - Persist settings with `Preferences` (NVS). Do not over-engineer edge cases.
-- The user's current goal and `specs/interaction-dynamics.md` supersede older stopwatch notes.
+- The user's current goal and `specs/touch-gaze-iteration.md` supersede older stopwatch notes.
+- Keep the final contact replay and on-device evidence in
+  `specs/touch-gaze-validation.md`.

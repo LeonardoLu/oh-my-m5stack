@@ -41,3 +41,9 @@ The browser has only search/filter/pause behavior; movement comes from the C++
 renderer. GIFs repeat a finite capture and may show a loop boundary that is not
 present in continuous firmware. Asleep's live z cycles have a separate native
 wrap-continuity, reduced-motion and zero-motion regression test.
+
+`test-orb-motion.sh` separately verifies the Thinking breathing shell and
+Working vortex at native target sizes, including their 3.6/4.4-second phase
+wraps, depth clusters, speed, low/reduced/zero motion, eye suppression and
+explicit-animation composition. It also emits disposable 200 px RGB565 PPM
+stills under `tmp/botux-orb-motion/`.

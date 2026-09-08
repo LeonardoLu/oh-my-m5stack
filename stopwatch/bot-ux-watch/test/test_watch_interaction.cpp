@@ -5,6 +5,18 @@
 
 using namespace watchinteraction;
 
+static void testTouchGazeUsesBodyAndNormalizedOutsideDirection() {
+    auto center=touchGaze(100,100,100,100,40);
+    auto edge=touchGaze(140,100,100,100,40);
+    auto right=touchGaze(141,100,100,100,40);
+    auto diagonal=touchGaze(20,20,100,100,40);
+    assert(center.x==0.0f&&center.y==0.0f);
+    assert(edge.x==0.0f&&edge.y==0.0f);
+    assert(right.x==1.0f&&right.y==0.0f);
+    float length=sqrtf(diagonal.x*diagonal.x+diagonal.y*diagonal.y);
+    assert(length>0.999f&&length<1.001f&&diagonal.x<0.0f&&diagonal.y<0.0f);
+}
+
 static void testHsvKeyColorsAndSectorBoundary() {
     auto red = hsvRgb(0, 100, 100);
     auto yellowEdge = hsvRgb(59, 100, 100);
@@ -79,25 +91,79 @@ static void testMotionFilterDeadzoneHysteresisAndCooldown() {
     assert(poked);
 }
 
-static void testAmbientCycleIsSlowAndCanBePostponed() {
-    AmbientCycle cycle;
+static uint32_t elapsed(uint32_t from, uint32_t to) {
+    return to-from;
+}
+
+static void testAmbientCycleAlternatesExactDurationCategories() {
+    AmbientCycle cycle(0x12345678u);
     cycle.begin(1000);
-    assert(!cycle.update(28999));
-    assert(cycle.update(29000));
-    assert(cycle.index() > 0 && cycle.index() < 7);
-    uint32_t next = cycle.nextMs();
-    assert(next >= 55000 && next <= 77000);
-    cycle.postpone(100000);
-    assert(!cycle.update(159999));
-    assert(cycle.update(160000));
+    assert(cycle.phase()==AmbientCycle::Phase::Safe&&cycle.index()==0);
+    uint32_t due=cycle.nextMs();
+    assert(elapsed(1000,due)>=5000&&elapsed(1000,due)<=15000);
+    assert(!cycle.update(due-1));
+    assert(cycle.update(due));
+    assert(cycle.phase()==AmbientCycle::Phase::LookingAround);
+    uint32_t lookingDue=cycle.nextMs();
+    assert(elapsed(due,lookingDue)>=30000&&elapsed(due,lookingDue)<=60000);
+    assert(cycle.update(lookingDue));
+    assert(cycle.phase()==AmbientCycle::Phase::Safe&&cycle.index()<7);
+    assert(elapsed(lookingDue,cycle.nextMs())>=5000&&elapsed(lookingDue,cycle.nextMs())<=15000);
+
+    for(int i=0;i<20;++i) {
+        due=cycle.nextMs();
+        auto before=cycle.phase();
+        assert(cycle.update(due));
+        assert(cycle.phase()!=before);
+        uint32_t duration=elapsed(due,cycle.nextMs());
+        if(cycle.phase()==AmbientCycle::Phase::LookingAround)
+            assert(duration>=30000&&duration<=60000);
+        else {
+            assert(duration>=5000&&duration<=15000);
+            assert(cycle.index()<7);
+        }
+    }
+}
+
+static void testAmbientCycleHandlesRolloverAndOneLateTransition() {
+    AmbientCycle cycle(0xABCDEF01u);
+    uint32_t start=0xfffff000u;
+    cycle.begin(start);
+    uint32_t due=cycle.nextMs();
+    assert(elapsed(start,due)>=5000&&elapsed(start,due)<=15000);
+    assert(!cycle.update(due-1));
+    assert(cycle.update(due));
+    assert(cycle.phase()==AmbientCycle::Phase::LookingAround);
+
+    // A long blocked frame advances one visible phase and schedules from now.
+    uint32_t late=due+180000;
+    assert(cycle.update(late));
+    assert(cycle.phase()==AmbientCycle::Phase::Safe);
+    assert(elapsed(late,cycle.nextMs())>=5000&&elapsed(late,cycle.nextMs())<=15000);
+}
+
+static void testAmbientPauseResumeRestartsVisibleIdle() {
+    AmbientCycle cycle(7);
+    cycle.begin(500);
+    uint32_t firstDue=cycle.nextMs();
+    cycle.setPaused(true,1000);
+    assert(cycle.paused()&&!cycle.update(firstDue+90000));
+    cycle.setPaused(false,firstDue+90000);
+    assert(!cycle.paused()&&cycle.phase()==AmbientCycle::Phase::Safe&&cycle.index()==0);
+    uint32_t resumed=cycle.nextMs();
+    assert(elapsed(firstDue+90000,resumed)>=5000&&elapsed(firstDue+90000,resumed)<=15000);
+    assert(!cycle.update(resumed-1)&&cycle.update(resumed));
 }
 
 int main() {
+    testTouchGazeUsesBodyAndNormalizedOutsideDirection();
     testHsvKeyColorsAndSectorBoundary();
     testSettingsChordNeedsBothButtonsForThreeSeconds();
     testChordConsumptionSuppressesBothReleaseTaps();
     testScrollListKeepsSelectionVisibleAndStopsAtEdges();
     testMotionFilterDeadzoneHysteresisAndCooldown();
-    testAmbientCycleIsSlowAndCanBePostponed();
+    testAmbientCycleAlternatesExactDurationCategories();
+    testAmbientCycleHandlesRolloverAndOneLateTransition();
+    testAmbientPauseResumeRestartsVisibleIdle();
     return 0;
 }

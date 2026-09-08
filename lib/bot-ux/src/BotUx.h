@@ -27,19 +27,20 @@ constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 class BotUx {
 public:
     enum class Mood : uint8_t {
-        Idle = 0,   // curious gaze, breathing, periodic blinks
+        Idle = 0,   // canonical upper-right gaze, breathing, periodic blinks
         Listening,  // engaged, eyes widen, subtle forward nod
-        Thinking,   // orb becomes a three-dot thinking loop
+        Thinking,   // breathing volumetric dot shell
         Speaking,   // body pulse follows setTalking()
         Happy,      // crescent eyes and a buoyant lift
         Sad,        // lowered gaze and settled body
         Sleepy,     // half/closed eyes, slow breath
         Surprised,  // wide eye marks + quick vertical stretch (transient)
-        Working,    // active pulse; eyes move toward the centre
+        Working,    // flowing vortex dot shell
         Waiting,    // alert, patient eyes with a slow searching glance
         Blocked,    // exclamation-mark silhouette
         Done,       // settled orb with a low-left glance
         Asleep,     // closed eyes, deep breathing and drifting zzz (append-only)
+        LookingAround, // full-range autonomous gaze shared with touch/directions
     };
 
     enum class EyeStyle : uint8_t {
@@ -85,6 +86,10 @@ public:
     };
 
     enum class GazeDirection : uint8_t { Auto = 0, Center, Left, Right, Up, Down, UpLeft, UpRight, DownLeft, DownRight };
+    // Auto mirrors facial handedness from the eye group's horizontal half.
+    // Explicit sides select the same authored expression on demand without
+    // reflecting the body or framebuffer.
+    enum class FaceSide : uint8_t { Auto = 0, Left, Right };
     enum class Language : uint8_t { English = 0, Chinese };
     static constexpr size_t kNameMax = 16;
     static constexpr uint8_t gazeDirectionCount() { return 10; }
@@ -93,11 +98,14 @@ public:
         return static_cast<GazeDirection>(1 + index % explicitGazeDirectionCount());
     }
     static const char* gazeDirectionName(GazeDirection value, Language language = Language::English);
-    // Persistent direction with subtle drift. Auto follows mood/expression gaze.
+    // Persistent exact direction. Auto follows the mood/expression gaze.
     // Temporary gazeAt takes precedence, then returns here. No UI/persistence ownership.
     void setGazeDirection(GazeDirection direction);
     GazeDirection gazeDirection() const { return _gazeDirection; }
-    static constexpr uint8_t moodCount() { return 13; }
+    void setFaceSide(FaceSide side);
+    FaceSide faceSide() const { return _faceSide; }
+    FaceSide effectiveFaceSide() const { return _faceHandedness < 0.0f ? FaceSide::Left : FaceSide::Right; }
+    static constexpr uint8_t moodCount() { return 14; }
     static constexpr uint8_t expressionCount() { return 10; }
     static constexpr uint8_t animationCount() { return 8; }
     static const char* moodName(Mood value, Language language = Language::English);
@@ -119,8 +127,9 @@ public:
     uint8_t randomPreset();
     uint8_t nextPreset();
     void resetToIdle();
-    // Normalized canvas direction [-1,1], positive y down. Only accepted in Idle.
-    // Temporary target eases in, then resumes wandering; 0 cancels the hold.
+    // Normalized canvas direction [-1,1], positive y down. Accepted in Idle
+    // and LookingAround. Temporary targets ease in, then resume the mood pose;
+    // 0 cancels the hold.
     void gazeAt(float x, float y, uint16_t holdMs = 1800);
     void clearGaze();
 
@@ -308,11 +317,13 @@ private:
     float _motionY = 0.0f;
     float _shake = 0.0f;
 
-    // Idle gaze changes target at irregular intervals, then eases into place.
+    // LookingAround changes full-range targets at irregular hold intervals.
     float    _wanderX = 0.0f;
     float    _wanderY = 0.0f;
     uint32_t _nextGaze = 0;
     uint32_t _gazeSeed = 0x9E3779B9u;
+    FaceSide _faceSide = FaceSide::Auto;
+    float _faceHandedness = 1.0f; // -1 left .. +1 right, eased through crossings
 
     // blink
     uint32_t _blinkSeed = 0x1234;

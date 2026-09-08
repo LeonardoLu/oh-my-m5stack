@@ -1,10 +1,20 @@
 #pragma once
 
+#include <math.h>
 #include <stdint.h>
 
 namespace watchinteraction {
 
 struct Rgb8 { uint8_t r, g, b; };
+
+struct GazeVector { float x, y; };
+
+inline GazeVector touchGaze(int16_t x, int16_t y, int16_t cx, int16_t cy, int16_t bodyR) {
+    int32_t dx=(int32_t)x-cx,dy=(int32_t)y-cy;
+    if(bodyR>0&&dx*dx+dy*dy<=(int32_t)bodyR*bodyR) return {0.0f,0.0f};
+    float length=sqrtf((float)dx*dx+(float)dy*dy);
+    return length>0.0f?GazeVector{dx/length,dy/length}:GazeVector{0.0f,0.0f};
+}
 
 inline Rgb8 hsvRgb(uint16_t hue, uint8_t saturation, uint8_t value) {
     hue %= 360;
@@ -140,26 +150,61 @@ private:
 
 class AmbientCycle {
 public:
-    void begin(uint32_t nowMs) { _nextMs = nowMs + 28000; }
-    void postpone(uint32_t nowMs) { _nextMs = nowMs + 60000; }
+    enum class Phase : uint8_t { Safe, LookingAround };
+
+    explicit AmbientCycle(uint32_t seed = 0x5A17u) : _seed(seed) {}
+
+    void begin(uint32_t nowMs) {
+        _paused = false;
+        restart(nowMs);
+    }
+
+    void restart(uint32_t nowMs) {
+        _phase = Phase::Safe;
+        _index = 0; // Idle is the visible entry into every automatic session.
+        schedule(nowMs, 5000, 15000);
+    }
+
+    void setPaused(bool paused, uint32_t nowMs) {
+        if (paused == _paused) return;
+        _paused = paused;
+        if (!_paused) restart(nowMs);
+    }
 
     bool update(uint32_t nowMs) {
+        if (_paused) return false;
         if ((int32_t)(nowMs - _nextMs) < 0) return false;
-        _seed = _seed * 1664525u + 1013904223u;
-        uint8_t next = (uint8_t)(_seed % 7);
-        if (next == _index) next = (next + 1) % 7;
-        _index = next;
-        _nextMs = nowMs + 26000 + (_seed % 22000);
+        if (_phase == Phase::Safe) {
+            _phase = Phase::LookingAround;
+            schedule(nowMs, 30000, 60000);
+        } else {
+            _phase = Phase::Safe;
+            _index = (uint8_t)(randomValue() % 7);
+            schedule(nowMs, 5000, 15000);
+        }
         return true;
     }
 
+    Phase phase() const { return _phase; }
+    bool paused() const { return _paused; }
     uint8_t index() const { return _index; }
     uint32_t nextMs() const { return _nextMs; }
 
 private:
+    uint32_t randomValue() {
+        _seed = _seed * 1664525u + 1013904223u;
+        return _seed;
+    }
+
+    void schedule(uint32_t nowMs, uint32_t minimumMs, uint32_t maximumMs) {
+        _nextMs = nowMs + minimumMs + randomValue() % (maximumMs - minimumMs + 1);
+    }
+
     uint32_t _nextMs = 0;
-    uint32_t _seed = 0x5A17u;
+    uint32_t _seed;
     uint8_t _index = 0;
+    Phase _phase = Phase::Safe;
+    bool _paused = true;
 };
 
 } // namespace watchinteraction

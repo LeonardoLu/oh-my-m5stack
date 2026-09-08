@@ -12,6 +12,7 @@ static const botux::BotUx::Mood kMoods[] = {
     botux::BotUx::Mood::Sleepy,   botux::BotUx::Mood::Surprised,
     botux::BotUx::Mood::Working,  botux::BotUx::Mood::Waiting,
     botux::BotUx::Mood::Blocked,  botux::BotUx::Mood::Done,
+    botux::BotUx::Mood::Asleep,   botux::BotUx::Mood::LookingAround,
 };
 static int moodIdx = 0;
 

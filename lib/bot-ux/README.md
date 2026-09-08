@@ -39,7 +39,7 @@ void loop() {
 
 - **Moods** — the original `Idle`, `Listening`, `Thinking`, `Speaking`, `Happy`,
   `Sad`, `Sleepy`, and `Surprised`, plus additive task states `Working`, `Waiting`,
-  `Blocked`, `Done`, and append-only `Asleep` via `setMood()`.
+  `Blocked`, `Done`, `Asleep`, and append-only `LookingAround` via `setMood()`.
 - **Personalization** — `Style` holds the background, orb, eye, and status colors;
   eye mark style; silhouette style; eye scale; and blink rate. `Round` + `Oval`
   is the closest match to the default Grok visual language.
@@ -64,8 +64,9 @@ heap allocation.
 
 The visual system follows xAI's published [Grok Bot design notes](https://x.ai/news/designing-grok-bot):
 simple geometric avatars, expressive eyes, and avatar motion that carries state.
-`Thinking` becomes three animated dots and `Blocked` becomes an exclamation;
-ordinary character moods keep the recognizable orb-and-eye-pair anatomy.
+`Thinking` becomes a breathing spherical point shell, `Working` becomes an
+upward-draining vortex shell, and `Blocked` becomes an exclamation; ordinary
+character moods keep the recognizable orb-and-eye-pair anatomy.
 The shared default uses a warm-white orb, dark graphite eye marks, and blue only
 for status accents. `Waiting` has open patient eyes and a slow searching glance;
 `Sleepy` settles into narrow eyes and a longer blink. `Asleep` closes the eyes
@@ -86,7 +87,8 @@ changes in openness, gaze, and lean carry curiosity and skepticism. Joy eases
 into shallow rounded arches; Wink closes one eye continuously; Alarmed shortens
 and rounds the same eye marks. Dizzy uses a slow pair sway. Face placement,
 body stretch, and body translation ease in time rather than jumping at a mood
-change. The Thinking dots and Blocked exclamation remain discrete status glyphs.
+change. The Thinking/Working point shells and Blocked exclamation remain
+discrete status glyphs.
 
 The default orb uses scanline coverage with four vertical samples at its
 boundary, and the eye capsules use a distance-based one-pixel edge. Solid
@@ -168,12 +170,12 @@ always terminates a nonempty buffer, and avoids cutting UTF-8 characters. Hosts
 must provide an appropriate font; BotUx does not add font assets or render this
 text automatically. Names remain English in either language.
 
-`moodCount()` = 13, `expressionCount()` = 10 (including Auto), and
+`moodCount()` = 14, `expressionCount()` = 10 (including Auto), and
 `animationCount()` = 8 (including Auto). All existing enum numeric values remain
-unchanged. Hosts can independently iterate all **1,040 combinations** in a preview
+unchanged. Hosts can independently iterate all **1,120 combinations** in a preview
 Bot. `mood()`, `expression()`, `animation()` report selections;
 `effectiveMood()` / `effectiveExpression()` report mood reactions and Auto's
-resolved face. Thinking and Blocked retain their intentional silhouette
+resolved face. Thinking, Working and Blocked retain their intentional silhouette
 replacements, so a selected expression is preserved but not visible in those
 moods. Preview Bot state must not overwrite actual host status.
 
@@ -187,9 +189,10 @@ the double-click window closes.
 
 `gazeAt(x, y, holdMs=1800)` takes normalized canvas coordinates, with negative x
 left, negative y up, each clamped to [-1,1]. Map a canvas-local tap as
-`2*x/width-1`, `2*y/height-1`. Only persistent Idle accepts it. The target eases in,
-expires using the same `millis()` clock as `update`, and then resumes wandering;
-`clearGaze()` cancels it. It does not call `poke` or change mood. Idle gaze now has
+`2*x/width-1`, `2*y/height-1`. Idle and LookingAround accept it. The target
+eases in and expires using the same `millis()` clock as `update`; Idle returns
+to its canonical upper-right pose and LookingAround resumes autonomous
+full-field exploration. `clearGaze()` cancels it. It does not call `poke` or change mood. Idle gaze now has
 24% radius horizontal and 20% vertical travel, independent of animation motion
 amount, preserving the characteristic neutral eye arrangement.
 
@@ -217,7 +220,7 @@ not native device captures. Regenerate current source sheets with
 comparison. The default rounded body and eye primitives are backed by real
 RGB565 raster pixels; other shapes remain SVG approximations.
 
-Validation on 2026-09-06: existing host checks pass; added checks exercise all 1,040
+Validation on 2026-09-06: the then-current host checks exercised all 1,040
 selector combinations, safe names, tiny UTF-8 buffers, preset transitions,
 temporary tap gaze and expiry. A connected-component pixel check verifies two
 continuous eye marks through 40 morph frames for all four eye styles at 40, 72,
@@ -229,7 +232,12 @@ disabled: full Neutral/Joy draw at 40px **3.12/3.42 µs**, 72px **8.25/8.91 µs*
 are not ESP32 timings. The parent integration owns native frame/memory timing,
 firmware builds, flashing and actual device captures.
 
-## Direction and sustained motion (September 2026)
+## Direction and sustained motion (2026-09-06 historical record)
+
+This section records the previous gaze field and is superseded by
+`specs/watch-gaze-experience.md`, the current public header, and the regenerated
+catalog. Idle now holds UpRight, LookingAround owns autonomous wandering, and
+FaceSide owns explicit or automatic mirroring.
 
 `GazeDirection { Auto=0, Center, Left, Right, Up, Down, UpLeft, UpRight,
 DownLeft, DownRight }` is additive; every older
@@ -257,21 +265,21 @@ The host preview additionally writes `gaze-directions.svg` from actual BotUx cod
 Calm now has continuous slow sway and a small eye rotation in addition to
 breathing. Choreography is more visible for stable expressions and at the
 Watch's 0.55 motion setting; every curated preset keeps moving in late time
-windows. Breathing, mood-specific pulses, Dizzy rotation and Thinking dot travel
+windows. Breathing, mood-specific pulses, Dizzy rotation and point-shell motion
 now all respect motion amount and reduced motion. At zero, the pose remains
 stable after easing settles (normal blinking is independent). Reduced motion
 keeps a small amount of slower-looking travel instead of repeating full-size
 motion. It does not change animation speed or erase an expression.
 
-Thinking's three dots now use float centers and the same real RGB565 AA ellipse
-coverage as the orb. Blocked's stem/dot also use float capsule/ellipse coverage
+Thinking and Working use 48/72/96 depth-shaded point shells and actual-pixel
+capsule coverage. Blocked's stem/dot also use float capsule/ellipse coverage
 and follow body scale: the new time-window checks exposed its integer-only
 position jumps, so breathing now remains visible even for this silhouette.
 No extra framebuffer or frame allocation was introduced.
 
 Added validation beyond the existing tests:
 
-- All 1,040 mood/expression/animation combinations produce at least four distinct
+- All 1,040 mood/expression/animation combinations produced at least four distinct
   raster frames in each 3-second window starting at 10, 30 and 50 seconds. Blink
   is delayed beyond those windows, so entry morphs/blinks cannot make a frozen
   choreography pass. All sampled frames stay inside the canvas.
@@ -280,8 +288,8 @@ Added validation beyond the existing tests:
 - Left/right produce clearly separated eye positions; a temporary tap overrides
   direction and returns to it. Zero-motion stable frames are identical across
   all 13 moods with Dizzy/Orbit, after settling and with blinking delayed.
-- Thinking coverage has more than 12 actual RGB565 colors across its three dots,
-  rather than checking for an SVG circle instruction.
+- Thinking and Working coverage contains dozens of separate native RGB565 point
+  clusters rather than checking for SVG instructions.
 - On a four-second Calm sequence, aggregate RGB565 temporal difference is
   392,549 full motion versus 108,210 reduced (27.6%). This measures pixel-channel
   movement rather than merely counting different frame hashes.
@@ -300,7 +308,11 @@ box keeps Wink's different ink masses from being mistaken for pair movement.
 All cases and the existing host suite pass; transitions retain the original
 scalar easing rather than jumping when a direction is selected.
 
-## Nine facing poses and Thinking travel
+## Nine facing poses (2026-09-06 historical record)
+
+The geometry measurements below describe the previous directional treatment;
+`specs/watch-gaze-experience.md` supersedes them. The current orb-shell motion
+contract is `specs/orb-motion-experience.md`.
 
 Direction is a continuous facing pose, not only a translated eye pair. Horizontal
 turns compress eye spacing by up to 16%, scale the far/near eyes by up to 22%,
@@ -332,12 +344,12 @@ diagonal directions bounds each 16ms eye-group movement to 8px on a 200px sprite
 then verifies return to Front within 1px. Thin closed eyes are detected from
 partial coverage too, because small AA strokes may have no fully opaque pixel.
 
-Thinking's dot travel coefficient increases from 0.13R to **0.28R**, with
-high motion amounts capped for this travel at 1.5 and reduced motion unchanged
-at a 20% multiplier. Actual center-dot peak travel at 200px is **47px full,
-9.5px reduced, 0px at motion zero**, measured over a late 2.4s window. Consecutive
-16ms centers move no more than 3.5px. Native ellipse AA and all existing geometry,
-1,040-combination sustained-motion, and preset-loop tests still pass.
+Thinking now uses a 3.6-second latitude-delayed breathing shell. Working uses a
+4.4-second bottom-to-top meridian flow with pole fade, re-entry and opposing
+shell rotation. Motion amount progressively scales their complete choreography;
+reduced motion applies a 20% multiplier and zero freezes every point. Native
+capsule AA and focused wrap-continuity checks cover the replacement. See
+`specs/orb-motion-experience.md`.
 
 
 ## Patient and sleeping faces, native catalog (2026-09-06)
@@ -345,9 +357,8 @@ at a 20% multiplier. Actual center-dot peak travel at 200px is **47px full,
 Every face now derives its default pair position from Idle (0.26r right,
 0.38r above center). Expression-specific openness, lean and slant still apply.
 Explicit directions retain body-relative centering and mirrored perspective;
-downward travel is capped at 0.16r, versus 0.24r upward. Thinking's staggered
-vertical dot amplitude rises from 0.28r to 0.42r. Its center-dot measured travel
-at 200px is 68.5px normally, 13.5px with reduced motion, and 0px at zero amount.
+downward travel is capped at 0.16r, versus 0.24r upward. Thinking and Working
+replace the avatar with the coordinated point shells described above.
 
 Waiting is alert and patient: partly open eyes, a gentle questioning lean and
 a 5.2-second sideways search; tiny previews use the same eased capsule path.
@@ -357,22 +368,25 @@ eyes, an 8.8-second breath and three vector z marks. Marks sit above the orb, bl
 Reduced motion calms travel; zero amount freezes the marks. Explicit Neutral
 still reopens the eyes while Asleep retains its sleep indicator.
 
-[The illustrated catalog](../../wiki/bot-ux/intro.html) contains all 13 moods,
+[The illustrated catalog](../../wiki/bot-ux/intro.html) contains all 14 moods,
 10 expressions and 8 animations, including Auto, with bilingual search,
-category filters, pause controls and offline embedded assets. Its 31 GIFs are
+category filters, pause controls and offline embedded assets. Its 32 GIFs are
 72 native renderer frames each, sampled at 10fps and displayed at their native
 120px size. [The Markdown guide](../../wiki/bot-ux/intro.md) documents reproduction.
 Host circle calls now update the preview RGB565 buffer so sparkle captures are
 visible; those circles remain a simple host approximation of M5GFX rasterization.
 
-Focused native checks pass with all 1,040 combinations and nine directions.
+Focused native checks pass with all 1,120 combinations and nine directions.
 Across two Asleep cycles the maximum phase-wrap/ordinary adjacent frame
 RGB565 differences for Round were 1,041/4,172 normally and 207/828 reduced; all
 four body styles passed the wrap check and zero amount
 remained identical. This is host rendering evidence, not hardware acceptance.
 
 
-## Idle-aligned directional eyes (2026-09-06 follow-up)
+## Idle-aligned directional eyes (2026-09-06 historical record)
+
+These ratios preserve the earlier follow-up evidence; the current mirror and
+gaze field are specified by `specs/watch-gaze-experience.md`.
 
 Right-facing poses now keep the screen-right eye slightly larger, matching the
 actual Idle face; left-facing poses mirror that relationship. The old depth
@@ -392,7 +406,7 @@ ink area and pair spacing directly, plus the existing nine-direction mirror,
 position and transition checks. All 1,040 combinations and sleep/thinking motion
 checks pass. `render.sh` emits `idle-up-right.ppm`; catalog packaging converts
 this and the updated nine-direction mosaic to the checked-in PNGs. Default Auto
-catalog examples are regenerated from source; the catalog still has 31 entries.
+catalog examples are regenerated from source; the catalog has 32 entries.
 
 
 The side-arc regression measures the actual ink axis in all six side poses:

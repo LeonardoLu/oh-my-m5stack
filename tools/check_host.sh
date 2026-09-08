@@ -57,3 +57,5 @@ c++ -std=c++11 -O2 -Wall -Wextra -Werror -pthread -Ilib/ux-components/src \
 echo 'PASS sound-sender'
 sh lib/bot-ux/tools/host-preview/render.sh "$OUT/bot-preview"
 echo 'PASS bot-preview'
+sh lib/bot-ux/tools/host-preview/test-orb-motion.sh "$OUT/bot-orb-motion"
+echo 'PASS bot-orb-motion'

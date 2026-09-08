@@ -33,6 +33,8 @@
 #include <string.h>
 
 using watchinput::Gesture;
+static_assert((uint8_t)botux::BotUx::Mood::LookingAround==watchcompanion::lookingAroundMood(),
+              "Looking around must remain the appended Watch ambient mood");
 
 namespace {
 constexpr int16_t kW = 466;
@@ -142,6 +144,7 @@ uint8_t _diagnosticButtonMask = 0;
 bool _diagnosticBattery = false;
 uint8_t _diagnosticBatteryPct = 100;
 TimedState _happyAcknowledgment;
+TimedState _pokeReaction;
 uint32_t _statusPanelStartMs = 0;
 uint32_t _statusPanelUntilMs = 0;
 int16_t _statusPanelTouchOffset = 0;
@@ -424,20 +427,14 @@ static bool actualBotContains(int16_t x,int16_t y) {
 
 static void directFaceGaze(int16_t x,int16_t y,uint32_t now) {
     const auto& metrics=face.bot().metrics();
-    float gx=0.0f,gy=0.0f;
-    if(!actualBotContains(x,y)) {
-        float dx=(float)(x-(kBotX+metrics.cx));
-        float dy=(float)(y-(kBotY+metrics.cy));
-        float length=sqrtf(dx*dx+dy*dy);
-        if(length>0.0f) { gx=dx/length; gy=dy/length; }
-    }
+    auto gaze=watchinteraction::touchGaze(x,y,kBotX+metrics.cx,kBotY+metrics.cy,metrics.bodyR);
     _gazeUntil=now+2200;
     face.bot().setMood(botux::BotUx::Mood::Idle);
     face.bot().setExpression(botux::BotUx::Expression::Auto,180);
     face.bot().setAnimation(botux::BotUx::Animation::Auto);
     face.bot().setTalking(false);
     _drawMood=botux::BotUx::Mood::Idle;
-    face.bot().gazeAt(gx,gy,2200);
+    face.bot().gazeAt(gaze.x,gaze.y,2200);
 }
 
 static void markListMoved() {
@@ -927,10 +924,14 @@ static float statusPanelProgress(uint32_t now) {
     return 1.0f;
 }
 
+static bool directedGazeActive(uint32_t now) {
+    return _gazeUntil&&(int32_t)(_gazeUntil-now)>0;
+}
+
 static botux::BotUx::Mood faceMood(uint32_t now) {
     if (_dozing) return botux::BotUx::Mood::Sleepy;
     if (_screen != Screen::Face) return botux::BotUx::Mood::Listening;
-    if ((int32_t)(_gazeUntil - now) > 0) return botux::BotUx::Mood::Idle;
+    if (directedGazeActive(now)) return botux::BotUx::Mood::Idle;
     if (_manualPreset) return _manualCombo.mood;
     if (_happyAcknowledgment.active(now)) return botux::BotUx::Mood::Happy;
     if (_battery <= kLowBattery) return botux::BotUx::Mood::Sleepy;
@@ -950,7 +951,6 @@ static void showManualMood(botux::BotUx::Mood mood) {
 
 static void enterSettings() {
     resetUiPointer();
-    _ambientCycle.postpone(millis());
     Screen prior = _screen;
     _screen = Screen::Settings;
     pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
@@ -967,7 +967,6 @@ static void enterSettings() {
 
 static void enterPersonalize(Screen parent = Screen::Settings) {
     resetUiPointer();
-    _ambientCycle.postpone(millis());
     _personalParent = parent;
     Screen prior = _screen;
     _screen = Screen::Personalize;
@@ -1096,6 +1095,7 @@ static void saveEditor(int cause = watchcontrols::None) {
 
 static void pokeBot() {
     face.bot().poke();
+    _pokeReaction.start(millis(),1180);
     pokeSound();
 }
 
@@ -1145,7 +1145,7 @@ static void updateMotion(uint32_t now) {
 
     if (filtered.poke) {
         face.bot().poke();
-        _ambientCycle.postpone(now);
+        _pokeReaction.start(now,1180);
         pokeSound();
     }
 }
@@ -1534,11 +1534,10 @@ static void handleInputs(uint32_t now) {
             settings.data().expression=settings.data().animation=0;
             face.bot().resetToIdle(); face.bot().setTalking(false);
             _ambientMood=_drawMood=botux::BotUx::Mood::Idle;
-            _ambientCycle.postpone(now);
+            _ambientCycle.restart(now);
             face.invalidate(); confirmSound();
         }
         if (gt != Gesture::None) handleFaceInput(gt);
-        if (ga != Gesture::None || gb != Gesture::None || gt != Gesture::None) _ambientCycle.postpone(now);
         return;
     }
     _bClick.cancel();
@@ -1682,7 +1681,8 @@ static void drawPersonalizeList(bool chrome = true) {
             case PersonalItem::Color: snprintf(value, sizeof(value), settings.data().customColor ? "CUSTOM" : "THEME"); break;
             case PersonalItem::Name: snprintf(value, sizeof(value), "%s", settings.data().botName); break;
             case PersonalItem::Language: snprintf(value, sizeof(value), settings.data().language ? "中文" : "English"); break;
-            case PersonalItem::Preview: snprintf(value, sizeof(value), "960"); break;
+            case PersonalItem::Preview: snprintf(value,sizeof(value),"%u",
+                (unsigned)botux::BotUx::moodCount()*botux::BotUx::expressionCount()*botux::BotUx::animationCount()); break;
             case PersonalItem::Gaze: snprintf(value,sizeof(value),"%s",botux::BotUx::gazeDirectionName((botux::BotUx::GazeDirection)settings.data().gaze,settings.data().language?botux::BotUx::Language::Chinese:botux::BotUx::Language::English)); break;
             case PersonalItem::Intensity: snprintf(value, sizeof(value), "%u / 5", settings.data().motionAmount); break;
             case PersonalItem::Speed: snprintf(value, sizeof(value), "%u / 5", settings.data().animationSpeed); break;
@@ -2283,7 +2283,7 @@ static void render(uint32_t now) {
         _drawMood = mood;
     }
     auto selectedExpression = (botux::BotUx::Expression)settings.data().expression;
-    bool gazeActive=_screen==Screen::Face&&(int32_t)(_gazeUntil-now)>0;
+    bool gazeActive=_screen==Screen::Face&&directedGazeActive(now);
     auto presentation=watchcompanion::presentation(gazeActive,_manualPreset,(uint8_t)_manualCombo.mood,
         (uint8_t)_manualCombo.expression,(uint8_t)_manualCombo.animation,
         (uint8_t)selectedExpression,settings.data().animation,_dozing||_battery<=kLowBattery);
@@ -2664,9 +2664,17 @@ void loop() {
     handleInputs(now);
     if(_contactReplyPending) { _contactReplyPending=false; printUiState(); }
     _soundOutput.update();
-    if (_screen == Screen::Face && !_manualPreset && !_gestureActive
-        && settings.data().expression == 0 && _ambientCycle.update(now)) {
-        _ambientMood=(botux::BotUx::Mood)watchcompanion::ambientMood(_ambientCycle.index());
+    bool ambientEligible=watchcompanion::ambientEligible({
+        _screen==Screen::Face,!_manualPreset,!_gestureActive,!_dozing,
+        !directedGazeActive(now),!_happyAcknowledgment.active(now)&&!_pokeReaction.active(now),
+        _battery>kLowBattery,settings.data().expression==0
+    });
+    bool ambientWasPaused=_ambientCycle.paused();
+    _ambientCycle.setPaused(!ambientEligible,now);
+    if(ambientEligible&&ambientWasPaused) _ambientMood=botux::BotUx::Mood::Idle;
+    if(ambientEligible&&_ambientCycle.update(now)) {
+        _ambientMood=(botux::BotUx::Mood)(_ambientCycle.phase()==watchinteraction::AmbientCycle::Phase::LookingAround
+            ?watchcompanion::lookingAroundMood():watchcompanion::ambientMood(_ambientCycle.index()));
     }
     handleSerialCommands();
     if (_diagnosticScroll && _screen == Screen::Settings) {

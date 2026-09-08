@@ -96,7 +96,7 @@ int main(int argc,char** argv) {
     // Bounded settings values retain separation from their real paired labels.
     assertPair("EXPRESSION","Skeptical",Latin24);
     assertPair("APPEARANCE","Pebble",Latin24);
-    assertPair("COMBINATIONS","960",Latin24);
+    assertPair("COMBINATIONS","1120",Latin24);
     assertPair("DIRECTION","Down-right",Latin24);
     assertPair("BRIGHTNESS","5 / 5",Latin24);
     assertPair("BUTTON FX","OFF",Latin24);

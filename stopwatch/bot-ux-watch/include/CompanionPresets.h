@@ -26,6 +26,23 @@ private:
 static const uint8_t kAmbientMoods[]={0,1,2,4,8,9,11};
 constexpr uint8_t ambientMoodCount() { return sizeof(kAmbientMoods)/sizeof(kAmbientMoods[0]); }
 inline uint8_t ambientMood(uint8_t index) { return kAmbientMoods[index%ambientMoodCount()]; }
+constexpr uint8_t lookingAroundMood() { return 13; }
+
+struct AmbientAvailability {
+    bool face;
+    bool automatic;
+    bool gestureFree;
+    bool awake;
+    bool gazeClear;
+    bool transientClear;
+    bool batteryOkay;
+    bool expressionAuto;
+};
+
+inline bool ambientEligible(const AmbientAvailability& value) {
+    return value.face&&value.automatic&&value.gestureFree&&value.awake&&value.gazeClear
+        &&value.transientClear&&value.batteryOkay&&value.expressionAuto;
+}
 
 struct Presentation {
     uint8_t expression;

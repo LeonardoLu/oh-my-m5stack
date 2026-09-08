@@ -30,11 +30,12 @@ tmp/                         scratch / research notes (gitignored)
 
 - `begin(M5Canvas*)` — bind a sprite, never owns the display.
 - `setStyle(Style)` — personalization (colors, eye/body style, sizes).
-- `setMood(Mood)` — persistent mood; 13 current values including append-only Asleep.
-  Use header counts/names: 13 moods × 10 expressions × 8 animations = 1,040 combinations.
+- `setMood(Mood)` — persistent mood; 14 current values including append-only Asleep and LookingAround.
+  Use header counts/names: 14 moods × 10 expressions × 8 animations = 1,120 combinations.
 - `setTalking(bool)`, `setBattery(pct)`, `setSignal(bars)`, `setTime(h,m,s,pm)`, `setLabel(text)`.
 - `setGazeDirection(GazeDirection)` — Auto plus nine explicit directions (Center, L/R/U/D, four diagonals);
   temporary `gazeAt` overrides expire.
+- `setFaceSide(FaceSide)` — Auto plus fixed Left/Right mirroring; Idle defaults to UpRight and LookingAround owns autonomous gaze.
 - `poke()` — transient surprise→happy reaction.
 - Naming, bilingual `describe`, curated presets and temporary `gazeAt` are additive APIs.
   Counts/name helpers drive independent device combination previews.
@@ -43,9 +44,10 @@ tmp/                         scratch / research notes (gitignored)
 ## Working rules
 
 - Match existing code style; keep comments purposeful.
-- The user's current goal, `specs/watch-settings-iteration.md` and
-  `specs/bot-vocabulary-iteration.md` supersede older touch/gaze and
-  app notes. Core2 now targets a real Codex Micro-compatible Bluetooth HID link;
+- The user's current goal, `specs/watch-gaze-experience.md`,
+  `specs/watch-ambient-experience.md`, and `specs/orb-motion-experience.md`
+  supersede older touch/gaze, vocabulary, and app notes. Core2 now targets a
+  real Codex Micro-compatible Bluetooth HID link;
   distinguish pairing, app handshake, host feedback, and local animation previews.
 - Keep the bilingual `wiki/bot-ux/intro.md` and standalone `intro.html` catalog
   current when changing moods, expressions or animation semantics; regenerate

@@ -31,6 +31,7 @@ static const MoodCase kMoods[] = {
     {botux::BotUx::Mood::Blocked, "Blocked", false},
     {botux::BotUx::Mood::Done, "Done", false},
     {botux::BotUx::Mood::Asleep, "Asleep", false},
+    {botux::BotUx::Mood::LookingAround, "Looking around", false},
 };
 
 struct ExpressionCase {
@@ -535,7 +536,7 @@ static void checkCompanionSemantics() {
             else { assert(desc[i + 1] && desc[i + 2]); i += 3; }
         }
     }
-    assert(Bot::moodCount() * Bot::expressionCount() * Bot::animationCount() == 1040);
+    assert(Bot::moodCount() * Bot::expressionCount() * Bot::animationCount() == 1120);
     M5Canvas canvas(72, 72); bot.begin(&canvas);
     bot.resetToIdle(); gNow += 16; bot.update(gNow);
     bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Milo is resting") == 0);
@@ -551,6 +552,10 @@ static void checkCompanionSemantics() {
     bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Ava is happy") == 0);
     bot.describe(desc, sizeof(desc), Bot::Language::Chinese);
     assert(std::strcmp(desc, "Ava 很高兴") == 0);
+    bot.setMood(Bot::Mood::LookingAround, 0); gNow += 16; bot.update(gNow);
+    bot.describe(desc, sizeof(desc)); assert(std::strcmp(desc, "Ava is looking around") == 0);
+    bot.describe(desc, sizeof(desc), Bot::Language::Chinese);
+    assert(std::strcmp(desc, "Ava 正在到处看看") == 0);
     for (uint8_t m = 0; m < Bot::moodCount(); ++m)
         for (uint8_t e = 0; e < Bot::expressionCount(); ++e)
             for (uint8_t a = 0; a < Bot::animationCount(); ++a) {
@@ -578,13 +583,24 @@ static void checkTemporaryGaze() {
     bot.setExpression(Bot::Expression::Neutral, 0); bot.setMotionAmount(0);
     gNow += 1000; bot.update(gNow); canvas.clear(); bot.draw();
     float baseline = eyeGroupCenterX(canvas);
-    bot.setExpression(Bot::Expression::Neutral, 0); bot.gazeAt(-1, 0, 1800); gNow += 16; bot.update(gNow); canvas.clear(); bot.draw();
+    bot.setExpression(Bot::Expression::Neutral, 0); bot.gazeAt(-1, 0, 1800); gNow += 240; bot.update(gNow); canvas.clear(); bot.draw();
     float left = eyeGroupCenterX(canvas);
     bot.setExpression(Bot::Expression::Neutral, 0); bot.gazeAt(1, 0, 1800);
-    gNow += 16; bot.update(gNow); canvas.clear(); bot.draw();
+    gNow += 240; bot.update(gNow); canvas.clear(); bot.draw();
     assert(eyeGroupCenterX(canvas) > left + 20);
     gNow += 1900; bot.setExpression(Bot::Expression::Neutral, 0); bot.update(gNow); canvas.clear(); bot.draw();
     assert(std::fabs(eyeGroupCenterX(canvas) - baseline) <= 1.5f);
+
+    // A temporary target has precedence over a persistent direction, then
+    // returns to that direction when its hold expires.
+    bot.setGazeDirection(Bot::GazeDirection::Left);
+    gNow += 200; bot.update(gNow); canvas.clear(); bot.draw();
+    float persistentLeft = eyeGroupCenterX(canvas);
+    bot.gazeAt(0.70710678f, -0.70710678f, 600);
+    gNow += 400; bot.update(gNow); canvas.clear(); bot.draw();
+    assert(eyeGroupCenterX(canvas) > baseline - 2);
+    gNow += 500; bot.update(gNow); canvas.clear(); bot.draw();
+    assert(std::fabs(eyeGroupCenterX(canvas) - persistentLeft) <= 1.5f);
 }
 
 static void checkConnectedEyeMorphs() {
@@ -694,7 +710,8 @@ static void checkDirectionsDominateEveryFace() {
     using Bot = botux::BotUx;
     M5Canvas canvas(96, 96); canvas.setRecording(false);
     for (uint8_t mood = 0; mood < Bot::moodCount(); ++mood) {
-        if (mood == (uint8_t)Bot::Mood::Thinking || mood == (uint8_t)Bot::Mood::Blocked) continue;
+        if (mood == (uint8_t)Bot::Mood::Thinking || mood == (uint8_t)Bot::Mood::Working ||
+            mood == (uint8_t)Bot::Mood::Blocked) continue;
         for (uint8_t expr = 0; expr < Bot::expressionCount(); ++expr)
             for (uint8_t eyeStyle = 0; eyeStyle < 4; ++eyeStyle)
                 for (auto direction : {Bot::GazeDirection::Left, Bot::GazeDirection::Right,
@@ -799,7 +816,7 @@ static DirectionRaster directionRaster(botux::BotUx::GazeDirection direction, bo
     auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style); bot.seedBlink(1234);
     bot.setMotionAmount(0); bot.setExpression(autoFace ? Bot::Expression::Auto : Bot::Expression::Neutral);
     for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
-    if (tap) bot.gazeAt(-0.85f,0.85f,5000); else bot.setGazeDirection(direction);
+    if (tap) bot.gazeAt(-0.70710678f,0.70710678f,5000); else bot.setGazeDirection(direction);
     for (int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
     bot.draw(); return captureDirectionRaster(canvas, style.eyeColor);
 }
@@ -842,6 +859,16 @@ static void checkIdleAndUpperRightProportions() {
     const auto idle = directionRaster(G::Auto, false, true);
     const auto upperRight = directionRaster(G::UpRight, false, true);
     const auto upperLeft = directionRaster(G::UpLeft, false, true);
+    const auto tappedUpperRight = [] {
+        using Bot = botux::BotUx;
+        gNow = 1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+        auto style = bot.style(); style.blinkMinMs = style.blinkMaxMs = 600000; bot.setStyle(style); bot.seedBlink(1234);
+        bot.setMotionAmount(0); bot.gazeAt(0.70710678f,-0.70710678f,5000);
+        for (int i=0;i<200;++i) { gNow+=16; bot.update(gNow); }
+        bot.draw(); return captureDirectionRaster(canvas, style.eyeColor);
+    }();
+    assert(idle.pixels == upperRight.pixels);
+    assert(idle.pixels == tappedUpperRight.pixels);
     assert(idle.eyes[1].pixels > idle.eyes[0].pixels);
     assert(upperRight.eyes[1].pixels > upperRight.eyes[0].pixels);
     assert(idle.eyes[1].height() > idle.eyes[0].height());
@@ -863,6 +890,140 @@ static void checkIdleAndUpperRightProportions() {
     float idleSpacing = idle.eyes[1].cx()-idle.eyes[0].cx();
     float directedSpacing = upperRight.eyes[1].cx()-upperRight.eyes[0].cx();
     assert(std::fabs(directedSpacing/idleSpacing-1) < 0.12f);
+}
+
+static DirectionRaster expressionSideRaster(botux::BotUx::Expression expression,
+                                             botux::BotUx::EyeStyle eyeStyle,
+                                             botux::BotUx::GazeDirection direction,
+                                             botux::BotUx::FaceSide faceSide = botux::BotUx::FaceSide::Auto) {
+    using Bot = botux::BotUx;
+    gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+    auto style=bot.style(); style.bodyStyle=Bot::BodyStyle::None; style.eyeStyle=eyeStyle;
+    style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(1234);
+    bot.setMotionAmount(0); bot.setAnimation(Bot::Animation::Calm);
+    bot.setExpression(expression,0); bot.setGazeDirection(direction); bot.setFaceSide(faceSide);
+    bot.update(gNow); canvas.clear(); bot.draw();
+    return captureDirectionRaster(canvas,style.eyeColor);
+}
+
+static DirectionRaster moodSideRaster(botux::BotUx::Mood mood,
+                                      botux::BotUx::EyeStyle eyeStyle,
+                                      botux::BotUx::GazeDirection direction) {
+    using Bot = botux::BotUx;
+    gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+    auto style=bot.style(); style.bodyStyle=Bot::BodyStyle::None; style.eyeStyle=eyeStyle;
+    style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(1234);
+    bot.setMotionAmount(0); bot.setAnimation(Bot::Animation::Calm);
+    bot.setMood(mood,0); bot.setExpression(Bot::Expression::Auto,0); bot.setGazeDirection(direction);
+    for(int i=0;i<100;++i) { gNow+=16; bot.update(gNow); }
+    canvas.clear(); bot.draw();
+    return captureDirectionRaster(canvas,style.eyeColor);
+}
+
+static float onePixelMirrorMissRatio(const DirectionRaster& right,
+                                     const DirectionRaster& left,
+                                     uint16_t ink) {
+    unsigned misses=0,total=0;
+    for(int pass=0;pass<2;++pass) for(int y=0;y<200;++y) for(int x=0;x<200;++x) {
+        const auto& source=pass?left:right;
+        const auto& target=pass?right:left;
+        if(source.pixels[y*200+x]!=ink) continue;
+        ++total; bool found=false;
+        for(int dy=-1;dy<=1&&!found;++dy) for(int dx=-1;dx<=1;++dx) {
+            int tx=200-x+dx,ty=y+dy;
+            if(tx>=0&&tx<200&&ty>=0&&ty<200&&target.pixels[ty*200+tx]==ink) {found=true;break;}
+        }
+        if(!found) ++misses;
+    }
+    return total ? (float)misses/total : 1.0f;
+}
+
+static void checkExpressionHandedness() {
+    using Bot=botux::BotUx; using G=Bot::GazeDirection;
+    const uint16_t ink=botux::rgb565(32,36,41);
+    for(uint8_t expression=1;expression<Bot::expressionCount();++expression)
+        for(uint8_t eyeStyle=0;eyeStyle<4;++eyeStyle) {
+            auto right=expressionSideRaster((Bot::Expression)expression,(Bot::EyeStyle)eyeStyle,G::UpRight);
+            auto left=expressionSideRaster((Bot::Expression)expression,(Bot::EyeStyle)eyeStyle,G::UpLeft);
+            unsigned mismatch=0,total=0;
+            for(int y=0;y<200;++y) for(int x=1;x<200;++x) {
+                bool a=right.pixels[y*200+x]==ink,b=left.pixels[y*200+200-x]==ink;
+                if(a||b) ++total;
+                if(a!=b) ++mismatch;
+            }
+            assert(total && mismatch<total*.14f);
+        }
+
+    auto forcedRight=expressionSideRaster(Bot::Expression::Wink,Bot::EyeStyle::Oval,G::UpRight,Bot::FaceSide::Right);
+    auto forcedLeft=expressionSideRaster(Bot::Expression::Wink,Bot::EyeStyle::Oval,G::UpRight,Bot::FaceSide::Left);
+    assert(std::fabs((forcedRight.eyes[0].cx()+forcedRight.eyes[1].cx())*.5f-
+                     (forcedLeft.eyes[0].cx()+forcedLeft.eyes[1].cx())*.5f)<1.0f);
+    assert(forcedRight.pixels!=forcedLeft.pixels);
+
+    const Bot::Mood faceMoods[]={Bot::Mood::Idle,Bot::Mood::Listening,Bot::Mood::Speaking,
+        Bot::Mood::Happy,Bot::Mood::Sad,Bot::Mood::Sleepy,Bot::Mood::Surprised,
+        Bot::Mood::Waiting,Bot::Mood::Done,Bot::Mood::Asleep,Bot::Mood::LookingAround};
+    for(auto mood:faceMoods) for(uint8_t eyeStyle=0;eyeStyle<4;++eyeStyle) {
+        auto right=moodSideRaster(mood,(Bot::EyeStyle)eyeStyle,G::UpRight);
+        auto left=moodSideRaster(mood,(Bot::EyeStyle)eyeStyle,G::UpLeft);
+        float missRatio=onePixelMirrorMissRatio(right,left,ink);
+        if(missRatio>=.08f) std::cerr<<"mood mirror "<<(int)mood
+            <<" style "<<(int)eyeStyle<<" one-pixel miss ratio "<<missRatio
+            <<" R "<<right.eyes[0].x0<<","<<right.eyes[0].y0<<".."<<right.eyes[0].x1<<","<<right.eyes[0].y1
+            <<" / "<<right.eyes[1].x0<<","<<right.eyes[1].y0<<".."<<right.eyes[1].x1<<","<<right.eyes[1].y1
+            <<" L "<<left.eyes[0].x0<<","<<left.eyes[0].y0<<".."<<left.eyes[0].x1<<","<<left.eyes[0].y1
+            <<" / "<<left.eyes[1].x0<<","<<left.eyes[1].y0<<".."<<left.eyes[1].x1<<","<<left.eyes[1].y1<<"\n";
+        assert(missRatio<.08f);
+    }
+}
+
+static void checkEyesStayInsideBody() {
+    using Bot=botux::BotUx;
+    for(int size:{40,72,178,286}) for(uint8_t expression=1;expression<Bot::expressionCount();++expression)
+        for(uint8_t eyeStyle=0;eyeStyle<4;++eyeStyle)
+            for(uint8_t gaze=1;gaze<Bot::gazeDirectionCount();++gaze) {
+                gNow=1000; M5Canvas canvas(size,size); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+                auto style=bot.style(); style.eyeStyle=(Bot::EyeStyle)eyeStyle;
+                style.bodyColor=style.bgColor; style.blinkMinMs=style.blinkMaxMs=600000;
+                bot.setStyle(style); bot.seedBlink(1234); bot.setMotionAmount(0);
+                bot.setExpression((Bot::Expression)expression,0);
+                bot.setGazeDirection((Bot::GazeDirection)gaze); bot.update(gNow); canvas.clear(); bot.draw();
+                unsigned ink=0; float limit=bot.metrics().bodyR*.94f;
+                for(int y=0;y<size;++y) for(int x=0;x<size;++x) if(canvas.readPixel(x,y)!=style.bgColor) {
+                    float dx=x-bot.metrics().cx,dy=y-bot.metrics().cy;
+                    assert(dx*dx+dy*dy<=limit*limit); ++ink;
+                }
+                assert(ink);
+            }
+}
+
+static void checkLookingAroundRange() {
+    using Bot=botux::BotUx;
+    gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
+    auto style=bot.style(); style.bodyStyle=Bot::BodyStyle::None;
+    style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(19);
+    bot.setMood(Bot::Mood::LookingAround,0); bot.setAnimation(Bot::Animation::Calm);
+    float minX=1000,maxX=-1000,minY=1000,maxY=-1000;
+    for(int frame=0;frame<1500;++frame) {
+        gNow+=40; bot.update(gNow); canvas.clear(); bot.draw();
+        if(frame%10) continue;
+        auto raster=captureDirectionRaster(canvas,style.eyeColor);
+        float x=(raster.eyes[0].cx()+raster.eyes[1].cx())*.5f;
+        float y=(raster.eyes[0].cy()+raster.eyes[1].cy())*.5f;
+        minX=std::min(minX,x); maxX=std::max(maxX,x);
+        minY=std::min(minY,y); maxY=std::max(maxY,y);
+    }
+    assert(minX<86 && maxX>114 && minY<78 && maxY>107);
+    std::cout<<"LookingAround eye-group range x "<<minX<<".."<<maxX
+             <<" y "<<minY<<".."<<maxY<<"\n";
+
+    bot.gazeAt(0.70710678f,-0.70710678f,5000);
+    for(int i=0;i<100;++i) {gNow+=16;bot.update(gNow);}
+    canvas.clear();bot.draw();
+    auto held=captureDirectionRaster(canvas,style.eyeColor);
+    float heldX=(held.eyes[0].cx()+held.eyes[1].cx())*.5f;
+    std::cout<<"LookingAround held upper-right x "<<heldX<<"\n";
+    assert(heldX>114);
 }
 
 // Least-squares ink axis, measured from native pixels rather than pose scalars.
@@ -939,7 +1100,8 @@ static void writeIdleComparison(const std::string& path) {
 static void checkDirectionTransitionContinuity() {
     using Bot=botux::BotUx; using G=Bot::GazeDirection;
     gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
-    auto style=bot.style(); style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(1234);
+    auto style=bot.style(); style.bodyStyle=Bot::BodyStyle::None;
+    style.blinkMinMs=style.blinkMaxMs=600000; bot.setStyle(style); bot.seedBlink(1234);
     bot.setMotionAmount(0); bot.setExpression(Bot::Expression::Neutral);
     float previous=100; bool first=true;
     for(auto direction : {G::Center,G::Left,G::Right,G::UpLeft,G::DownRight,G::Center}) {
@@ -954,34 +1116,10 @@ static void checkDirectionTransitionContinuity() {
     assert(std::fabs(previous-100)<=1.0f);
 }
 
-static void checkThinkingTravelAndContinuity() {
-    using Bot=botux::BotUx;
-    float ranges[3]={};
-    for(int mode=0;mode<3;++mode) {
-        gNow=1000; M5Canvas canvas(200,200); canvas.setRecording(false); Bot bot; bot.begin(&canvas);
-        bot.setMood(Bot::Mood::Thinking); bot.setAnimation(Bot::Animation::Calm);
-        bot.setReducedMotion(mode==1); bot.setMotionAmount(mode==2?0:1);
-        float lo=1000,hi=-1000,previous=0;
-        for(int frame=0;frame<250;++frame) {
-            gNow+=16; bot.update(gNow); canvas.clear(); bot.draw();
-            if(frame<100) continue;
-            int top=200,bottom=-1;
-            for(int y=0;y<200;++y) if(canvas.readPixel(100,y)!=bot.style().bgColor) {top=std::min(top,y);bottom=std::max(bottom,y);}
-            assert(bottom>=top); float center=(top+bottom)*.5f;
-            if(frame>100) assert(std::fabs(center-previous)<=5.0f);
-            previous=center; lo=std::min(lo,center);hi=std::max(hi,center);
-        }
-        ranges[mode]=hi-lo;
-    }
-    assert(ranges[0]>200*.39f*.75f);
-    assert(ranges[1]>0 && ranges[1]<ranges[0]*.35f);
-    assert(ranges[2]==0);
-    std::cout<<"Thinking center-dot peak travel full/reduced/zero: "<<ranges[0]<<"/"<<ranges[1]<<"/"<<ranges[2]<<" px\n";
-}
-
 static void checkSleepContinuity() {
     using Bot = botux::BotUx;
-    static_assert((int)Bot::Mood::Done == 11 && (int)Bot::Mood::Asleep == 12, "append-only moods");
+    static_assert((int)Bot::Mood::Done == 11 && (int)Bot::Mood::Asleep == 12 &&
+                  (int)Bot::Mood::LookingAround == 13, "append-only moods");
     double totals[3] = {};
     for (int body=0; body<4; ++body) {
     for (int mode = 0; mode < 3; ++mode) {
@@ -1093,9 +1231,11 @@ int main(int argc, char** argv) {
     checkReducedMotionAmplitude();
     checkNineDirectionPerspective();
     checkIdleAndUpperRightProportions();
+    checkExpressionHandedness();
+    checkEyesStayInsideBody();
+    checkLookingAroundRange();
     checkSideArcTilt();
     checkDirectionTransitionContinuity();
-    checkThinkingTravelAndContinuity();
     checkSleepContinuity();
     benchmarkEyes();
     checkCoverageAndFacePlacement();

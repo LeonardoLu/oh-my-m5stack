@@ -94,6 +94,7 @@ void BotUx::setMood(Mood m) { setMood(m, 180); }
 void BotUx::setMood(Mood m, uint16_t transitionMs) {
     if (_mood == m) return;
     _mood = m;
+    if (m == Mood::LookingAround) _nextGaze = _lastNow;
     _transitionMs = transitionMs;
     _snapPose = transitionMs == 0;
 }
@@ -206,8 +207,8 @@ void BotUx::_updateBlink(uint32_t now) {
 }
 
 const char* BotUx::moodName(Mood value, Language language) {
-    static const char* const en[] = {"Idle", "Listening", "Thinking", "Speaking", "Happy", "Sad", "Sleepy", "Surprised", "Working", "Waiting", "Blocked", "Done", "Asleep"};
-    static const char* const zh[] = {"空闲", "聆听", "思考", "说话", "开心", "难过", "困倦", "惊讶", "工作", "等待", "受阻", "完成", "熟睡"};
+    static const char* const en[] = {"Idle", "Listening", "Thinking", "Speaking", "Happy", "Sad", "Sleepy", "Surprised", "Working", "Waiting", "Blocked", "Done", "Asleep", "Looking around"};
+    static const char* const zh[] = {"空闲", "聆听", "思考", "说话", "开心", "难过", "困倦", "惊讶", "工作", "等待", "受阻", "完成", "熟睡", "到处看看"};
     return (language == Language::Chinese ? zh : en)[(uint8_t)value < moodCount() ? (uint8_t)value : 0];
 }
 const char* BotUx::expressionName(Expression value, Language language) {
@@ -237,11 +238,11 @@ size_t BotUx::describe(char* out, size_t capacity, Language language) const {
     static const char* const moodEn[] = {
         "is resting", "is listening", "is thinking", "is speaking", "is happy",
         "feels sad", "feels sleepy", "feels surprised", "is working", "is waiting",
-        "has hit a blocker", "has finished", "is asleep"
+        "has hit a blocker", "has finished", "is asleep", "is looking around"
     };
     static const char* const moodZh[] = {
         "正在休息", "正在聆听", "正在思考", "正在说话", "很高兴", "有些难过",
-        "有些困倦", "感到惊讶", "正在工作", "正在等待", "遇到阻碍", "已经完成", "正在熟睡"
+        "有些困倦", "感到惊讶", "正在工作", "正在等待", "遇到阻碍", "已经完成", "正在熟睡", "正在到处看看"
     };
     static const char* const expressionEn[] = {
         "is resting", "looks relaxed", "feels curious", "looks focused", "is happy",
@@ -310,23 +311,30 @@ void BotUx::setGazeDirection(GazeDirection direction) {
     _gazeDirection = (uint8_t)direction < gazeDirectionCount() ? direction : GazeDirection::Auto;
 }
 
+void BotUx::setFaceSide(FaceSide side) {
+    _faceSide = (uint8_t)side <= (uint8_t)FaceSide::Right ? side : FaceSide::Auto;
+}
+
 void BotUx::gazeAt(float x, float y, uint16_t holdMs) {
-    if (_mood != Mood::Idle) return;
+    if (_mood != Mood::Idle && _mood != Mood::LookingAround) return;
     _gazeX = clampf(x, -1.0f, 1.0f); _gazeY = clampf(y, -1.0f, 1.0f);
+    float length = sqrtf(_gazeX * _gazeX + _gazeY * _gazeY);
+    if (length > 1.0f) { _gazeX /= length; _gazeY /= length; }
     _gazeUntil = millis() + holdMs; _gazeHeld = holdMs != 0;
 }
 void BotUx::clearGaze() { _gazeHeld = false; }
 
 void BotUx::_updateGaze(uint32_t now) {
+    if (_mood != Mood::LookingAround) return;
     if ((int32_t)(now - _nextGaze) < 0) return;
     _gazeSeed = _gazeSeed * 1664525u + 1013904223u;
     _wanderX = ((float)((_gazeSeed >> 24) & 0xFF) / 127.5f) - 1.0f;
     _gazeSeed = _gazeSeed * 1664525u + 1013904223u;
-    _wanderY = ((float)((_gazeSeed >> 24) & 0xFF) / 170.0f) - 0.75f;
-    _wanderX = clampf(_wanderX, -0.85f, 0.85f);
-    _wanderY = clampf(_wanderY, -0.55f, 0.55f);
+    _wanderY = ((float)((_gazeSeed >> 24) & 0xFF) / 127.5f) - 1.0f;
+    float length = sqrtf(_wanderX * _wanderX + _wanderY * _wanderY);
+    if (length > 1.0f) { _wanderX /= length; _wanderY /= length; }
     _gazeSeed = _gazeSeed * 1664525u + 1013904223u;
-    _nextGaze = now + 2200u + ((_gazeSeed >> 16) % 2600u);
+    _nextGaze = now + 900u + ((_gazeSeed >> 16) % 1901u);
 }
 
 void BotUx::_updateTalk(uint32_t now) {
@@ -369,7 +377,8 @@ void BotUx::_resolveMood(uint32_t now) {
     float targetOpen = 1.0f, targetAsym = 0.04f;
     float targetPairX = 0.26f, targetPairY = -0.38f, targetAngle = 0.34f;
     float targetLean = 0.0f, targetTwist = 0.0f;
-    float gazeX = _wanderX, gazeY = _wanderY;
+    constexpr float kDiagonal = 0.70710678f;
+    float gazeX = kDiagonal, gazeY = -kDiagonal;
     float lift = 0.0f, stretch = 0.0f;
 
     switch (_effMood) {
@@ -405,6 +414,13 @@ void BotUx::_resolveMood(uint32_t now) {
         case Mood::Asleep:
             targetOpen = 0.0f; targetAsym = 0.0f;
             gazeX = 0.0f; gazeY = 0.20f; lift = 0.075f; stretch = -0.055f;
+            break;
+        case Mood::LookingAround:
+            // Use the complete touch/direction field; motion preferences only
+            // scale autonomous travel back toward the canonical Idle pose.
+            targetOpen = 1.0f; targetAsym = 0.04f;
+            targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.34f;
+            gazeX = _wanderX; gazeY = _wanderY;
             break;
         case Mood::Waiting:
             targetOpen = 0.72f; targetAsym = -0.08f;
@@ -444,7 +460,13 @@ void BotUx::_resolveMood(uint32_t now) {
                 targetOpen = 1.0f; targetAsym = 0.04f;
                 targetPairX = 0.26f; targetPairY = -0.38f; targetAngle = 0.34f;
                 targetLean = 0.0f; targetTwist = 0.0f;
-                gazeX = _wanderX; gazeY = _wanderY;
+                if (_effMood == Mood::LookingAround) {
+                    gazeX = _wanderX; gazeY = _wanderY;
+                } else if (_effMood == Mood::Idle) {
+                    gazeX = kDiagonal; gazeY = -kDiagonal;
+                } else {
+                    gazeX = 0.0f; gazeY = 0.0f;
+                }
             }
             break;
         case Expression::Curious:
@@ -493,17 +515,12 @@ void BotUx::_resolveMood(uint32_t now) {
             break;
     }
 
-    if (_gazeHeld && ((int32_t)(now - _gazeUntil) >= 0 || _mood != Mood::Idle)) clearGaze();
-    bool directed = _gazeDirection != GazeDirection::Auto || (_gazeHeld && _effMood == Mood::Idle);
-
-    // A chosen direction is relative to the body, not the expression's default
-    // pair placement. Ease that placement to center so Left cannot be cancelled
-    // by Curious's rightward bias (or Down by the usual elevated eye position).
-    // Local eye shape, spacing, lean and rotation remain expression-driven.
-    if (directed) {
-        targetPairX = 0.0f;
-        targetPairY = 0.0f;
-    }
+    bool gazeMood = _mood == Mood::Idle || _mood == Mood::LookingAround;
+    if (_gazeHeld && ((int32_t)(now - _gazeUntil) >= 0 || !gazeMood)) clearGaze();
+    bool idleCanonical = _effMood == Mood::Idle &&
+                         (_expression == Expression::Auto || _expression == Expression::Neutral);
+    bool directed = _gazeDirection != GazeDirection::Auto ||
+                    _gazeHeld || idleCanonical || _effMood == Mood::LookingAround;
 
     if (_battery <= 10 && targetOpen > 0.24f) {
         targetOpen = 0.24f;
@@ -514,7 +531,8 @@ void BotUx::_resolveMood(uint32_t now) {
     if (dt > 1000u) dt = 1000u;
     float timeConstant = (_transitionMs == 0) ? 1.0f : clampf(_transitionMs * 0.42f, 28.0f, 600.0f);
     float a = _snapPose ? 1.0f : easeAlpha(dt, timeConstant);
-    _directionPose += ((directed ? 1.0f : 0.0f) - _directionPose) * a;
+    float gazeA = _snapPose ? 1.0f : easeAlpha(dt, 120.0f);
+    _directionPose += ((directed ? 1.0f : 0.0f) - _directionPose) * gazeA;
     _openBase += (targetOpen - _openBase) * a;
     _eyeAsym += (targetAsym - _eyeAsym) * a;
     _eyeSmile += ((_effExpression == Expression::Joy ? 1.0f : 0.0f) - _eyeSmile) * a;
@@ -526,13 +544,18 @@ void BotUx::_resolveMood(uint32_t now) {
     _bodyLean += (targetLean - _bodyLean) * a;
     _eyeTwist += (targetTwist - _eyeTwist) * a;
     float gazeMotion = (_reducedMotion ? 0.20f : 1.0f) * fminf(_motionAmount, 1.0f);
-    if (_gazeDirection != GazeDirection::Auto) {
-        static const int8_t x[] = {0, 0, -1, 1, 0, 0, -1, 1, -1, 1};
-        static const int8_t y[] = {0, 0, 0, 0, -1, 1, -1, -1, 1, 1};
-        gazeX = x[(uint8_t)_gazeDirection] * 0.85f;
-        gazeY = y[(uint8_t)_gazeDirection] * 0.85f;
-        gazeX += _wanderX * 0.10f * gazeMotion;
-        gazeY += _wanderY * 0.10f * gazeMotion;
+    if (_gazeHeld) {
+        gazeX = _gazeX; gazeY = _gazeY;
+    } else if (_gazeDirection != GazeDirection::Auto) {
+        static const float x[] = {0, 0, -1, 1, 0, 0, -kDiagonal, kDiagonal, -kDiagonal, kDiagonal};
+        static const float y[] = {0, 0, 0, 0, -1, 1, -kDiagonal, -kDiagonal, kDiagonal, kDiagonal};
+        gazeX = x[(uint8_t)_gazeDirection];
+        gazeY = y[(uint8_t)_gazeDirection];
+    } else if (idleCanonical) {
+        gazeX = kDiagonal; gazeY = -kDiagonal;
+    } else if (_effMood == Mood::LookingAround) {
+        gazeX = kDiagonal + (_wanderX - kDiagonal) * gazeMotion;
+        gazeY = -kDiagonal + (_wanderY + kDiagonal) * gazeMotion;
     } else if (_effExpression == Expression::Neutral &&
                (_effMood == Mood::Idle || _expression == Expression::Neutral)) {
         gazeX *= gazeMotion; gazeY *= gazeMotion;
@@ -541,15 +564,31 @@ void BotUx::_resolveMood(uint32_t now) {
         gazeX = clampf(gazeX + _wanderX * 0.20f * gazeMotion, -1, 1);
         gazeY = clampf(gazeY + _wanderY * 0.16f * gazeMotion, -1, 1);
     }
-    if (_gazeHeld && _effMood == Mood::Idle) { gazeX = _gazeX; gazeY = _gazeY; }
-    _pupilDX += (gazeX - _pupilDX) * a;
-    _pupilDY += (gazeY - _pupilDY) * a;
+    _pupilDX += (gazeX - _pupilDX) * gazeA;
+    _pupilDY += (gazeY - _pupilDY) * gazeA;
     _snapPose = false;
 
     float motionA = easeAlpha(dt, _reducedMotion ? 380.0f : 240.0f);
     _motionX += (_motionTargetX - _motionX) * motionA;
     _motionY += (_motionTargetY - _motionY) * motionA;
     _shake += (_shakeTarget - _shake) * motionA;
+
+    // Use the same blended horizontal geometry as draw(), including IMU
+    // countershift, so Auto changes handedness only as the rendered pair
+    // crosses the body's centre line.
+    float faceSensorAmount = _reducedMotion ? _motionAmount * 0.32f : _motionAmount;
+    float renderedGazeX = clampf(_pupilDX - _motionX * 0.18f * faceSensorAmount, -1.0f, 1.0f);
+    float fieldX = clampf(renderedGazeX / kDiagonal, -1.0f, 1.0f);
+    float naturalX = _eyePairX + renderedGazeX * 0.24f;
+    float directedX = fieldX * 0.26f;
+    float faceX = naturalX + (directedX - naturalX) * _directionPose;
+    float faceTarget = _faceHandedness;
+    if (_faceSide == FaceSide::Left) faceTarget = -1.0f;
+    else if (_faceSide == FaceSide::Right) faceTarget = 1.0f;
+    else if (faceX < -0.015f) faceTarget = -1.0f;
+    else if (faceX > 0.015f) faceTarget = 1.0f;
+    else faceTarget = 0.0f;
+    _faceHandedness += (faceTarget - _faceHandedness) * gazeA;
 
     float open = _openBase;
     if (_blinking && _effMood != Mood::Thinking && _effMood != Mood::Blocked) {
@@ -710,17 +749,90 @@ void BotUx::_drawBody() {
     if (rx < 2) rx = 2;
     if (ry < 2) ry = 2;
 
-    // Thinking and Blocked replace the avatar silhouette in the official motion language.
-    if (_effMood == Mood::Thinking) {
-        float dotR = fmaxf(2.0f, r * 0.19f);
-        float lifeAmount = (_reducedMotion ? 0.20f : 1.0f) * _motionAmount;
-        for (int i = -1; i <= 1; ++i) {
-            float phase = i * 1.35f;
-            float elapsed = (_now - _animStart) * _animationSpeed;
-            float y = _m.cy + _bodyDY + sinf(2.0f * kPi * elapsed / 920.0f + phase) * r * 0.42f * fminf(lifeAmount, 1.5f);
-            uint8_t mix = (uint8_t)(35 + (i + 1) * 25);
-            _fillEllipseAA(_m.cx + _bodyDX + i * r * 0.48f, y, dotR, dotR,
-                           mix565(_style.bodyColor, _style.bgColor, mix));
+    // Thinking and Working become volumetric dot shells. Keep Auto on the
+    // mood's own choreography; an explicitly selected Animation may still
+    // translate the complete shell through the ordinary animation layer.
+    if (_effMood == Mood::Thinking || _effMood == Mood::Working) {
+        struct OrbDot { float x, y, z, radius; uint8_t opacity; };
+        OrbDot dots[96];
+        int count = r >= 60 ? 96 : (r >= 34 ? 72 : 48);
+        float amount = fminf(_motionAmount, 1.5f);
+        float reducedScale = _reducedMotion ? 0.20f : 1.0f;
+        float phaseScale = fminf(_motionAmount, 1.0f) * reducedScale;
+        float deformationScale = amount * reducedScale;
+        float elapsed = (_now - _animStart) * _animationSpeed * phaseScale;
+        float period = _effMood == Mood::Thinking ? 3600.0f : 4400.0f;
+        float phase = elapsed / period;
+        phase -= floorf(phase);
+        float turn = 2.0f * kPi * phase;
+        float turnCos = cosf(turn), turnSin = sinf(turn);
+        float shellCos = _effMood == Mood::Thinking ? turnCos : cosf(-turn);
+        float shellSin = _effMood == Mood::Thinking ? turnSin : sinf(-turn);
+        const float pitch = 0.36f;
+        const float pitchCos = cosf(pitch), pitchSin = sinf(pitch);
+        const float goldenCos = -0.73736888f;
+        const float goldenSin = 0.67549029f;
+        float gx = 1.0f, gz = 0.0f;
+
+        for (int i = 0; i < count; ++i) {
+            float px, py, pz;
+            float pointOpacity = 0.90f;
+            if (_effMood == Mood::Thinking) {
+                py = 1.0f - i * (2.0f / (count - 1));
+                float ring = sqrtf(fmaxf(0.0f, 1.0f - py * py));
+                px = gx * ring;
+                pz = gz * ring;
+                float swell = 1.0f + 0.13f * deformationScale
+                            * sinf(2.0f * kPi * (phase - 0.22f * (py + 1.0f)));
+                px *= swell; py *= swell; pz *= swell;
+
+                float nextGx = gx * goldenCos - gz * goldenSin;
+                gz = gx * goldenSin + gz * goldenCos;
+                gx = nextGx;
+            } else {
+                // Each point advances bottom-to-top on a meridian and wraps.
+                // A second, opposing shell turn leaves diagonal streams and
+                // open lanes instead of reading as a uniformly spinning ball.
+                float u = i * 0.61803399f + phase;
+                u -= floorf(u);
+                float polar = kPi * u;
+                float ring = sinf(polar);
+                float longitude = 2.0f * kPi * (i * 0.75487767f) + 2.0f * turn;
+                px = cosf(longitude) * ring;
+                py = cosf(polar);
+                pz = sinf(longitude) * ring;
+                pointOpacity = powf(fmaxf(0.0f, sinf(kPi * u)), 0.40f) * 0.90f;
+            }
+
+            // Rotate the shell and hold a fixed tilt so depth is legible.
+            float tx = px * shellCos - pz * shellSin;
+            float tz = px * shellSin + pz * shellCos;
+            float ty = py * pitchCos - tz * pitchSin;
+            tz = py * pitchSin + tz * pitchCos;
+
+            float perspective = 3.5f / (3.5f - tz);
+            float depth = clampf((tz + 1.1f) / 2.2f, 0.0f, 1.0f);
+            float sphereR = r * 0.77f;
+            float dotBase = fmaxf(0.55f, r * 0.0086f);
+            float dotScale = _effMood == Mood::Thinking ? 0.85f : 0.80f;
+            dots[i].x = tx * sphereR * perspective;
+            dots[i].y = ty * sphereR * perspective;
+            dots[i].z = tz;
+            dots[i].radius = dotBase * (0.40f + 1.60f * depth)
+                           * perspective * dotScale;
+            float depthOpacity = 0.07f + 0.93f * powf(depth, 1.55f);
+            dots[i].opacity = (uint8_t)(255.0f * depthOpacity * pointOpacity);
+        }
+
+        float shellCx = _m.cx + (_animation == Animation::Auto ? 0.0f : _bodyDX);
+        float shellCy = _m.cy + (_animation == Animation::Auto ? 0.0f : _bodyDY);
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int i = 0; i < count; ++i) {
+                if ((dots[i].z >= 0.0f) != (pass != 0)) continue;
+                _fillCapsule(shellCx + dots[i].x, shellCy + dots[i].y,
+                             0.0f, 0.0f, dots[i].radius,
+                             _style.bodyColor, dots[i].opacity);
+            }
         }
         return;
     }
@@ -919,7 +1031,7 @@ void BotUx::_fillEyeCurve(float cx, float cy, float dx, float dy, float rise,
 }
 
 void BotUx::_drawEyes() {
-    if (_effMood == Mood::Thinking || _effMood == Mood::Blocked) return;
+    if (_effMood == Mood::Thinking || _effMood == Mood::Working || _effMood == Mood::Blocked) return;
     int16_t side = min16(_w, _h);
     int16_t r = _m.bodyR ? _m.bodyR : (int16_t)(side * 0.39f);
     float bodyCx = _m.cx + _bodyDX;
@@ -927,28 +1039,36 @@ void BotUx::_drawEyes() {
     float sensorAmount = _reducedMotion ? _motionAmount * 0.32f : _motionAmount;
     float gazeX = clampf(_pupilDX - _motionX * 0.18f * sensorAmount, -1.0f, 1.0f);
     float gazeY = clampf(_pupilDY - _motionY * 0.14f * sensorAmount, -1.0f, 1.0f);
-    float pairCx = bodyCx + _eyePairX * r + gazeX * r * (0.24f + 0.04f * _directionPose);
-    float pairCy = bodyCy + _eyePairY * r + gazeY * r * (gazeY > 0.0f ? 0.16f : (0.20f + 0.04f * _directionPose));
-    float facingX = gazeX * _directionPose, facingY = gazeY * _directionPose;
-    float dx = _m.eyeDX * (1.0f - 0.08f * fabsf(facingX));
+    constexpr float kDiagonal = 0.70710678f;
+    float fieldX = clampf(gazeX / kDiagonal, -1.0f, 1.0f);
+    float fieldY = clampf(gazeY / kDiagonal, -1.0f, 1.0f);
+    float naturalX = _eyePairX + gazeX * 0.24f;
+    float naturalY = _eyePairY + gazeY * (gazeY > 0.0f ? 0.16f : 0.20f);
+    float directedX = fieldX * 0.26f;
+    // Preserve the established, comfortable near-centre downward limit while
+    // the upper half reaches the legacy Idle baseline.
+    float directedY = fieldY * (fieldY > 0.0f ? 0.16f : 0.38f);
+    float pairCx = bodyCx + (naturalX + (directedX - naturalX) * _directionPose) * r;
+    float pairCy = bodyCy + (naturalY + (directedY - naturalY) * _directionPose) * r;
+    float facingX = fieldX * _directionPose, facingY = fieldY * _directionPose;
+    // At the upper diagonals this is exactly the legacy Idle spacing. Pure
+    // side views retain a small, continuous yaw compression.
+    float dx = _m.eyeDX * (1.0f - 0.08f * fabsf(facingX) * (1.0f - fabsf(facingY)));
     float baseEr = (float)_m.eyeRadius;
-    // Along either side arc, pitch turns the eye axis through vertical.
-    // The bilinear field stays continuous for held/touch gaze and mirrors in x.
-    float eyeAngle = _eyeAngle * (1.0f - _directionPose)
-        - facingX * facingY * (0.34f / (0.85f * 0.85f));
+    // The bilinear direction field crosses upright at side/centre and reaches
+    // the exact legacy Idle +0.34 slope at the upper-right 45-degree pose.
+    float eyeAngle = _eyeAngle * _faceHandedness * (1.0f - _directionPose)
+        - facingX * facingY * 0.34f;
 
-    float twist = _eyeTwist + _animEyeTwist;
+    float twist = (_eyeTwist + _animEyeTwist) * _faceHandedness;
     float twistCos = cosf(twist), twistSin = sinf(twist);
     for (int s = -1; s <= 1; s += 2) {
-        // Idle has a slightly larger screen-right eye. Looking right preserves
-        // that near-eye ordering; looking left mirrors it without caricature.
-        float depth = 1.0f + s * facingX * 0.03f;
-        float er = baseEr * depth;
-        float asymWeight = _effExpression == Expression::Neutral ? 1.0f : 0.75f;
-        float asym = 1.0f + s * _eyeAsym * (1.0f - _directionPose * asymWeight);
-        float eyeOpen = clampf(_open * asym * (1.0f - facingY * 0.04f), 0.05f, 1.35f);
+        float er = baseEr;
+        float asym = 1.0f + s * _eyeAsym * _faceHandedness;
+        float pitchOpen = 1.0f - facingY * 0.04f * (1.0f - fabsf(facingX));
+        float eyeOpen = clampf(_open * asym * pitchOpen, 0.05f, 1.35f);
         float pairX = s * dx;
-        float pairY = s * _bodyLean * baseEr + s * facingX * facingY * baseEr * 0.45f;
+        float pairY = s * _bodyLean * _faceHandedness * baseEr;
         float ex = pairCx + pairX * twistCos - pairY * twistSin;
         float ey = pairCy + pairX * twistSin + pairY * twistCos;
 
@@ -961,9 +1081,11 @@ void BotUx::_drawEyes() {
         }
 
         // Morph the neutral pill into a short, rounded arch. A blink closes
-        // each eye continuously; a wink closes only the left eye.
+        // each eye continuously. Wink handedness blends between eyes while a
+        // moving gaze crosses the centre, avoiding an eye-swap discontinuity.
         float closure = clampf(eyeOpen / 0.45f, 0.0f, 1.0f);
-        if (s < 0) closure *= 1.0f - _eyeWink;
+        float winkWeight = 0.5f - 0.5f * s * _faceHandedness;
+        closure *= 1.0f - _eyeWink * winkWeight;
         float smile = _eyeSmile * closure;
         float major = er * lengthScale * (0.62f + 0.38f * eyeOpen) *
                       (1.0f - _eyeRound) * closure * (1.0f - smile);
@@ -974,10 +1096,14 @@ void BotUx::_drawEyes() {
         float radius = fmaxf(0.9f, er * radiusScale * eyeOpen * closure);
         radius = radius * (1.0f - smile) + er * 0.27f * smile;
         float closedWidth = er * 0.60f * (1.0f - closure);
-        halfDx += closedWidth;
+        float horizontalSign = halfDx < 0.0f ? -1.0f : 1.0f;
+        halfDx += horizontalSign * closedWidth;
         if (smile > 0.001f) {
-            float curveDx = halfDx + er * 0.90f * smile;
-            if (side <= 48) curveDx = fminf(curveDx, fmaxf(0.5f, dx - radius - 1.0f));
+            float curveDx = halfDx + horizontalSign * er * 0.90f * smile;
+            if (side <= 48) {
+                float maxCurve = fmaxf(0.5f, dx - radius - 1.0f);
+                curveDx = horizontalSign * fminf(fabsf(curveDx), maxCurve);
+            }
             _fillEyeCurve(ex, ey, curveDx, halfDy,
                           er * 0.46f * smile, radius, _style.eyeColor);
         } else {

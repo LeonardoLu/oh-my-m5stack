@@ -82,12 +82,14 @@ on shake reactions.
 
 The companion is **Milo** by default. Both devices support a 16-character name,
 English/Chinese UI and descriptions, and independent live selectors for all
-13 moods × 10 expressions × 8 animations (1,040 combinations). Preview choices do
+14 moods × 10 expressions × 8 animations (1,120 combinations). Preview choices do
 not overwrite the persistent expression/action or Core2 host state. Gaze offers
 Auto plus nine explicit directions: Center, Left, Right, Up, Down and the four
 diagonals. Temporary screen-directed gaze returns to that preference; normal
-presets retain continuous motion. Watch contact and gaze validation is tracked in
-[the Watch settings specification](specs/watch-settings-iteration.md) and
+presets retain continuous motion. Idle rests at the canonical upper-right pose;
+LookingAround explores the full gaze field, and FaceSide controls automatic or
+fixed left/right mirroring. Watch contact and gaze validation is tracked in
+[the current gaze specification](specs/watch-gaze-experience.md) and
 [the combined acceptance record](specs/companion-catalog-validation.md).
 
 ## The bot
@@ -98,10 +100,11 @@ elapsed time and fixed state rather than frame-count timing. See
 [the component guide](lib/bot-ux/README.md),
 [the searchable illustrated catalog](wiki/bot-ux/intro.html), or its
 [Markdown edition](wiki/bot-ux/intro.md). The catalog has bilingual explanations
-and actual native-rendered animations for all 31 enumeration entries.
+and actual native-rendered animations for all 32 enumeration entries.
 
 Waiting keeps an alert, patient face; Asleep closes its eyes and breathes deeply
-with drifting z marks. Thinking dots have larger visible travel. All ordinary
+with drifting z marks. Thinking uses a breathing spherical point shell and
+Working uses an upward-draining vortex shell; both replace the eyes. All ordinary
 faces retain Idle’s baseline proportions; selected gaze changes mirrored
 perspective, with downward travel closer to center.
 
@@ -159,9 +162,9 @@ These checks require a C++11 compiler, without an attached device:
 sh tools/check_host.sh
 ```
 
-The suite runs 20 standalone C++ contracts plus the real BotUx renderer checks.
+The suite runs the platform-independent contracts plus the real BotUx renderer checks.
 It covers input timing, continuous scrolling, native font/shape coverage, naming,
-1,040 combinations at multiple late time windows, gaze and dot antialiasing, HID
+1,120 combinations at multiple late time windows, gaze, point-shell antialiasing, HID
 framing, exact host status projection, LED envelopes, sound waveforms/PCM and
 playback-thread stalls.
 Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
@@ -177,8 +180,11 @@ Artifacts stay under `tmp/host-checks/`. Host raster timings are not device FPS;
 [previous UX validation](specs/ux-polish-validation.md),
 [previous shared UX requirements](specs/ux-components-iteration.md),
 [earlier interaction requirements](specs/interaction-dynamics.md),
-[current Watch settings requirements](specs/watch-settings-iteration.md),
-[current Bot vocabulary and catalog](specs/bot-vocabulary-iteration.md),
+[current Watch gaze experience](specs/watch-gaze-experience.md),
+[current Watch ambient experience](specs/watch-ambient-experience.md),
+[current Thinking/Working orb motion](specs/orb-motion-experience.md),
+[previous Watch settings requirements](specs/watch-settings-iteration.md),
+[previous Bot vocabulary and catalog](specs/bot-vocabulary-iteration.md),
 [current combined validation](specs/companion-catalog-validation.md),
 [shared UX library](specs/ux-components-library.md),
 [previous shared UX validation](specs/ux-components-validation.md),

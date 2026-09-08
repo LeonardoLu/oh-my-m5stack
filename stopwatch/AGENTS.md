@@ -104,7 +104,7 @@ official bot treatment uses dark pill eyes.
   and shows percentage, a horizontal gauge, green charging fill and bolt.
 - Settings is a scrollable hierarchy: clock, Bot Personality, display/sound and Done.
   Personality includes expression, action, shape, eye style, HSV color, action amount
-  and speed, naming, English/Chinese UI, all 960 independent combinations and a live
+  and speed, naming, English/Chinese UI, all 1,120 independent combinations and a live
   gaze selector. Chinese mode also localizes keyboard action labels. The HSV picker
   previews live and Done persists it.
 - NVS persists 12/24-hour format, seconds, theme, shape, eye style, custom HSV body
@@ -113,8 +113,9 @@ official bot treatment uses dark pill eyes.
   layout. Gaze is Auto plus Center/Left/Right/Up/Down and four diagonals. RTC hardware
   persists time/date.
 - BMI270 tilt passes through a low-pass filter and dead zone. Shake uses hysteresis and
-  a seven-second cooldown before poke. Auto expression shuffles among calm ambient moods
-  every 26–48 seconds; direct interaction postpones rotation for 60 seconds.
+  a seven-second cooldown before poke. Auto expression begins with Idle for 5–15 seconds,
+  alternates with 30–60 seconds of Looking around, then shows a safe ambient mood for
+  5–15 seconds. Returning from a held/manual state restarts that sequence at Idle.
 - Rendering targets 16 ms active / 33 ms preview / 250 ms dozing. The face pushes only
   the bot region; disjoint clock/status regions redraw when their values change. A fixed 466×90
   HUD canvas (83,880 bytes) provides coverage text/shapes without panel readback.

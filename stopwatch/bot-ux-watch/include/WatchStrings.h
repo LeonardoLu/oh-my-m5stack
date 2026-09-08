@@ -29,6 +29,7 @@ static const Entry entries[] = {
     {"Calm","平静"},{"Orbit","环绕"},{"Bounce","弹跳"},{"Glitch","抖动"},{"Wave","摇摆"},{"Sparkle","闪耀"},
     {"Working","工作"},{"Idle","待机"},{"Listening","聆听"},{"Thinking","思考"},{"Speaking","说话"},{"Happy","开心"},
     {"Sad","难过"},{"Sleepy","困倦"},{"Surprised","惊喜"},{"Waiting","等待"},{"Done","完成"},{"Blocked","受阻"},{"Error","出错"},
+    {"Asleep","熟睡"},{"Looking around","到处看看"},
     {"Front","正前"},{"Center","正前"},{"Left","左"},{"Right","右"},{"Up","上"},{"Down","下"},
     {"Up left","左上"},{"Up right","右上"},{"Down left","左下"},{"Down right","右下"},
     {"Delete","删除"},{"Space","空格"},{"Confirm","确定"}

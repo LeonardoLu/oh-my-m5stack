@@ -1,8 +1,8 @@
 # BotUx illustrated field guide
 
-[Open the searchable offline catalog](intro.html). All 31 entries have actual-source animated examples. The standalone HTML embeds its images; Markdown uses the adjacent assets.
+[Open the searchable offline catalog](intro.html). All 32 entries have actual-source animated examples. The standalone HTML embeds its images; Markdown uses the adjacent assets.
 
-The shared component renders into a caller-owned M5Canvas. Mood, expression and animation form 1,040 combinations (13 × 10 × 8). Existing enum values are preserved; Asleep is appended as mood 12.
+The shared component renders into a caller-owned M5Canvas. Mood, expression and animation form 1,120 combinations (14 × 10 × 8). Existing enum values are preserved; Asleep is mood 12 and LookingAround is appended as mood 13.
 
 ## Moods
 
@@ -10,7 +10,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Idle animation](assets/Mood-0.gif)
 
-`Mood::Idle` — 轻柔呼吸、不规则眨眼与游移目光，定义所有表情的基础比例。 Quiet breath, irregular blinks and wandering eyes define the baseline proportions.
+`Mood::Idle` — 轻柔呼吸、不规则眨眼与固定的右上视线，定义所有表情的基础比例。 Quiet breath, irregular blinks and the canonical upper-right gaze define the baseline proportions.
 
 ### Listening · 聆听
 
@@ -22,7 +22,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Thinking animation](assets/Mood-2.gif)
 
-`Mood::Thinking` — 三颗深浅不同的圆点错峰起伏；上下振幅为身体半径的 0.42 倍。 Three shaded dots travel in a staggered wave with a 0.42-radius vertical amplitude.
+`Mood::Thinking` — 具有纵深明暗的球形点阵缓慢旋转，并以错开纬度的波动协调呼吸。 A depth-shaded spherical point shell turns and breathes through a latitude-delayed swell.
 
 ### Speaking · 说话
 
@@ -58,7 +58,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Working animation](assets/Mood-8.gif)
 
-`Mood::Working` — 专注的双眼、紧凑的工作脉动与环绕运动。 Focused eyes and a compact active pulse with orbital body movement.
+`Mood::Working` — 稀疏的点阵涡流沿经线向上运动，在两极淡出并反向旋转。 A sparse point vortex streams upward along meridians, fades at the poles and counter-rotates.
 
 ### Waiting · 等待
 
@@ -83,6 +83,12 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 ![Asleep animation](assets/Mood-12.gif)
 
 `Mood::Asleep` — 完全闭眼、8.8 秒深呼吸，以及三枚逐渐飘起并淡出的 z 字。 Fully closed sleepy eyes, an 8.8-second breath and three drifting, fading z marks.
+
+### Looking around · 到处看看
+
+![Looking around animation](assets/Mood-13.gif)
+
+`Mood::LookingAround` — 脸部探索完整视线范围，每隔 0.9–2.8 秒平滑转向新目标。 The face explores the complete gaze field, easing through new targets every 0.9–2.8 seconds.
 
 ## Expressions
 
@@ -204,9 +210,9 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ## Composition and controls
 
-Auto follows the effective mood. Thinking and Blocked replace the silhouette; Happy and Surprised prioritize their mood expression. Explicit Neutral restores baseline eyes under Sleepy, Waiting and Asleep, while Asleep retains z marks. All eye shapes use eased scalar geometry. Nine explicit directions include center, four cardinal and four diagonal poses, with mirrored yaw and pitch. Downward movement is limited to 0.16 body radius. Thinking has 0.42-radius vertical dot amplitude before amount/reduced-motion scaling.
+Auto follows the effective mood. Thinking and Working replace the avatar with depth-shaded point shells; Blocked replaces it with an exclamation. Thinking uses a 3.6-second latitude-delayed breath, while Working streams upward through a 4.4-second pole-faded vortex. Explicit Neutral cannot restore eyes over these silhouette states. LookingAround explores the complete gaze field; Idle holds the canonical upper-right pose. `setFaceSide()` selects automatic, left or right mirroring.
 
-`setAnimationSpeed(0.25..3)`, `setMotionAmount(0..2)` and `setReducedMotion()` apply to choreography. Zero amount freezes motion, including z marks. `gazeAt()` temporarily overrides gaze in Idle. `poke()` runs surprise → happy → prior mood. `setTalking()` controls speech pulsing. Hosts can supply IMU tilt/shake, battery, signal, time, labels, names and bilingual descriptions. Eight curated presets remain compatible.
+`setAnimationSpeed(0.25..3)`, `setMotionAmount(0..2)` and `setReducedMotion()` apply to choreography. Zero amount freezes shell and z-mark motion. `gazeAt()` temporarily overrides gaze in Idle or LookingAround. `poke()` runs surprise → happy → prior mood. `setTalking()` controls speech pulsing. Hosts can supply IMU tilt/shake, battery, signal, time, labels, names and bilingual descriptions. Eight curated presets remain compatible.
 
 ## Reproduce and validate
 
@@ -220,4 +226,4 @@ python3 lib/bot-ux/tools/host-preview/catalog.py tmp/botux-preview
 
 Packaging requires Pillow. The native C++ renderer emits 72 frames per entry at 120×120, 100 ms apart, using fixed blink seed 1234. The packager encodes GIF assets and embeds them into the searchable HTML. Sources are `lib/bot-ux/src/BotUx.{h,cpp}` and `lib/bot-ux/tools/host-preview/`.
 
-The focused harness verifies coverage, pose direction, reduced/zero motion, transition continuity, Thinking travel and sleep-loop continuity. These are native host renders, not hardware captures. Component AA ellipse/capsule rendering is real; host circles use simple software rasterization. Other M5GFX shapes/fonts remain approximations. GIF quantization and a finite repeating capture can introduce sampling or loop artifacts absent from continuous firmware. No device performance claim is made.
+The focused harness verifies coverage, pose direction, mirroring, reduced/zero motion, transition continuity, both orb phase wraps and sleep-loop continuity. These are native host renders, not hardware captures. Component AA ellipse/capsule rendering is real; other M5GFX shapes/fonts remain approximations. GIF quantization and a finite repeating capture can introduce sampling or loop artifacts absent from continuous firmware. No device performance claim is made.

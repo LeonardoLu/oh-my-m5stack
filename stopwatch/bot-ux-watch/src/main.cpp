@@ -2058,16 +2058,6 @@ static uint8_t visibleButtonMask() {
     return _diagnosticButtons ? _diagnosticButtonMask : _buttonFeedback.held();
 }
 
-static watchbuttons::Bounds intersectBounds(const watchbuttons::Bounds& a,
-                                            const watchbuttons::Bounds& b) {
-    int16_t x = a.x > b.x ? a.x : b.x;
-    int16_t y = a.y > b.y ? a.y : b.y;
-    int16_t right = a.x + a.w < b.x + b.w ? a.x + a.w : b.x + b.w;
-    int16_t bottom = a.y + a.h < b.y + b.h ? a.y + a.h : b.y + b.h;
-    return {x, y, (int16_t)(right > x ? right - x : 0),
-            (int16_t)(bottom > y ? bottom - y : 0)};
-}
-
 static size_t buttonMaskPixels(watchbuttons::Button button) {
     auto bounds = watchbuttons::dirtyBounds(button);
     return (size_t)bounds.w * bounds.h;
@@ -2174,7 +2164,8 @@ static uint32_t pushCanvasRegionWithButtonFeedback(
         base.readRect(tile.x, tile.y, tile.w, tile.h, _buttonFeedbackScratch);
         for (auto button : buttons) {
             if (!(held & button)) continue;
-            auto clipped = intersectBounds(tile, watchbuttons::dirtyBounds(button));
+            auto clipped = watchfeedbackpatch::intersection(
+                tile, watchbuttons::dirtyBounds(button));
             if (clipped.w && clipped.h)
                 blendButtonBlob(_buttonFeedbackScratch, tile.w, tile.x, tile.y,
                                 clipped, button);
@@ -2203,7 +2194,10 @@ static void pushFaceWithButtonFeedback(uint32_t now) {
         canvas.fillSprite(settings.style().bgColor);
         _buttonFeedbackFaceBaseValid = true;
     }
-    botSprite.pushSprite(&canvas, kBotX, kBotY);
+    // Edge patches never enter the Bot rectangle. Keep its current pixels in
+    // the sprite and panel; only a full-frame transition needs the Bot copied
+    // into the canonical canvas.
+    if (fullFrame) botSprite.pushSprite(&canvas, kBotX, kBotY);
     if (refreshHud) {
         face.invalidate();
         face.draw(&canvas, settings.style().bgColor, settings.ink(), settings.muted(),
@@ -2229,24 +2223,35 @@ static void pushFaceWithButtonFeedback(uint32_t now) {
         pixels += (uint32_t)kBotSize * kBotSize;
     }
 
-    // The elongated shapes cross HUD band boundaries. Submit their complete
-    // dirty rectangles from the coherent canvas; the canvas includes the bot
-    // beneath each bounding box, while actual liquid pixels stop short of it.
+    // Do not retransmit Bot pixels inside broad liquid dirty boxes. When both
+    // HUD bands were already submitted with their liquid blended in, keep the
+    // remaining patches in the middle band as well. The subtraction produces
+    // a few rectangles rather than a panel transaction per scanline.
     const watchbuttons::Button buttons[] = {
         watchbuttons::A, watchbuttons::B, watchbuttons::Power
+    };
+    const watchbuttons::Bounds exclusions[] = {
+        {kBotX, kBotY, kBotSize, kBotSize},
+        {0, 0, kW, 90},
+        {0, 376, kW, 90},
     };
     for (auto button : buttons) {
         if (fullFrame) break;
         if (!(dirty & button)) continue;
         auto bounds = watchbuttons::dirtyBounds(button);
-        canvas.readRect(bounds.x, bounds.y, bounds.w, bounds.h,
-                        _buttonFeedbackScratch);
-        if (held & button)
-            blendButtonBlob(_buttonFeedbackScratch, bounds.w, bounds.x, bounds.y,
-                            bounds, button);
-        M5.Display.pushImage(bounds.x, bounds.y, bounds.w, bounds.h,
-                             _buttonFeedbackScratch);
-        pixels += (uint32_t)bounds.w * bounds.h;
+        auto regions = watchfeedbackpatch::visibleRegions(
+            bounds, exclusions, submitHud ? 3 : 1);
+        for (uint8_t i = 0; i < regions.count; ++i) {
+            auto piece = regions.items[i];
+            canvas.readRect(piece.x, piece.y, piece.w, piece.h,
+                            _buttonFeedbackScratch);
+            if (held & button)
+                blendButtonBlob(_buttonFeedbackScratch, piece.w,
+                                piece.x, piece.y, piece, button);
+            M5.Display.pushImage(piece.x, piece.y, piece.w, piece.h,
+                                 _buttonFeedbackScratch);
+            pixels += (uint32_t)piece.w * piece.h;
+        }
     }
     M5.Display.waitDisplay();
     _buttonFeedbackDrawnMask = held;

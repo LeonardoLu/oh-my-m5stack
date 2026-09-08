@@ -122,3 +122,40 @@ vortex. A final production reset restored Face in automatic Idle (`manual=0`,
 The NVS image, build and upload logs, telemetry, boot output and native captures remain
 ignored under `tmp/orb-speed-audit/` and `tmp/orb-speed-deploy/`. These observations do
 not claim panel optics, physical controls, IMU response or long-duration acceptance.
+
+## Larger orb-scale deployment
+
+The subsequent readability pass expands both dot-shell moods to the visual area of the
+ordinary anthropomorphic body. Large canvases use a `0.95 * bodyRadius` shell, a dot
+base of `max(0.90, 0.030 * bodyRadius)`, and 32, 64 or 96 points by render size. The
+Thinking breath amount is 0.11; depth opacity starts at 0.12 with a 1.35 exponent.
+Small canvases retain a 0.85 shell scale, and translated shells constrain their center
+to keep the complete point cloud inside the existing safety margin. The 1,600 ms and
+1,400 ms base periods and the Watch's wrist-sensing fix are unchanged.
+
+Native 466×466 captures of Idle, Thinking and Working on the saved wrist-Off,
+amount-2/5, speed-2/5 profile show the expanded shells at approximately the ordinary
+body footprint, with materially larger depth-scaled points and the intended open dark
+band through Working. The renderer optimization preserves the approved images: a
+320-frame corpus spanning both moods, five sizes, multiple motion profiles and eight
+phases remained byte-identical. The optimized disc path retains per-pixel background
+and overlap compositing while avoiding repeated blend work for flat background
+interiors.
+
+Before that optimization, both larger shells sustained 27.6 fps on the device, with
+approximately 19.93 ms draw time. The final firmware sustains 30.1 fps for Thinking
+(17.01 ms draw, 12.80 ms push) and 29.7 fps for Working (17.42 ms draw, 12.81 ms push)
+in separate steady five-second windows collected before any framebuffer transfer.
+Working therefore remains slightly below the internal 30 fps target; no higher result
+or physical panel acceptance is claimed.
+
+The final `m5stack-stopwatch` build uses 48,928 B RAM and 1,062,785 B flash.
+`firmware.bin` is 1,063,152 B with SHA-256
+`a25f5b2390208a88a982e8ed8cacb99fbf7f53f714634895a173cd2f59757d7f`. It was
+uploaded to the same identified ESP32-S3 at `/dev/cu.usbmodem214201` without erasing
+NVS; esptool verified the data hash for all four regions and reset the device. The
+production boot again reported `IMU=1`, `keys_mask_ms=24` and
+`keys_mask_bytes=754785` without allocation failures. A final reset and read-only UI
+query confirmed automatic Face with `manual=0`, `mood=0` and `effective=0`, and the
+serial port was closed. Build, upload, boot, telemetry and capture evidence remains
+ignored under `tmp/orb-scale-deploy/` and `tmp/orb-scale-*-deploy/`.

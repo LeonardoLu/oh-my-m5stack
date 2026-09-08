@@ -271,7 +271,7 @@ stable after easing settles (normal blinking is independent). Reduced motion
 keeps a small amount of slower-looking travel instead of repeating full-size
 motion. It does not change animation speed or erase an expression.
 
-Thinking and Working use 32/48/72 depth-shaded point shells and actual-pixel
+Thinking and Working use 32/64/96 depth-shaded point shells and actual-pixel
 capsule coverage. Blocked's stem/dot also use float capsule/ellipse coverage
 and follow body scale: the new time-window checks exposed its integer-only
 position jumps, so breathing now remains visible even for this silhouette.

@@ -22,7 +22,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Thinking animation](assets/Mood-2.gif)
 
-`Mood::Thinking` — 更醒目的纵深点阵以 1.6 秒基础周期旋转呼吸，纬度波动依次传递。 Larger depth-shaded points turn through a brisk 1.6-second latitude-delayed breathing cycle.
+`Mood::Thinking` — 与常规身体同等视觉尺度的醒目纵深点阵，以 1.6 秒基础周期旋转呼吸，纬度波动依次传递。 A full-body-scale shell of bold depth-shaded points turns through a brisk 1.6-second latitude-delayed breathing cycle.
 
 ### Speaking · 说话
 
@@ -58,7 +58,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Working animation](assets/Mood-8.gif)
 
-`Mood::Working` — 更醒目的稀疏点阵以 1.4 秒基础周期沿经线上升，在两极淡出并反向旋转。 Larger sparse points stream upward through a 1.4-second meridian vortex, fading at the poles as the shell counter-rotates.
+`Mood::Working` — 与常规身体同等视觉尺度的醒目稀疏点阵，以 1.4 秒基础周期沿经线上升，在两极淡出并反向旋转。 A full-body-scale shell of bold sparse points streams upward through a 1.4-second meridian vortex, fading at the poles as it counter-rotates.
 
 ### Waiting · 等待
 

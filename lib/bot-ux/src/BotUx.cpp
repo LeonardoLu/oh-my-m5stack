@@ -754,12 +754,14 @@ void BotUx::_drawBody() {
     // translate the complete shell through the ordinary animation layer.
     if (_effMood == Mood::Thinking || _effMood == Mood::Working) {
         static const int kSmallOrbDotCount = 32;
-        static const int kMediumOrbDotCount = 48;
-        static const int kLargeOrbDotCount = 72;
+        static const int kMediumOrbDotCount = 64;
+        static const int kLargeOrbDotCount = 96;
         static const float kThinkingPeriodMs = 1600.0f;
         static const float kWorkingPeriodMs = 1400.0f;
-        static const float kMinOrbDotRadius = 0.70f;
-        static const float kOrbDotRadiusPerBodyRadius = 0.014f;
+        static const float kMinOrbDotRadius = 0.90f;
+        static const float kOrbDotRadiusPerBodyRadius = 0.030f;
+        static const float kOrbShellScale = 0.95f;
+        static const float kSmallOrbShellScale = 0.85f;
         struct OrbDot { float x, y, z, radius; uint8_t opacity; };
         OrbDot dots[kLargeOrbDotCount];
         int count = r >= 60 ? kLargeOrbDotCount
@@ -784,6 +786,8 @@ void BotUx::_drawBody() {
         const float goldenCos = -0.73736888f;
         const float goldenSin = 0.67549029f;
         float gx = 1.0f, gz = 0.0f;
+        float dotMinX = 0.0f, dotMaxX = 0.0f;
+        float dotMinY = 0.0f, dotMaxY = 0.0f;
 
         for (int i = 0; i < count; ++i) {
             float px, py, pz;
@@ -793,7 +797,7 @@ void BotUx::_drawBody() {
                 float ring = sqrtf(fmaxf(0.0f, 1.0f - py * py));
                 px = gx * ring;
                 pz = gz * ring;
-                float swell = 1.0f + 0.13f * deformationScale
+                float swell = 1.0f + 0.11f * deformationScale
                             * sinf(2.0f * kPi * (phase - 0.22f * (py + 1.0f)));
                 px *= swell; py *= swell; pz *= swell;
 
@@ -812,7 +816,7 @@ void BotUx::_drawBody() {
                 px = cosf(longitude) * ring;
                 py = cosf(polar);
                 pz = sinf(longitude) * ring;
-                pointOpacity = powf(fmaxf(0.0f, sinf(kPi * u)), 0.40f) * 0.90f;
+                pointOpacity = powf(fmaxf(0.0f, ring), 0.40f) * 0.90f;
             }
 
             // Rotate the shell and hold a fixed tilt so depth is legible.
@@ -823,7 +827,9 @@ void BotUx::_drawBody() {
 
             float perspective = 3.5f / (3.5f - tz);
             float depth = clampf((tz + 1.1f) / 2.2f, 0.0f, 1.0f);
-            float sphereR = r * 0.77f;
+            // Small canvases reserve enough room for the minimum dot radius;
+            // the visible dot edges still match the ordinary body footprint.
+            float sphereR = r * (r < 34 ? kSmallOrbShellScale : kOrbShellScale);
             float dotBase = fmaxf(kMinOrbDotRadius,
                                   r * kOrbDotRadiusPerBodyRadius);
             float dotScale = _effMood == Mood::Thinking ? 0.85f : 0.80f;
@@ -832,12 +838,26 @@ void BotUx::_drawBody() {
             dots[i].z = tz;
             dots[i].radius = dotBase * (0.40f + 1.60f * depth)
                            * perspective * dotScale;
-            float depthOpacity = 0.07f + 0.93f * powf(depth, 1.55f);
+            float depthOpacity = 0.12f + 0.88f * powf(depth, 1.35f);
             dots[i].opacity = (uint8_t)(255.0f * depthOpacity * pointOpacity);
+            float extent = fmaxf(dots[i].radius, 0.8f) + 0.5f;
+            float left = dots[i].x - extent, right = dots[i].x + extent;
+            float top = dots[i].y - extent, bottom = dots[i].y + extent;
+            if (i == 0 || left < dotMinX) dotMinX = left;
+            if (i == 0 || right > dotMaxX) dotMaxX = right;
+            if (i == 0 || top < dotMinY) dotMinY = top;
+            if (i == 0 || bottom > dotMaxY) dotMaxY = bottom;
         }
 
         float shellCx = _m.cx + (_animation == Animation::Auto ? 0.0f : _bodyDX);
         float shellCy = _m.cy + (_animation == Animation::Auto ? 0.0f : _bodyDY);
+        // Keep an explicitly translated shell inside the same two-pixel
+        // safety margin as the ordinary body. The cloud remains rigid: its
+        // centre is constrained without clipping or moving individual dots.
+        float minCx = 2.0f - dotMinX, maxCx = _w - 3.0f - dotMaxX;
+        float minCy = 2.0f - dotMinY, maxCy = _h - 3.0f - dotMaxY;
+        if (minCx <= maxCx) shellCx = clampf(shellCx, minCx, maxCx);
+        if (minCy <= maxCy) shellCy = clampf(shellCy, minCy, maxCy);
         for (int pass = 0; pass < 2; ++pass) {
             for (int i = 0; i < count; ++i) {
                 if ((dots[i].z >= 0.0f) != (pass != 0)) continue;
@@ -963,6 +983,61 @@ void BotUx::_fillCapsule(float cx, float cy, float halfDx, float halfDy,
                          float radius, uint16_t color, uint8_t opacity) {
     if (!opacity) return;
     radius = fmaxf(radius, 0.8f);
+    if (halfDx == 0.0f && halfDy == 0.0f) {
+        int minX = (int)floorf(cx - radius - 0.5f);
+        int maxX = (int)ceilf(cx + radius + 0.5f);
+        int minY = (int)floorf(cy - radius - 0.5f);
+        int maxY = (int)ceilf(cy + radius + 0.5f);
+        float inner2 = (radius - 0.5f) * (radius - 0.5f);
+        float outer2 = (radius + 0.5f) * (radius + 0.5f);
+        if (opacity < 255) {
+            uint16_t flatInterior = mix565(_style.bgColor, color, opacity);
+            for (int y = minY; y <= maxY; ++y) {
+                float dy = y - cy;
+                float dy2 = dy * dy;
+                for (int x = minX; x <= maxX; ++x) {
+                    float dx = x - cx;
+                    float d2 = dx * dx + dy2;
+                    if (d2 <= inner2) {
+                        uint16_t under = _cv->readPixel(x, y);
+                        _cv->drawPixel(x, y, under == _style.bgColor
+                            ? flatInterior : mix565(under, color, opacity));
+                        continue;
+                    }
+                    if (d2 >= outer2) continue;
+                    uint8_t coverage = (uint8_t)(clampf(
+                        radius + 0.5f - sqrtf(d2), 0.0f, 1.0f) * opacity);
+                    _cv->drawPixel(x, y,
+                        mix565(_cv->readPixel(x, y), color, coverage));
+                }
+            }
+            return;
+        }
+        for (int y = minY; y <= maxY; ++y) {
+            float dy = y - cy;
+            float dy2 = dy * dy;
+            int run = -1;
+            for (int x = minX; x <= maxX; ++x) {
+                float dx = x - cx;
+                float d2 = dx * dx + dy2;
+                if (d2 <= inner2) {
+                    if (run < 0) run = x;
+                    continue;
+                }
+                if (run >= 0) {
+                    _cv->fillRect(run, y, x - run, 1, color);
+                    run = -1;
+                }
+                if (d2 >= outer2) continue;
+                uint8_t coverage = (uint8_t)(clampf(
+                    radius + 0.5f - sqrtf(d2), 0.0f, 1.0f) * opacity);
+                _cv->drawPixel(x, y,
+                    mix565(_cv->readPixel(x, y), color, coverage));
+            }
+            if (run >= 0) _cv->fillRect(run, y, maxX - run + 1, 1, color);
+        }
+        return;
+    }
     float ax = cx - halfDx, ay = cy - halfDy;
     float vx = halfDx * 2.0f, vy = halfDy * 2.0f;
     float invLen = 1.0f / fmaxf(vx * vx + vy * vy, 0.0001f);

@@ -22,7 +22,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Thinking animation](assets/Mood-2.gif)
 
-`Mood::Thinking` — 具有纵深明暗的球形点阵缓慢旋转，并以错开纬度的波动协调呼吸。 A depth-shaded spherical point shell turns and breathes through a latitude-delayed swell.
+`Mood::Thinking` — 更醒目的纵深点阵以 1.6 秒基础周期旋转呼吸，纬度波动依次传递。 Larger depth-shaded points turn through a brisk 1.6-second latitude-delayed breathing cycle.
 
 ### Speaking · 说话
 
@@ -58,7 +58,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ![Working animation](assets/Mood-8.gif)
 
-`Mood::Working` — 稀疏的点阵涡流沿经线向上运动，在两极淡出并反向旋转。 A sparse point vortex streams upward along meridians, fades at the poles and counter-rotates.
+`Mood::Working` — 更醒目的稀疏点阵以 1.4 秒基础周期沿经线上升，在两极淡出并反向旋转。 Larger sparse points stream upward through a 1.4-second meridian vortex, fading at the poles as the shell counter-rotates.
 
 ### Waiting · 等待
 
@@ -210,7 +210,7 @@ The shared component renders into a caller-owned M5Canvas. Mood, expression and 
 
 ## Composition and controls
 
-Auto follows the effective mood. Thinking and Working replace the avatar with depth-shaded point shells; Blocked replaces it with an exclamation. Thinking uses a 3.6-second latitude-delayed breath, while Working streams upward through a 4.4-second pole-faded vortex. Explicit Neutral cannot restore eyes over these silhouette states. LookingAround explores the complete gaze field; Idle holds the canonical upper-right pose. `setFaceSide()` selects automatic, left or right mirroring.
+Auto follows the effective mood. Thinking and Working replace the avatar with larger depth-shaded point shells; Blocked replaces it with an exclamation. Thinking uses a 1.6-second latitude-delayed base cycle, while Working streams upward through a 1.4-second pole-faded vortex. StopWatch level-two speed and intensity produce approximately 4.0- and 3.5-second cycles. Explicit Neutral cannot restore eyes over these silhouette states. LookingAround explores the complete gaze field; Idle holds the canonical upper-right pose. `setFaceSide()` selects automatic, left or right mirroring.
 
 `setAnimationSpeed(0.25..3)`, `setMotionAmount(0..2)` and `setReducedMotion()` apply to choreography. Zero amount freezes shell and z-mark motion. `gazeAt()` temporarily overrides gaze in Idle or LookingAround. `poke()` runs surprise → happy → prior mood. `setTalking()` controls speech pulsing. Hosts can supply IMU tilt/shake, battery, signal, time, labels, names and bilingual descriptions. Eight curated presets remain compatible.
 

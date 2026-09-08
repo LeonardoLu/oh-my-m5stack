@@ -17,13 +17,13 @@ notes = {
 'Mood': [
 'Quiet breath, irregular blinks and the canonical upper-right gaze define the baseline proportions.',
 'Wider curious eyes, a slight lean and a gentle nod show attention.',
-'A depth-shaded spherical point shell turns and breathes through a latitude-delayed swell.',
+'Larger depth-shaded points turn through a brisk 1.6-second latitude-delayed breathing cycle.',
 'An engaged face pulses with speech. This example enables setTalking(true).',
 'Rounded smiling arches and a buoyant lift, accompanied by small sparkles.',
 'A settled, slightly compressed body and lowered, partly closed eyes.',
 'Drowsy narrow eyes with extended blinks and a slow 7.2-second breath.',
 'Wide rounded eyes and a quick vertical stretch. Also used by poke().',
-'A sparse point vortex streams upward along meridians, fades at the poles and counter-rotates.',
+'Larger sparse points stream upward through a 1.4-second meridian vortex, fading at the poles as the shell counter-rotates.',
 'Patient open eyes, a slight questioning lean and a slow side-to-side search.',
 'An exclamation-mark silhouette with a small glitch rhythm signals a blocker.',
 'A settled bashful glance, gentle lift and celebratory sparkles.',
@@ -50,7 +50,7 @@ notes = {
 'A flowing sideways sway and eye rotation.',
 'Three small accent lights circulate around the breathing bot.']}
 zh_notes = {
-'Mood': ['轻柔呼吸、不规则眨眼与固定的右上视线，定义所有表情的基础比例。','睁大好奇的双眼，轻微倾身、点头，表示正在认真倾听。','具有纵深明暗的球形点阵缓慢旋转，并以错开纬度的波动协调呼吸。','说话时身体随语音脉动；示例已开启 setTalking(true)。','圆润弧形笑眼、轻盈上浮，伴随环绕的小光点。','身体下沉并略微压扁，半闭的眼睛低垂。','困倦的细眼、较长眨眼，以及 7.2 秒周期的慢呼吸。','更圆、更大的双眼与快速竖向拉伸，也用于 poke() 的惊讶阶段。','稀疏的点阵涡流沿经线向上运动，在两极淡出并反向旋转。','保持清醒的耐心神态，略微歪头，缓慢左右张望。','感叹号替代身体轮廓，轻微抖动提示工作受阻。','害羞的低侧目光、轻柔抬升和庆祝光点。','完全闭眼、8.8 秒深呼吸，以及三枚逐渐飘起并淡出的 z 字。','脸部探索完整视线范围，每隔 0.9–2.8 秒平滑转向新目标。'],
+'Mood': ['轻柔呼吸、不规则眨眼与固定的右上视线，定义所有表情的基础比例。','睁大好奇的双眼，轻微倾身、点头，表示正在认真倾听。','更醒目的纵深点阵以 1.6 秒基础周期旋转呼吸，纬度波动依次传递。','说话时身体随语音脉动；示例已开启 setTalking(true)。','圆润弧形笑眼、轻盈上浮，伴随环绕的小光点。','身体下沉并略微压扁，半闭的眼睛低垂。','困倦的细眼、较长眨眼，以及 7.2 秒周期的慢呼吸。','更圆、更大的双眼与快速竖向拉伸，也用于 poke() 的惊讶阶段。','更醒目的稀疏点阵以 1.4 秒基础周期沿经线上升，在两极淡出并反向旋转。','保持清醒的耐心神态，略微歪头，缓慢左右张望。','感叹号替代身体轮廓，轻微抖动提示工作受阻。','害羞的低侧目光、轻柔抬升和庆祝光点。','完全闭眼、8.8 秒深呼吸，以及三枚逐渐飘起并淡出的 z 字。','脸部探索完整视线范围，每隔 0.9–2.8 秒平滑转向新目标。'],
 'Expression': ['跟随当前心情的脸部形态；此处显示空闲状态。','显式恢复空闲状态的基础眼形，覆盖困倦等心情的闭眼形态。','睁大双眼、轻轻歪头，并看向右上方。','收窄双眼、保持对称间距与居中视线。','双眼通过连续形变变成平滑的笑弧。','轻微反向倾斜、不对称眼形与侧目。','略微旋转眼睛，害羞地向下看。','一只眼睛沿同一套平滑几何逐渐闭合。','双眼缓慢扭转以表示眩晕，不替换成独立符号。','更宽、更圆的双眼构成警觉神态。'],
 'Animation': ['按有效心情选择平静、好奇、环绕、弹跳、闪耀或闪动节奏。','轻柔漂移、呼吸和小幅眼睛旋转。','带有好奇感的侧倾，以及细微的水平和竖直移动。','平滑的环绕路径，配合眼睛移动。','明显的竖直弹跳，伴随身体压缩和拉伸。','短促、幅度有限的抖动，适合受阻状态。','流畅的左右摇摆与眼睛旋转。','三个小光点围绕正在呼吸的角色运动。']}
 records=[]
@@ -71,12 +71,19 @@ for ident,group,name,zh,note,gif,png in records:
     search=html.escape(f'{group} {name} {zh} {note}'.lower(),quote=True)
     api_name='LookingAround' if name == 'Looking around' else name.replace(' ', '')
     cards.append(f'<article id="{ident}" data-group="{group}" data-search="{search}"><img width="120" height="120" alt="{name} {group.lower()} rendered by BotUx" src="data:image/gif;base64,{gif}" data-still="data:image/png;base64,{png}"><div class="eyebrow">{group} · {zh}</div><h2>{name}</h2><code>{group}::{api_name}</code><p>{note}</p></article>')
-footer='''</section><footer><h2>如何组合使用</h2><p>心情定义持续状态，表情覆盖眼睛形态，动画选择运动节奏。Thinking、Working 与 Blocked 会替换身体轮廓；前两者使用具有纵深的球形点阵。LookingAround 探索完整视线范围；Idle 保持右上视线。FaceSide 可固定左右镜像，也可跟随视线自动切换。暂停按钮切换为静帧；系统开启减少动态效果时默认暂停。</p><p>Set a persistent mood with <code>setMood()</code>, choose an optional face with <code>setExpression()</code>, and a rhythm with <code>setAnimation()</code>. Thinking and Working replace the avatar with depth-shaded point shells; Blocked uses an exclamation. LookingAround explores the complete gaze field while Idle holds the canonical upper-right pose. <code>setFaceSide()</code> selects automatic, left or right mirroring.</p><p>Nine explicit gaze directions add continuous eye proportion changes. Temporary <code>gazeAt()</code> applies while Idle or LookingAround; poke briefly runs Surprise → Happy. Speed, motion amount, reduced motion, IMU tilt, names, bilingual descriptions, battery, signal and optional clock/label overlays remain host-controlled.</p><p class="muted">这些是原生主机渲染图，非设备录像。眼睛、圆形身体和球形点阵采用组件自身的 RGB565 抗锯齿；其他 M5GFX 图形使用主机近似。GIF 量化及截取片段循环可能产生实时固件没有的边界跳变。此页面嵌入全部资源，可离线使用；不代表实机性能验证。 Evidence: these are host RGB565 captures of BotUx.cpp, not device recordings. Eye, ellipse body and orb-point capsule boundaries use the component’s own coverage renderer. Other native M5GFX shapes/fonts are approximations. GIF color quantization and the repeating 7.2-second sampling window may introduce visible loop boundaries absent from the live renderer. No hardware frame-time or optical acceptance is implied. Pause replaces examples with static first frames; reduced-motion preference pauses initially. This HTML embeds every asset and works offline.</p><a href="intro.md">文档与复现方法 / Source guide</a></footer></main>
+footer='''</section><footer><h2>如何组合使用</h2><p>心情定义持续状态，表情覆盖眼睛形态，动画选择运动节奏。Thinking、Working 与 Blocked 会替换身体轮廓；前两者使用更大、更清晰的纵深点阵，基础周期分别为 1.6 秒和 1.4 秒。StopWatch 二级速度与强度会把实际周期调节为约 4.0 秒和 3.5 秒。LookingAround 探索完整视线范围；Idle 保持右上视线。FaceSide 可固定左右镜像，也可跟随视线自动切换。暂停按钮切换为静帧；系统开启减少动态效果时默认暂停。</p><p>Set a persistent mood with <code>setMood()</code>, choose an optional face with <code>setExpression()</code>, and a rhythm with <code>setAnimation()</code>. Thinking and Working replace the avatar with larger depth-shaded point shells with 1.6- and 1.4-second base periods; the StopWatch level-two speed and intensity produce about 4.0- and 3.5-second cycles. Blocked uses an exclamation. LookingAround explores the complete gaze field while Idle holds the canonical upper-right pose. <code>setFaceSide()</code> selects automatic, left or right mirroring.</p><p>Nine explicit gaze directions add continuous eye proportion changes. Temporary <code>gazeAt()</code> applies while Idle or LookingAround; poke briefly runs Surprise → Happy. Speed, motion amount, reduced motion, IMU tilt, names, bilingual descriptions, battery, signal and optional clock/label overlays remain host-controlled.</p><p class="muted">这些是原生主机渲染图，非设备录像。眼睛、圆形身体和球形点阵采用组件自身的 RGB565 抗锯齿；其他 M5GFX 图形使用主机近似。GIF 量化及截取片段循环可能产生实时固件没有的边界跳变。此页面嵌入全部资源，可离线使用；不代表实机性能验证。 Evidence: these are host RGB565 captures of BotUx.cpp, not device recordings. Eye, ellipse body and orb-point capsule boundaries use the component’s own coverage renderer. Other native M5GFX shapes/fonts are approximations. GIF color quantization and the repeating 7.2-second sampling window may introduce visible loop boundaries absent from the live renderer. No hardware frame-time or optical acceptance is implied. Pause replaces examples with static first frames; reduced-motion preference pauses initially. This HTML embeds every asset and works offline.</p><a href="intro.md">文档与复现方法 / Source guide</a></footer></main>
 <script>const cards=[...document.querySelectorAll('article')],search=document.querySelector('#search'),group=document.querySelector('#group'),count=document.querySelector('#count'),motion=document.querySelector('#motion');let paused=matchMedia('(prefers-reduced-motion: reduce)').matches;cards.forEach(c=>{const i=c.querySelector('img');i.dataset.animated=i.src});function filter(){let n=0;cards.forEach(c=>{c.hidden=!!((group.value&&c.dataset.group!==group.value)||!c.dataset.search.includes(search.value.trim().toLowerCase()));if(!c.hidden)n++});count.textContent='显示 '+n+' / '+cards.length+' 项'}function renderMotion(){cards.forEach(c=>{let i=c.querySelector('img');i.src=paused?i.dataset.still:i.dataset.animated});motion.textContent=paused?'播放动画':'暂停动画';motion.setAttribute('aria-pressed',String(paused))}search.addEventListener('input',filter);group.addEventListener('change',filter);motion.onclick=()=>{paused=!paused;renderMotion()};filter();renderMotion();</script></html>'''
+def save_png_when_pixels_change(image, path):
+    if path.exists():
+        with Image.open(path) as current:
+            if current.size == image.size and current.convert('RGBA').tobytes() == image.convert('RGBA').tobytes():
+                return
+    image.save(path)
+
 gaze = Image.open(source / 'gaze-directions.svg.ppm')
 gaze_path = root / 'lib/bot-ux/docs/nine-directions-raster.png'
-gaze.save(gaze_path)
-Image.open(source / 'idle-up-right.ppm').save(root / 'lib/bot-ux/docs/idle-up-right-raster.png')
+save_png_when_pixels_change(gaze, gaze_path)
+save_png_when_pixels_change(Image.open(source / 'idle-up-right.ppm'), root / 'lib/bot-ux/docs/idle-up-right-raster.png')
 gaze_data = base64.b64encode(gaze_path.read_bytes()).decode()
 footer = footer.replace('<footer>', '<footer><h2>九方向眼神 · Gaze perspective</h2><p>左上 / 上 / 右上，左 / 正面 / 右，左下 / 下 / 右下。由相同原生渲染器直接输出；下看的极限位置更接近中心，左右方向保持镜像透视。</p><img width="600" height="600" style="display:block;width:100%;max-width:600px;height:auto" alt="Nine gaze directions: up-left, up, up-right; left, center, right; down-left, down, down-right" src="data:image/png;base64,' + gaze_data + '">')
 (out/'intro.html').write_text(header+'\n'.join(cards)+footer)
@@ -95,7 +102,7 @@ md.append('''## 九方向眼神 · Gaze perspective
 
 ## Composition and controls
 
-Auto follows the effective mood. Thinking and Working replace the avatar with depth-shaded point shells; Blocked replaces it with an exclamation. Thinking uses a 3.6-second latitude-delayed breath, while Working streams upward through a 4.4-second pole-faded vortex. Explicit Neutral cannot restore eyes over these silhouette states. LookingAround explores the complete gaze field; Idle holds the canonical upper-right pose. `setFaceSide()` selects automatic, left or right mirroring.
+Auto follows the effective mood. Thinking and Working replace the avatar with larger depth-shaded point shells; Blocked replaces it with an exclamation. Thinking uses a 1.6-second latitude-delayed base cycle, while Working streams upward through a 1.4-second pole-faded vortex. StopWatch level-two speed and intensity produce approximately 4.0- and 3.5-second cycles. Explicit Neutral cannot restore eyes over these silhouette states. LookingAround explores the complete gaze field; Idle holds the canonical upper-right pose. `setFaceSide()` selects automatic, left or right mirroring.
 
 `setAnimationSpeed(0.25..3)`, `setMotionAmount(0..2)` and `setReducedMotion()` apply to choreography. Zero amount freezes shell and z-mark motion. `gazeAt()` temporarily overrides gaze in Idle or LookingAround. `poke()` runs surprise → happy → prior mood. `setTalking()` controls speech pulsing. Hosts can supply IMU tilt/shake, battery, signal, time, labels, names and bilingual descriptions. Eight curated presets remain compatible.
 

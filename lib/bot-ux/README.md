@@ -271,7 +271,7 @@ stable after easing settles (normal blinking is independent). Reduced motion
 keeps a small amount of slower-looking travel instead of repeating full-size
 motion. It does not change animation speed or erase an expression.
 
-Thinking and Working use 48/72/96 depth-shaded point shells and actual-pixel
+Thinking and Working use 32/48/72 depth-shaded point shells and actual-pixel
 capsule coverage. Blocked's stem/dot also use float capsule/ellipse coverage
 and follow body scale: the new time-window checks exposed its integer-only
 position jumps, so breathing now remains visible even for this silhouette.
@@ -279,7 +279,7 @@ No extra framebuffer or frame allocation was introduced.
 
 Added validation beyond the existing tests:
 
-- All 1,040 mood/expression/animation combinations produced at least four distinct
+- All 1,120 mood/expression/animation combinations produced at least four distinct
   raster frames in each 3-second window starting at 10, 30 and 50 seconds. Blink
   is delayed beyond those windows, so entry morphs/blinks cannot make a frozen
   choreography pass. All sampled frames stay inside the canvas.
@@ -287,7 +287,7 @@ Added validation beyond the existing tests:
   distinct raster frames in windows starting at 10, 40 and 80 seconds.
 - Left/right produce clearly separated eye positions; a temporary tap overrides
   direction and returns to it. Zero-motion stable frames are identical across
-  all 13 moods with Dizzy/Orbit, after settling and with blinking delayed.
+  all 14 moods with Dizzy/Orbit, after settling and with blinking delayed.
 - Thinking and Working coverage contains dozens of separate native RGB565 point
   clusters rather than checking for SVG instructions.
 - On a four-second Calm sequence, aggregate RGB565 temporal difference is
@@ -344,9 +344,11 @@ diagonal directions bounds each 16ms eye-group movement to 8px on a 200px sprite
 then verifies return to Front within 1px. Thin closed eyes are detected from
 partial coverage too, because small AA strokes may have no fully opaque pixel.
 
-Thinking now uses a 3.6-second latitude-delayed breathing shell. Working uses a
-4.4-second bottom-to-top meridian flow with pole fade, re-entry and opposing
-shell rotation. Motion amount progressively scales their complete choreography;
+Thinking now uses a 1.6-second latitude-delayed base breathing cycle. Working
+uses a 1.4-second bottom-to-top base meridian cycle with pole fade, re-entry and
+opposing shell rotation. At the StopWatch level-two speed and intensity these
+become approximately 4.0 and 3.5 seconds. Motion amount progressively scales
+their complete choreography;
 reduced motion applies a 20% multiplier and zero freezes every point. Native
 capsule AA and focused wrap-continuity checks cover the replacement. See
 `specs/orb-motion-experience.md`.

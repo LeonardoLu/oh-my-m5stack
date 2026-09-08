@@ -80,3 +80,45 @@ Full chip, upload and boot logs plus the native capture remain ignored under
 `tmp/watch-ambient-deploy/`. The capture validates the firmware render target rather
 than panel optics. No injected contact, physical touch, button, IMU-motion, charging or
 long-duration ambient-timing acceptance is claimed by this deployment.
+
+## Orb-speed diagnosis and redeployment
+
+A later read-only NVS capture found the device's saved motion profile unchanged at
+wrist response Off, motion amount 2/5 and animation speed 2/5. The Watch maps those
+levels to 0.55 motion amount and 0.73 animation speed. The wrist-response setting was
+also incorrectly passed to BotUx as reduced motion, adding a 0.20 phase multiplier
+when wrist sensing was Off. With the former 3,600 ms Thinking and 4,400 ms Working
+base periods, the resulting wall-clock loops were approximately 44.83 seconds and
+54.79 seconds (`base / (0.55 * 0.73 * 0.20)`). Device telemetry showed this was a
+phase-scaling problem rather than a stopped renderer: the former implementation held
+41.4 fps for Thinking and 38.7 fps for Working in steady five-second windows.
+
+The Watch now uses wrist response only to gate IMU input. It no longer changes BotUx
+reduced-motion state, and the saved Off value remains Off. Thinking and Working use
+1,600 ms and 1,400 ms base periods, a dot radius of `max(0.70, 0.014 * bodyRadius)`,
+and 32, 48 or 72 points by render size instead of 48, 72 or 96. With the device's
+unchanged amount and speed levels, the effective loops are approximately 3.99 seconds
+for Thinking and 3.49 seconds for Working (`base / (0.55 * 0.73)`). The shared BotUx
+reduced-motion API remains available to hosts that explicitly offer that behavior.
+
+The integrated firmware was built with PlatformIO environment `m5stack-stopwatch` and
+uploaded to the same explicit `/dev/cu.usbmodem214201` ESP32-S3 target without erasing
+NVS. The build uses 48,928 B RAM and 1,061,789 B flash; `firmware.bin` is 1,062,160 B
+with SHA-256 `8af0d34570b6578bbe4bcea7a760e06598d24d71aac984bca578ff28914ab930`.
+Esptool again identified revision 0.2, 8 MB embedded PSRAM and MAC
+`28:84:85:44:5b:8c`, verified the data hash for all four written regions and performed
+a hard reset.
+
+The bounded production boot reported `IMU=1`, `keys_mask_ms=24` and
+`keys_mask_bytes=754785`, with no sprite, HUD or mask allocation failure. Separate
+steady telemetry windows, collected before each framebuffer transfer, held 40.3–40.4
+fps for Thinking (8,668 us draw and 12,720–12,721 us push) and 39.1 fps for Working
+(9,442–9,448 us draw and 12,720–12,721 us push). Both remain above the 30 fps device
+acceptance threshold. Read-only `c` captures at the native 466×466 canvas showed the
+larger sparse depth-scaled points and the intended dark band through the Working
+vortex. A final production reset restored Face in automatic Idle (`manual=0`,
+`mood=0`, `effective=0`) and the serial port was closed.
+
+The NVS image, build and upload logs, telemetry, boot output and native captures remain
+ignored under `tmp/orb-speed-audit/` and `tmp/orb-speed-deploy/`. These observations do
+not claim panel optics, physical controls, IMU response or long-duration acceptance.

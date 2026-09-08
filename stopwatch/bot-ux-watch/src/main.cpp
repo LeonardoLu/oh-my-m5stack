@@ -822,8 +822,6 @@ static void applySettings() {
     previewBot.setExpression(expression, 500);
     face.bot().setAnimation(_manualPreset ? _manualCombo.animation : animation);
     previewBot.setAnimation(animation);
-    face.bot().setReducedMotion(!settings.data().motion);
-    previewBot.setReducedMotion(!settings.data().motion);
     float amount = 0.25f + settings.data().motionAmount * 0.15f;
     float speed = 0.45f + settings.data().animationSpeed * 0.14f;
     face.bot().setMotionAmount(amount);

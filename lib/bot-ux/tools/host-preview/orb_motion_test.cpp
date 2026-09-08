@@ -1,6 +1,7 @@
 #include <BotUx.h>
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <fstream>
 #include <iostream>
@@ -89,7 +90,8 @@ static Raster render(Bot::Mood mood, uint32_t offsetMs, float speed = 1.0f,
 static void renderAtSize(M5Canvas& canvas, Bot::Mood mood, uint32_t offsetMs,
                          int size, float amount = 1.0f,
                          Bot::Animation animation = Bot::Animation::Auto,
-                         Bot::Expression expression = Bot::Expression::Auto) {
+                         Bot::Expression expression = Bot::Expression::Auto,
+                         float speed = 1.0f, bool reduced = false) {
     gNow = 1000;
     canvas.setRecording(false);
     Bot bot;
@@ -101,6 +103,8 @@ static void renderAtSize(M5Canvas& canvas, Bot::Mood mood, uint32_t offsetMs,
     bot.setExpression(expression, 0);
     bot.setAnimation(animation);
     bot.setMotionAmount(amount);
+    bot.setAnimationSpeed(speed);
+    bot.setReducedMotion(reduced);
     bot.update(1000 + offsetMs);
     bot.draw();
     assert(!canvas.outOfBounds());
@@ -150,9 +154,10 @@ static void checkLoop(Bot::Mood mood, uint32_t period, int size) {
 }
 
 static void writePpm(const std::string& path, Bot::Mood mood, uint32_t time,
-                     int size = 200) {
+                     int size = 200, float amount = 1.0f, float speed = 1.0f) {
     M5Canvas canvas(size, size);
-    renderAtSize(canvas, mood, time, size);
+    renderAtSize(canvas, mood, time, size, amount, Bot::Animation::Auto,
+                 Bot::Expression::Auto, speed);
     std::ofstream out(path.c_str(), std::ios::binary);
     assert(out);
     out << "P6\n" << size << " " << size << "\n255\n";
@@ -170,7 +175,7 @@ static void writePpm(const std::string& path, Bot::Mood mood, uint32_t time,
 }
 
 static int changedPixels(Bot::Mood mood, uint32_t firstMs, uint32_t secondMs,
-                         float amount, bool reduced) {
+                         float amount, bool reduced, float speed = 1.0f) {
     const int size = 200;
     M5Canvas first(size, size), second(size, size);
     first.setRecording(false); second.setRecording(false);
@@ -179,6 +184,7 @@ static int changedPixels(Bot::Mood mood, uint32_t firstMs, uint32_t secondMs,
     a.setMood(mood, 0); b.setMood(mood, 0);
     a.setMotionAmount(amount); b.setMotionAmount(amount);
     a.setReducedMotion(reduced); b.setReducedMotion(reduced);
+    a.setAnimationSpeed(speed); b.setAnimationSpeed(speed);
     a.update(1000 + firstMs); b.update(1000 + secondMs);
     a.draw(); b.draw();
     int changed = 0;
@@ -186,6 +192,22 @@ static int changedPixels(Bot::Mood mood, uint32_t firstMs, uint32_t secondMs,
         for (int x = 0; x < size; ++x)
             changed += first.readPixel(x, y) != second.readPixel(x, y);
     return changed;
+}
+
+static void writeWatchLoop(const std::string& directory, const char* stem,
+                           Bot::Mood mood, uint32_t basePeriodMs) {
+    static const int kFrames = 16;
+    static const float kWatchMotionAmount = 0.55f;
+    static const float kWatchAnimationSpeed = 0.73f;
+    float wallPeriod = basePeriodMs /
+                       (kWatchMotionAmount * kWatchAnimationSpeed);
+    for (int frame = 0; frame < kFrames; ++frame) {
+        char suffix[32];
+        snprintf(suffix, sizeof(suffix), "-%02d.ppm", frame);
+        uint32_t time = (uint32_t)(wallPeriod * frame / kFrames + 0.5f);
+        writePpm(directory + "/" + stem + suffix, mood, time, 120,
+                 kWatchMotionAmount, kWatchAnimationSpeed);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -198,31 +220,60 @@ int main(int argc, char** argv) {
     assert(thinking.right - thinking.left > 85 && thinking.bottom - thinking.top > 85);
     assert(working.right - working.left > 85 && working.bottom - working.top > 85);
     assert(thinking.hash != working.hash);
+    assert(thinking.ink / thinking.components > 8);
+    assert(working.ink / working.components > 8);
+    int workingBoxArea = (working.right - working.left + 1) *
+                         (working.bottom - working.top + 1);
+    assert(working.ink * 8 < workingBoxArea);
 
     // Speed remains an exact scalar of phase for both reference loops.
-    assert(render(Bot::Mood::Thinking, 900, 1.0f).hash ==
-           render(Bot::Mood::Thinking, 450, 2.0f).hash);
-    assert(render(Bot::Mood::Working, 1100, 1.0f).hash ==
-           render(Bot::Mood::Working, 550, 2.0f).hash);
+    assert(render(Bot::Mood::Thinking, 400, 1.0f).hash ==
+           render(Bot::Mood::Thinking, 200, 2.0f).hash);
+    assert(render(Bot::Mood::Working, 350, 1.0f).hash ==
+           render(Bot::Mood::Working, 175, 2.0f).hash);
 
     // Zero freezes every point. Small amounts and reduced motion both calm the
     // entire choreography instead of leaving a full-speed shell rotation.
-    assert(changedPixels(Bot::Mood::Thinking, 0, 1400, 0.0f, false) == 0);
-    assert(changedPixels(Bot::Mood::Working, 0, 1400, 0.0f, false) == 0);
-    int thinkingFull = changedPixels(Bot::Mood::Thinking, 0, 180, 1.0f, false);
-    int thinkingLow = changedPixels(Bot::Mood::Thinking, 0, 180, 0.10f, false);
-    int thinkingReduced = changedPixels(Bot::Mood::Thinking, 0, 180, 1.0f, true);
-    int workingFull = changedPixels(Bot::Mood::Working, 0, 180, 1.0f, false);
-    int workingLow = changedPixels(Bot::Mood::Working, 0, 180, 0.10f, false);
-    int workingReduced = changedPixels(Bot::Mood::Working, 0, 180, 1.0f, true);
+    assert(changedPixels(Bot::Mood::Thinking, 0, 1237, 0.0f, false) == 0);
+    assert(changedPixels(Bot::Mood::Working, 0, 1237, 0.0f, false) == 0);
+    int thinkingFull = changedPixels(Bot::Mood::Thinking, 0, 40, 1.0f, false);
+    int thinkingLow = changedPixels(Bot::Mood::Thinking, 0, 40, 0.10f, false);
+    int thinkingReduced = changedPixels(Bot::Mood::Thinking, 0, 40, 1.0f, true);
+    int workingFull = changedPixels(Bot::Mood::Working, 0, 40, 1.0f, false);
+    int workingLow = changedPixels(Bot::Mood::Working, 0, 40, 0.10f, false);
+    int workingReduced = changedPixels(Bot::Mood::Working, 0, 40, 1.0f, true);
     assert(thinkingFull > thinkingReduced && thinkingReduced > thinkingLow);
     assert(workingFull > workingReduced && workingReduced > workingLow);
     assert(thinkingLow > 0 && workingLow > 0);
 
+    // The Watch's default controls (speed 0.73, amount 0.55) remain visibly
+    // active while progressing more calmly than the renderer's 1.0 profile.
+    int thinkingWatch = changedPixels(Bot::Mood::Thinking, 0, 40,
+                                      0.55f, false, 0.73f);
+    int workingWatch = changedPixels(Bot::Mood::Working, 0, 40,
+                                     0.55f, false, 0.73f);
+    assert(thinkingWatch > 0 && thinkingWatch < thinkingFull);
+    assert(workingWatch > 0 && workingWatch < workingFull);
+
+    M5Canvas thinkingWatchCanvas(286, 286), workingWatchCanvas(286, 286);
+    renderAtSize(thinkingWatchCanvas, Bot::Mood::Thinking, 1000, 286, 0.55f,
+                 Bot::Animation::Auto, Bot::Expression::Auto, 0.73f);
+    renderAtSize(workingWatchCanvas, Bot::Mood::Working, 1000, 286, 0.55f,
+                 Bot::Animation::Auto, Bot::Expression::Auto, 0.73f);
+    Raster thinkingWatch286 = inspect(thinkingWatchCanvas, 286);
+    Raster workingWatch286 = inspect(workingWatchCanvas, 286);
+    assert(thinkingWatch286.components > 0);
+    assert(workingWatch286.components > 0);
+    assert(thinkingWatch286.ink / thinkingWatch286.components > 12);
+    assert(workingWatch286.ink / workingWatch286.components > 12);
+    int workingWatchBoxArea = (workingWatch286.right - workingWatch286.left + 1) *
+                              (workingWatch286.bottom - workingWatch286.top + 1);
+    assert(workingWatch286.ink * 8 < workingWatchBoxArea);
+
     static const int sizes[] = {40, 72, 178, 286};
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
-        checkLoop(Bot::Mood::Thinking, 3600, sizes[i]);
-        checkLoop(Bot::Mood::Working, 4400, sizes[i]);
+        checkLoop(Bot::Mood::Thinking, 1600, sizes[i]);
+        checkLoop(Bot::Mood::Working, 1400, sizes[i]);
     }
 
     // Explicit expressions cannot restore eyes over either shell. Explicit
@@ -244,11 +295,26 @@ int main(int argc, char** argv) {
         writePpm(directory + "/working-vortex.ppm", Bot::Mood::Working, 700);
         writePpm(directory + "/thinking-orbs-286.ppm", Bot::Mood::Thinking, 700, 286);
         writePpm(directory + "/working-vortex-286.ppm", Bot::Mood::Working, 700, 286);
+        writePpm(directory + "/watch-thinking-120.ppm", Bot::Mood::Thinking,
+                 1000, 120, 0.55f, 0.73f);
+        writePpm(directory + "/watch-working-120.ppm", Bot::Mood::Working,
+                 1000, 120, 0.55f, 0.73f);
+        writePpm(directory + "/watch-thinking-286.ppm", Bot::Mood::Thinking,
+                 1000, 286, 0.55f, 0.73f);
+        writePpm(directory + "/watch-working-286.ppm", Bot::Mood::Working,
+                 1000, 286, 0.55f, 0.73f);
+        writeWatchLoop(directory, "watch-thinking-120", Bot::Mood::Thinking, 1600);
+        writeWatchLoop(directory, "watch-working-120", Bot::Mood::Working, 1400);
     }
 
     std::cout << "Orb motion: Thinking " << thinking.ink << " px/"
               << thinking.components << " clusters, Working " << working.ink
-              << " px/" << working.components << " clusters; 180ms deltas full/reduced/0.1 = "
+              << " px/" << working.components << " clusters; 40ms deltas full/reduced/0.1 = "
               << thinkingFull << "/" << thinkingReduced << "/" << thinkingLow << " and "
-              << workingFull << "/" << workingReduced << "/" << workingLow << "\n";
+              << workingFull << "/" << workingReduced << "/" << workingLow
+              << "; Watch-default deltas " << thinkingWatch << "/"
+              << workingWatch << "; 286px Watch ink/clusters "
+              << thinkingWatch286.ink << "/" << thinkingWatch286.components
+              << " and " << workingWatch286.ink << "/"
+              << workingWatch286.components << "\n";
 }

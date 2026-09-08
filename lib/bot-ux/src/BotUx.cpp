@@ -753,15 +753,26 @@ void BotUx::_drawBody() {
     // mood's own choreography; an explicitly selected Animation may still
     // translate the complete shell through the ordinary animation layer.
     if (_effMood == Mood::Thinking || _effMood == Mood::Working) {
+        static const int kSmallOrbDotCount = 32;
+        static const int kMediumOrbDotCount = 48;
+        static const int kLargeOrbDotCount = 72;
+        static const float kThinkingPeriodMs = 1600.0f;
+        static const float kWorkingPeriodMs = 1400.0f;
+        static const float kMinOrbDotRadius = 0.70f;
+        static const float kOrbDotRadiusPerBodyRadius = 0.014f;
         struct OrbDot { float x, y, z, radius; uint8_t opacity; };
-        OrbDot dots[96];
-        int count = r >= 60 ? 96 : (r >= 34 ? 72 : 48);
+        OrbDot dots[kLargeOrbDotCount];
+        int count = r >= 60 ? kLargeOrbDotCount
+                            : (r >= 34 ? kMediumOrbDotCount : kSmallOrbDotCount);
         float amount = fminf(_motionAmount, 1.5f);
         float reducedScale = _reducedMotion ? 0.20f : 1.0f;
         float phaseScale = fminf(_motionAmount, 1.0f) * reducedScale;
         float deformationScale = amount * reducedScale;
         float elapsed = (_now - _animStart) * _animationSpeed * phaseScale;
-        float period = _effMood == Mood::Thinking ? 3600.0f : 4400.0f;
+        // Base periods remain short enough to read on the Watch after its
+        // animation-speed and motion-amount controls both scale the phase.
+        float period = _effMood == Mood::Thinking ? kThinkingPeriodMs
+                                                  : kWorkingPeriodMs;
         float phase = elapsed / period;
         phase -= floorf(phase);
         float turn = 2.0f * kPi * phase;
@@ -813,7 +824,8 @@ void BotUx::_drawBody() {
             float perspective = 3.5f / (3.5f - tz);
             float depth = clampf((tz + 1.1f) / 2.2f, 0.0f, 1.0f);
             float sphereR = r * 0.77f;
-            float dotBase = fmaxf(0.55f, r * 0.0086f);
+            float dotBase = fmaxf(kMinOrbDotRadius,
+                                  r * kOrbDotRadiusPerBodyRadius);
             float dotScale = _effMood == Mood::Thinking ? 0.85f : 0.80f;
             dots[i].x = tx * sphereR * perspective;
             dots[i].y = ty * sphereR * perspective;

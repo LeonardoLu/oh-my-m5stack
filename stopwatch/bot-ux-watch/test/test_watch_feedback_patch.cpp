@@ -9,6 +9,15 @@ static bool contains(const Bounds& bounds, int x, int y) {
         && y >= bounds.y && y < bounds.y + bounds.h;
 }
 
+static Bounds amoledFlushBounds(const Bounds& bounds) {
+    int16_t left = bounds.x & ~1;
+    int16_t top = bounds.y & ~1;
+    int16_t right = (bounds.x + bounds.w - 1) | 1;
+    int16_t bottom = (bounds.y + bounds.h - 1) | 1;
+    return {left, top, (int16_t)(right - left + 1),
+            (int16_t)(bottom - top + 1)};
+}
+
 static void verify(const Bounds& source, const Bounds* cuts, size_t cutCount) {
     auto regions = watchfeedbackpatch::visibleRegions(source, cuts, cutCount);
     assert(regions.count > 0);
@@ -52,6 +61,18 @@ int main() {
         auto noHudRegions = watchfeedbackpatch::visibleRegions(source, &bot, 1);
         assert(watchfeedbackpatch::pixelCount(middleRegions)
                <= watchfeedbackpatch::pixelCount(noHudRegions));
+        for (uint8_t i = 0; i < noHudRegions.count; ++i)
+            assert(watchfeedbackpatch::empty(watchfeedbackpatch::intersection(
+                amoledFlushBounds(noHudRegions.items[i]), bot)));
+        for (uint8_t i = 0; i < middleRegions.count; ++i) {
+            Bounds flushed = amoledFlushBounds(middleRegions.items[i]);
+            assert(watchfeedbackpatch::empty(
+                watchfeedbackpatch::intersection(flushed, bot)));
+            assert(watchfeedbackpatch::empty(
+                watchfeedbackpatch::intersection(flushed, hud[0])));
+            assert(watchfeedbackpatch::empty(
+                watchfeedbackpatch::intersection(flushed, hud[1])));
+        }
 
         auto regions = watchfeedbackpatch::visibleRegions(source, &bot, 1);
         for (uint8_t step = 0; step <= Feedback::ExpandSteps; ++step) {

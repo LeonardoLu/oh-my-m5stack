@@ -56,3 +56,27 @@ pass under C++11 with `-Wall -Wextra -Werror`. The final `m5stack-stopwatch` Pla
 build against the frozen shared BotUx source uses 48,928 B RAM and 1,061,825 B flash;
 the generated firmware image is 1,062,192 B. This validation includes no serial upload
 or physical hardware acceptance.
+
+## Authorized device deployment
+
+The user later explicitly authorized flashing the StopWatch. Commit `7d29faa` was built
+and uploaded with PlatformIO environment `m5stack-stopwatch` to the explicit port
+`/dev/cu.usbmodem214201`. Esptool identified an ESP32-S3 revision 0.2 with 8 MB embedded
+PSRAM, USB Serial/JTAG and MAC `28:84:85:44:5b:8c`. The normal application upload did
+not erase NVS. It wrote the bootloader, partition table, boot application and the
+1,062,192 B firmware image; esptool reported successful data-hash verification for all
+four regions and performed a hard reset. The firmware SHA-256 is
+`134ecc71d77fa9b9b63bd29680d4ae5512da88bd31354451a5a28d61cadf9c53`.
+
+The bounded production boot reported `IMU=1`, `keys_mask_ms=24` and the expected
+`keys_mask_bytes=754785`, with no sprite, HUD or mask allocation failure. A read-only
+`ui` query reported Face, automatic Idle, Auto expression/action/gaze, diagnostics off,
+a valid unpressed power input, and the persisted Chinese language, sound-off and button
+effect-off settings. The safe framebuffer tool sent only the `c` command and captured a
+466×466 native Face canvas showing the canonical upper-right Idle gaze, 98% battery and
+the live clock/date. The serial port was closed afterward.
+
+Full chip, upload and boot logs plus the native capture remain ignored under
+`tmp/watch-ambient-deploy/`. The capture validates the firmware render target rather
+than panel optics. No injected contact, physical touch, button, IMU-motion, charging or
+long-duration ambient-timing acceptance is claimed by this deployment.

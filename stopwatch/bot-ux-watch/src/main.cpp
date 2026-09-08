@@ -15,7 +15,9 @@
 #include "WatchFace.h"
 #include "WatchInteraction.h"
 #include "WatchButtonFeedback.h"
+#include "WatchButtonFeedbackMasks.h"
 #include "WatchEdgeGeometry.h"
+#include "WatchFeedbackPatch.h"
 #include "WatchUi.h"
 #include "WatchControls.h"
 #include <UxPointer.h>
@@ -2081,21 +2083,10 @@ static uint8_t* buttonMask(watchbuttons::Button button, uint8_t step) {
 
 static uint32_t buildButtonFeedbackMasks() {
     uint32_t started = millis();
-    const watchbuttons::Button buttons[] = {
-        watchbuttons::A, watchbuttons::B, watchbuttons::Power
-    };
-    for (auto button : buttons) {
-        auto bounds = watchbuttons::dirtyBounds(button);
-        for (uint8_t step = 0; step <= watchbuttons::Feedback::ExpandSteps; ++step) {
-            auto blob = watchbuttons::expandedBlob(button, step);
-            uint8_t* mask = buttonMask(button, step);
-            for (int16_t y = 0; y < bounds.h; ++y)
-                for (int16_t x = 0; x < bounds.w; ++x)
-                    mask[(size_t)y * bounds.w + x] = watchbuttons::blobCoverage(
-                        blob, bounds.x + x + 0.5f, bounds.y + y + 0.5f);
-        }
-    }
-    return millis() - started;
+    static_assert(kButtonMasksTotal == watchbuttonmasks::DecodedSize,
+                  "generated button masks must match runtime layout");
+    return watchbuttonmasks::decode(_buttonFeedbackMasks, kButtonMasksTotal)
+        ? millis() - started : UINT32_MAX;
 }
 
 static void blendButtonBlob(lgfx::rgb565_t* pixels, int16_t width,
@@ -2635,6 +2626,11 @@ void setup() {
         return;
     }
     uint32_t buttonMaskMs = buildButtonFeedbackMasks();
+    if (buttonMaskMs == UINT32_MAX) {
+        _renderReady = false;
+        Serial.println("button feedback mask decode failed");
+        return;
+    }
 
     _renderReady = face.begin(&botSprite);
     if (!_renderReady) { Serial.println("HUD allocation failed"); return; }

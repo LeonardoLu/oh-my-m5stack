@@ -5,12 +5,19 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 OUT="$ROOT/tmp/host-checks"
 mkdir -p "$OUT"
-for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls test_companion_presets test_ui_controls test_touch_affine test_touch_contact test_touch_trace_buffer test_watch_strings test_watch_button_feedback test_watch_edge_geometry; do
+for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls test_companion_presets test_ui_controls test_touch_affine test_touch_contact test_touch_trace_buffer test_watch_strings test_watch_button_feedback test_watch_button_feedback_masks test_watch_edge_geometry test_watch_feedback_patch; do
   c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
     "stopwatch/bot-ux-watch/test/$name.cpp" -o "$OUT/$name"
   "$OUT/$name"
   echo "PASS $name"
 done
+c++ -std=c++11 -O2 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include \
+  stopwatch/bot-ux-watch/tools/generate_button_feedback_masks.cpp \
+  -o "$OUT/generate_button_feedback_masks"
+"$OUT/generate_button_feedback_masks" "$OUT/WatchButtonFeedbackMasks.generated.h"
+cmp "$OUT/WatchButtonFeedbackMasks.generated.h" \
+  stopwatch/bot-ux-watch/include/WatchButtonFeedbackMasks.generated.h
+echo 'PASS generated button-feedback masks'
 c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
   stopwatch/bot-ux-watch/test/test_watch_typography.cpp \
   lib/ux-components/src/FontLatin18.cpp lib/ux-components/src/FontLatin24.cpp \

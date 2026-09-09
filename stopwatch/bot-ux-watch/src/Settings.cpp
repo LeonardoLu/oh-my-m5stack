@@ -33,6 +33,11 @@ const char* kAnimationNames[Settings::ANIMATION_COUNT] = {
     "Auto", "Calm", "Curious", "Orbit", "Bounce", "Glitch", "Wave", "Sparkle"
 };
 const char* kNamespace = "watch";
+const char* kDimTimeoutKey = "dimTimeout";
+// ESP NVS keys are limited to 15 characters; keep this distinct from the
+// public Settings::Data::screenOffTimeout field without altering old keys.
+const char* kScreenOffTimeoutKey = "screenOffTo";
+const char* kButtonWakeOnlyKey = "buttonWake";
 } // namespace
 
 void Settings::begin() {
@@ -54,6 +59,9 @@ void Settings::begin() {
     _data.expression  = prefs.getUChar("expr", _data.expression);
     _data.animation   = prefs.getUChar("anim", _data.animation);
     _data.brightness  = prefs.getUChar("bright", _data.brightness);
+    _data.dimTimeout = prefs.getUChar(kDimTimeoutKey, _data.dimTimeout);
+    _data.screenOffTimeout = prefs.getUChar(kScreenOffTimeoutKey, _data.screenOffTimeout);
+    _data.buttonWakeOnly = prefs.getBool(kButtonWakeOnlyKey, _data.buttonWakeOnly);
     _data.motion      = prefs.getBool("motion", _data.motion);
     _data.eyeStyle    = prefs.getUChar("eyes", _data.eyeStyle);
     _data.customColor = prefs.getBool("custom", _data.customColor);
@@ -69,6 +77,8 @@ void Settings::begin() {
     if (_data.expression >= EXPRESSION_COUNT) _data.expression = 0;
     if (_data.animation >= ANIMATION_COUNT) _data.animation = 1;
     if (_data.brightness < 1 || _data.brightness > 5) _data.brightness = 3;
+    _data.dimTimeout = timeoutIndex(_data.dimTimeout, 1);
+    _data.screenOffTimeout = timeoutIndex(_data.screenOffTimeout, 2);
     if (_data.eyeStyle >= EYE_STYLE_COUNT) _data.eyeStyle = 1;
     if (_data.colorHue > 359) _data.colorHue = 42;
     if (_data.colorSat > 100) _data.colorSat = 8;
@@ -97,6 +107,9 @@ void Settings::save() {
     prefs.putUChar("expr", _data.expression);
     prefs.putUChar("anim", _data.animation);
     prefs.putUChar("bright", _data.brightness);
+    prefs.putUChar(kDimTimeoutKey, _data.dimTimeout);
+    prefs.putUChar(kScreenOffTimeoutKey, _data.screenOffTimeout);
+    prefs.putBool(kButtonWakeOnlyKey, _data.buttonWakeOnly);
     prefs.putBool("motion", _data.motion);
     prefs.putUChar("eyes", _data.eyeStyle);
     prefs.putBool("custom", _data.customColor);

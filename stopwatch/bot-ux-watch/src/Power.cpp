@@ -1,5 +1,7 @@
 #include "Power.h"
 #include <M5Unified.h>
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
 
 void Power::begin() {
     // Disable only single-click reset; leave double-off and download intact.
@@ -31,7 +33,8 @@ void Power::update() {
     // M5Unified reads M5PM1 GPIO2 active-low for StopWatch. Gate it with VIN
     // so a floating/status-low line cannot claim charging when unplugged.
     const int vinMv = M5.Power.getVBUSVoltage();
-    _charging = vinMv > 4000
+    _externalPower = vinMv > 4000;
+    _charging = _externalPower
         && M5.Power.isCharging() == m5::Power_Class::is_charging;
 }
 
@@ -52,6 +55,49 @@ void Power::setBrightness(uint8_t v) {
 
 void Power::applyLevel(uint8_t level) {
     setBrightness(levelToValue(level));
+}
+
+void Power::sleepDisplay() {
+    if (_displaySleeping) return;
+    M5.Display.sleep();
+    _displaySleeping = true;
+}
+
+void Power::wakeDisplay(uint8_t level) {
+    if (_displaySleeping) M5.Display.wakeup();
+    _displaySleeping = false;
+    applyLevel(level);
+}
+
+bool Power::lightSleepForButtonPoll(uint64_t fallbackUs) {
+    // StopWatch A/B are direct active-low ESP32-S3 GPIO2/GPIO1. The timer
+    // keeps the PMIC power key and VIN observable without changing PM1 IRQ
+    // routing, so a failed or board-revision-specific IRQ cannot strand it.
+    pinMode(1, INPUT_PULLUP);
+    pinMode(2, INPUT_PULLUP);
+    if (digitalRead(1) == LOW || digitalRead(2) == LOW) return true;
+
+    const uint64_t buttons = (1ULL << 1) | (1ULL << 2);
+    if (esp_sleep_enable_ext1_wakeup(buttons, ESP_EXT1_WAKEUP_ANY_LOW) != ESP_OK
+        || esp_sleep_enable_timer_wakeup(fallbackUs) != ESP_OK) {
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT1);
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+        delay(8);
+        return false;
+    }
+    esp_err_t result=esp_light_sleep_start();
+    bool buttonWake=result==ESP_OK
+        &&(esp_sleep_get_ext1_wakeup_status()&buttons)!=0;
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT1);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+    rtc_gpio_hold_dis(GPIO_NUM_1);
+    rtc_gpio_hold_dis(GPIO_NUM_2);
+    rtc_gpio_deinit(GPIO_NUM_1);
+    rtc_gpio_deinit(GPIO_NUM_2);
+    pinMode(1, INPUT_PULLUP);
+    pinMode(2, INPUT_PULLUP);
+    if(result!=ESP_OK) delay(8);
+    return buttonWake;
 }
 
 bool Power::setIndicator(bool enabled) {

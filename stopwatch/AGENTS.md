@@ -90,7 +90,13 @@ official bot treatment uses dark pill eyes.
   Cancel inertia before target capture; use WatchControls for hit geometry.
   Color surfaces retain the pointer through drag and cannot activate Done.
 - Any touch or A/B press wakes from doze and is consumed, so it cannot trigger the
-  control underneath.
+  control underneath. On battery, independent persisted dim and display-off timers
+  use 5 s, 15 s, 1 min, 5 min, 10 min or 15 min choices and default to 15 s / 1 min.
+  Touch and all three hardware buttons wake and consume their input. External
+  VBUS keeps the display awake at configured brightness even when charging is complete.
+  The optional Keys-only wake mode uses ESP32 light sleep after display-off; A/B use
+  direct EXT1 wake while a one-second timer polls power/home and external power. Touch
+  is disabled as a wake source in this mode.
 - M5PM1 single-click reset is disabled without changing double-click power-off or
   download behavior. `BtnPWR.wasClicked()` returns to the face, cancels an unsaved
   editor snapshot and consumes the active gesture. The green PM status LED is a
@@ -116,6 +122,10 @@ official bot treatment uses dark pill eyes.
   a seven-second cooldown before poke. Auto expression begins with Idle for 5–15 seconds,
   alternates with 30–60 seconds of Looking around, then shows a safe ambient mood for
   5–15 seconds. Returning from a held/manual state restarts that sequence at Idle.
+- Display-off uses AMOLED panel sleep. The default Touch + keys mode keeps the MCU awake
+  to poll power and wake inputs; Keys only also enters ESP32 light sleep. Clock
+  continuity is preserved; bot animation, ambient scheduling, IMU, sound and rendering
+  pause until wake. Neither mode uses deep sleep.
 - Rendering targets 16 ms active / 33 ms preview / 250 ms dozing. The face pushes only
   the bot region; disjoint clock/status regions redraw when their values change. A fixed 466×90
   HUD canvas (83,880 bytes) provides coverage text/shapes without panel readback.

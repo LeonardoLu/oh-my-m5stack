@@ -24,12 +24,15 @@ constexpr ux::Rect nameKeyboardBounds() { return {78,126,310,214}; }
 constexpr ux::Rect useThemeBounds() { return {163,207,140,32}; }
 constexpr ux::Rect colorPadBounds() { return {66,242,260,96}; }
 constexpr ux::Rect hueBarBounds() { return {344,242,56,96}; }
-constexpr uint8_t displayRowCount() { return 5; }
-constexpr int16_t displayRowCenter(uint8_t index) {
-    return (int16_t)(100+index*58);
+constexpr ListLayout displayList() { return {58,76,350,278,58,44,17,5}; }
+constexpr uint8_t displayRowCount() { return 8; }
+inline int16_t displayRowCenter(uint8_t index, float offset=0) {
+    return (int16_t)(100+index*displayList().step-(int16_t)offset);
 }
-constexpr ux::Rect displayRowBounds(uint8_t index) {
-    return {58,(int16_t)(displayRowCenter(index)-22),350,44};
+inline ux::Rect displayRowBounds(uint8_t index, float offset=0) {
+    const auto layout=displayList();
+    return {layout.x,(int16_t)(displayRowCenter(index,offset)-layout.rowHeight/2),
+            layout.w,layout.rowHeight};
 }
 
 inline bool doneContains(int x, int y) {
@@ -62,10 +65,17 @@ inline bool roundedContains(ux::Rect r, int16_t radius, int x, int y) {
 inline bool editorUsesPreviewList(Editor editor) {
     return editor==Editor::Appearance||editor==Editor::Motion||editor==Editor::Preview||editor==Editor::Gaze;
 }
+inline bool editorUsesScrollList(Editor editor) {
+    return editorUsesPreviewList(editor)||editor==Editor::Display;
+}
+constexpr ListLayout editorList(Editor editor) {
+    return editor==Editor::Display ? displayList() : previewList();
+}
 inline uint8_t editorRowCount(Editor editor) {
     switch(editor) {
         case Editor::Appearance:return 2; case Editor::Motion:return 4;
         case Editor::Preview:return 3; case Editor::Gaze:return 1;
+        case Editor::Display:return displayRowCount();
         default:return 0;
     }
 }
@@ -104,6 +114,13 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
             auto bounds=rowBounds(layout,i,offset);
             if(roundedContains(bounds,layout.radius,x,y)) return {First+i,bounds,layout.radius};
         }
+    } else if (editor==Editor::Display) {
+        const auto layout=displayList();
+        if(!inViewport(layout,x,y)) return result;
+        for(uint8_t i=0;i<displayRowCount();++i) {
+            auto bounds=displayRowBounds(i,offset);
+            if(roundedContains(bounds,layout.radius,x,y)) return {First+i,bounds,layout.radius};
+        }
     } else if (editor==Editor::Name) {
         const auto area=nameKeyboardBounds();
         int key=ux::nameKeyAt(area,x,y);
@@ -131,8 +148,6 @@ inline Target at(Screen screen, Editor editor, float offset, int x, int y) {
         match(First,{78,128,146,76},38); match(First+1,{242,128,146,76},38); match(First+2,{100,242,266,58},29);
     } else if (editor==Editor::Expression) {
         match(First,{48,126,76,96},38); match(First+1,{342,126,76,96},38); match(First+2,{144,62,178,178},89);
-    } else if (editor==Editor::Display) {
-        for(uint8_t i=0;i<displayRowCount();++i) match(First+i,displayRowBounds(i),17);
     }
     return result;
 }

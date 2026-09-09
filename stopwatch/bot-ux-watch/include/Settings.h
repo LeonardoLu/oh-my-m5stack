@@ -15,6 +15,11 @@ public:
     static const uint8_t EYE_STYLE_COUNT = 4;
     static const uint8_t EXPRESSION_COUNT = 10;
     static const uint8_t ANIMATION_COUNT = 8;
+    static const uint8_t TIMEOUT_COUNT = 6;
+
+    static constexpr uint8_t timeoutIndex(uint8_t value, uint8_t fallback) {
+        return value < TIMEOUT_COUNT ? value : fallback;
+    }
 
     struct Data {
         char    botName[17] = "Milo";
@@ -32,6 +37,9 @@ public:
         uint8_t expression  = 0;
         uint8_t animation   = 1;
         uint8_t brightness  = 3;     // 1..5
+        uint8_t dimTimeout = 1;      // 5 s, 15 s, 1 m, 5 m, 10 m, 15 m
+        uint8_t screenOffTimeout = 2;
+        bool    buttonWakeOnly = false;
         bool    motion       = true;
         uint8_t eyeStyle     = 1;
         bool    customColor  = false;

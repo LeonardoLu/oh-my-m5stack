@@ -52,6 +52,7 @@ int main(int argc,char** argv) {
         while(*cursor) {
             uint32_t cp=nextCodepoint(cursor);
             if(!((cp>=0x4e00&&cp<=0x9fff)||cp==0xff0c||cp==0x3002)) continue;
+            assert(glyph(Cjk18,cp)->code==cp);
             assert(glyph(Cjk22,cp)->code==cp);
             assert(glyph(Cjk24,cp)->code==cp);
             assert(glyph(Cjk28,cp)->code==cp);
@@ -69,6 +70,7 @@ int main(int argc,char** argv) {
         while(*cursor) {
             uint32_t cp=nextCodepoint(cursor);
             if(!((cp>=0x4e00&&cp<=0x9fff)||cp==0xff0c||cp==0x3002)) continue;
+            assert(glyph(Cjk18,cp)->code==cp);
             assert(glyph(Cjk22,cp)->code==cp);
             assert(glyph(Cjk24,cp)->code==cp);
             assert(glyph(Cjk28,cp)->code==cp);
@@ -100,7 +102,15 @@ int main(int argc,char** argv) {
     assertPair("DIRECTION","Down-right",Latin24);
     assertPair("BRIGHTNESS","5 / 5",Latin24);
     assertPair("BUTTON FX","OFF",Latin24);
+    assertPair("DIM TIMEOUT","15 MIN",Latin24);
+    assertPair("SCREEN OFF","15 MIN",Latin24);
+    assertPair("WAKE","TOUCH + KEYS",Latin24);
+    assertPair("WAKE","KEYS ONLY",Latin24);
     assertPair("按下效果","关闭",Cjk24);
+    assertPair("调暗延时","15 MIN",Cjk24);
+    assertPair("息屏延时","15 MIN",Cjk24);
+    assertPair("唤醒","触摸 + 按键",Cjk24);
+    assertPair("唤醒","仅按键",Cjk24);
     assertPair("伙伴描述","显示",Cjk24);
     assertPair("方向","右下",Cjk24);
     assertPair("表情","怀疑",Cjk24);

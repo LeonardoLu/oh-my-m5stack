@@ -5,12 +5,18 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 OUT="$ROOT/tmp/host-checks"
 mkdir -p "$OUT"
-for name in test_calendar_math test_input_semantics test_timed_state test_watch_interaction test_companion_controls test_companion_presets test_ui_controls test_touch_affine test_touch_contact test_touch_trace_buffer test_watch_strings test_watch_button_feedback test_watch_button_feedback_masks test_watch_edge_geometry test_watch_feedback_patch; do
+for name in test_calendar_math test_input_semantics test_timed_state test_power_policy test_watch_interaction test_companion_controls test_companion_presets test_ui_controls test_touch_affine test_touch_contact test_touch_trace_buffer test_watch_strings test_watch_button_feedback test_watch_button_feedback_masks test_watch_edge_geometry test_watch_feedback_patch; do
   c++ -std=c++11 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include -Ilib/ux-components/src \
     "stopwatch/bot-ux-watch/test/$name.cpp" -o "$OUT/$name"
   "$OUT/$name"
   echo "PASS $name"
 done
+c++ -std=c++11 -Wall -Wextra -Werror \
+  -Istopwatch/bot-ux-watch/test/support -Istopwatch/bot-ux-watch/include -Ilib/bot-ux/src \
+  stopwatch/bot-ux-watch/test/test_settings_timeouts.cpp stopwatch/bot-ux-watch/src/Settings.cpp \
+  -o "$OUT/test_settings_timeouts"
+"$OUT/test_settings_timeouts"
+echo 'PASS test_settings_timeouts'
 c++ -std=c++11 -O2 -Wall -Wextra -Werror -Istopwatch/bot-ux-watch/include \
   stopwatch/bot-ux-watch/tools/generate_button_feedback_masks.cpp \
   -o "$OUT/generate_button_feedback_masks"

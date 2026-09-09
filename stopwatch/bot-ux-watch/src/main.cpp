@@ -10,6 +10,7 @@
 #include "TouchAffine.h"
 #include "TouchTraceBuffer.h"
 #include "Power.h"
+#include "PowerPolicy.h"
 #include "Settings.h"
 #include "TimedState.h"
 #include "WatchFace.h"
@@ -53,6 +54,7 @@ constexpr uint32_t kActiveFrameMs = 16;
 constexpr uint32_t kPreviewFrameMs = 33;
 constexpr uint32_t kDozeFrameMs = 250;
 constexpr uint8_t kLowBattery = 15;
+constexpr uint8_t kDimBrightness = 1;
 
 const char* const kMenuLabels[(uint8_t)MenuItem::Count] = {
     "TIME", "DATE", "FORMAT", "BOT", "DISPLAY", "LAYOUT", "DONE"
@@ -139,6 +141,9 @@ bool _powerKnown = false;
 uint32_t _powerReadMs = 0;
 uint32_t _powerButtonReadMs = 0;
 bool _powerButtonValid = false, _powerButtonPressed = false;
+bool _powerButtonWakePressed = false;
+watchpower::WakeInputGate _wakeInputGate;
+bool _externalPower = false;
 bool _diagnosticButtons = false;
 uint8_t _diagnosticButtonMask = 0;
 bool _diagnosticBattery = false;
@@ -150,6 +155,9 @@ uint32_t _statusPanelUntilMs = 0;
 int16_t _statusPanelTouchOffset = 0;
 bool _statusPanelTouchVisible = false;
 bool _dozing = false;
+bool _manualDozing = false;
+watchpower::ScreenState _screenPowerState = watchpower::ScreenState::Active;
+watchpower::IdleScreenPolicy _idleScreenPolicy;
 bool _renderReady = false;
 bool _uiDirty = true;
 bool _listBandOnly = false;
@@ -804,6 +812,33 @@ static void consumeWakeInput() {
     resetUiPointer();
 }
 
+static void applyScreenPowerState(watchpower::ScreenState next) {
+    if (_screenPowerState == next) return;
+    _screenPowerState = next;
+    _dozing = next != watchpower::ScreenState::Active;
+    if (next == watchpower::ScreenState::Active) {
+        power.wakeDisplay(settings.data().brightness);
+        _faceNeedsClear = true;
+        _buttonFeedbackFaceBaseValid = false;
+        _buttonFeedbackHudMs = 0;
+        _scrollMs = millis();
+        _uiDirty = true;
+        _listBandOnly = false;
+        face.invalidate();
+        _buttonFeedbackDirty = true;
+    } else {
+        _soundOutput.cancel();
+        _settingsScroll.cancel();
+        _personalScroll.cancel();
+        _editorScroll.cancel();
+        if (next == watchpower::ScreenState::Dimmed) power.setBrightness(kDimBrightness);
+        else {
+            _ambientCycle.setPaused(true,millis());
+            power.sleepDisplay();
+        }
+    }
+}
+
 static void applySettings() {
     watchstrings::chinese()=settings.data().language!=0;
     settings.rebuildStyle();
@@ -830,7 +865,10 @@ static void applySettings() {
     previewBot.setAnimationSpeed(speed);
     face.setHour24(settings.data().hour24);
     face.setShowSeconds(settings.data().showSeconds);
-    power.applyLevel(settings.data().brightness);
+    if (_screenPowerState == watchpower::ScreenState::Active)
+        power.applyLevel(settings.data().brightness);
+    else if (_screenPowerState == watchpower::ScreenState::Dimmed)
+        power.setBrightness(kDimBrightness);
     _uiDirty = true;
 }
 
@@ -868,6 +906,7 @@ static void refreshPower(uint32_t now) {
     power.update();
     _battery = power.batteryPct();
     _charging = power.charging();
+    _externalPower = power.externalPower();
     if (_powerKnown && _charging && !wasCharging) {
         _happyAcknowledgment.start(now, 1400);
         _statusPanelStartMs = now;
@@ -881,11 +920,14 @@ static void invalidateButtonFeedback() {
 }
 
 static bool refreshButtonFeedback(uint32_t now) {
+    _powerButtonWakePressed = false;
     if (now - _powerButtonReadMs >= 8) {
         _powerButtonReadMs = now;
         bool pressed = false;
+        bool previousPressed = _powerButtonPressed;
         _powerButtonValid = power.readPowerButton(&pressed);
         _powerButtonPressed = _powerButtonValid && pressed;
+        _powerButtonWakePressed = _powerButtonPressed && !previousPressed;
     }
     bool enabled = settings.data().buttonFeedback;
     bool changed = _buttonFeedback.sample(enabled && M5.BtnA.isPressed(),
@@ -1017,8 +1059,8 @@ static void enterEditor(Editor editor, Screen parent = Screen::Settings) {
     _originalManualPreset = _manualPreset; _originalManualCombo = _manualCombo;
     _editorParent = parent;
     _editField = 0;
-    if(watchcontrols::editorUsesPreviewList(editor)) {
-        auto layout=watchcontrols::previewList();
+    if(watchcontrols::editorUsesScrollList(editor)) {
+        auto layout=watchcontrols::editorList(editor);
         _editorScroll.setBounds(watchcontrols::editorRowCount(editor)*layout.step,layout.h);
         _editorScroll.setOffset(0);
     } else _editorScroll.setBounds(0,0);
@@ -1050,12 +1092,14 @@ static void returnHome() {
         _manualPreset=_originalManualPreset; _manualCombo=_originalManualCombo;
         settings.data()=_originalSettings; applySettings();
     }
-    _dozing=false; _clockDoubleTap.reset(); consumeWakeInput();
+    _manualDozing=false;
+    _idleScreenPolicy.wake(millis());
+    applyScreenPowerState(watchpower::ScreenState::Active);
+    _clockDoubleTap.reset(); consumeWakeInput();
     Screen prior=_screen;
     _screen=Screen::Face; _editor=Editor::None;
     pushTouchTrace(TouchTraceKind::Screen, millis(), 0, 0, (int16_t)prior, (int16_t)_screen);
     _faceNeedsClear=true; face.invalidate(); _uiDirty=true;
-    power.applyLevel(settings.data().brightness);
     _sounds.play(ux::sound::Cue::Back);
 }
 
@@ -1098,8 +1142,9 @@ static void pokeBot() {
 }
 
 static void startDoze() {
-    _dozing = true;
-    power.setBrightness(14);
+    if (_externalPower) return;
+    _manualDozing = true;
+    applyScreenPowerState(watchpower::ScreenState::Dimmed);
 }
 
 static void cycleExpression(int8_t delta, bool persist = false) {
@@ -1211,8 +1256,16 @@ static void changeEditorValue(int8_t delta) {
         } else if (_editField == 1) {
             settings.data().theme = (uint8_t)((settings.data().theme + Settings::THEME_COUNT + delta) % Settings::THEME_COUNT);
         } else if(_editField==2) {
-            settings.data().sound = !settings.data().sound;
+            settings.data().dimTimeout=(uint8_t)((settings.data().dimTimeout
+                +Settings::TIMEOUT_COUNT+delta)%Settings::TIMEOUT_COUNT);
         } else if(_editField==3) {
+            settings.data().screenOffTimeout=(uint8_t)((settings.data().screenOffTimeout
+                +Settings::TIMEOUT_COUNT+delta)%Settings::TIMEOUT_COUNT);
+        } else if(_editField==4) {
+            settings.data().buttonWakeOnly=!settings.data().buttonWakeOnly;
+        } else if(_editField==5) {
+            settings.data().sound = !settings.data().sound;
+        } else if(_editField==6) {
             settings.data().indicator=!settings.data().indicator;
         } else {
             settings.data().buttonFeedback=!settings.data().buttonFeedback;
@@ -1338,7 +1391,7 @@ static int exactPressedTarget() {
     if(!_pointer.pressed()) return watchcontrols::None;
     float offset=_screen==Screen::Settings?_settingsScroll.offset():
         _screen==Screen::Personalize?_personalScroll.offset():
-        _screen==Screen::Editor&&watchcontrols::editorUsesPreviewList(_editor)?_editorScroll.offset():0;
+        _screen==Screen::Editor&&watchcontrols::editorUsesScrollList(_editor)?_editorScroll.offset():0;
     auto target=watchcontrols::at(_screen,_editor,offset,_pointer.x(),_pointer.y());
     return target.id==_capturedTarget?target.id:watchcontrols::None;
 }
@@ -1348,8 +1401,8 @@ static void handleUiPointer(bool down, bool held, bool up, int x, int y, uint32_
     if (_screen==Screen::Face) return;
     ux::ScrollModel* scroll=_screen==Screen::Settings?&_settingsScroll:
         _screen==Screen::Personalize?&_personalScroll:
-        _screen==Screen::Editor&&watchcontrols::editorUsesPreviewList(_editor)?&_editorScroll:nullptr;
-    const auto scrollLayout=_screen==Screen::Editor?watchcontrols::previewList():watchcontrols::mainList();
+        _screen==Screen::Editor&&watchcontrols::editorUsesScrollList(_editor)?&_editorScroll:nullptr;
+    const auto scrollLayout=_screen==Screen::Editor?watchcontrols::editorList(_editor):watchcontrols::mainList();
     int oldPressed=exactPressedTarget();
     if(down) {
         _buttonNavigation=false; _uiDirty=true; _listBandOnly=false;
@@ -1407,6 +1460,10 @@ static void handleInputs(uint32_t now) {
     _traceSampleSensorKnown=false;
     if(_diagnosticContact) {
         contact=_diagnosticDown; x=_diagnosticX; y=_diagnosticY;
+    }
+    else if(_screenPowerState==watchpower::ScreenState::Off
+            &&settings.data().buttonWakeOnly) {
+        contact=false;
     }
     else if(now-_contactReadMs>=8) {
         uint32_t previousReadMs=_contactReadMs;
@@ -1469,19 +1526,58 @@ static void handleInputs(uint32_t now) {
         sampleTouchCalibration(contact,acquired,(int16_t)x,(int16_t)y,now);
         return;
     }
-    if(M5.BtnPWR.wasClicked()) {
-        returnHome(); return;
-    }
+    bool powerClicked=M5.BtnPWR.wasClicked();
     _gestureActive = M5.BtnA.isPressed() || M5.BtnB.isPressed()
-        || touch.wasPressed() || touch.isPressed();
-    bool wakePressed = M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || touch.wasPressed();
-    if (_dozing) {
-        if (wakePressed) {
-            _dozing = false;
+        || _powerButtonPressed || touch.wasPressed() || touch.isPressed();
+    auto wakeGate=_wakeInputGate.update(now,_gestureActive,
+                                        _powerButtonPressed,powerClicked);
+    if(wakeGate.blockControls) {
+        _idleScreenPolicy.wake(now);
+        consumeWakeInput();
+        return;
+    }
+    bool wakePressed = M5.BtnA.wasPressed() || M5.BtnB.wasPressed()
+        || _powerButtonWakePressed || M5.BtnPWR.wasPressed() || powerClicked
+        || touch.wasPressed();
+    bool wasDozing=_screenPowerState!=watchpower::ScreenState::Active;
+    if(_externalPower) {
+        _manualDozing=false;
+        _idleScreenPolicy.update(now,true,_gestureActive,
+                                 settings.data().dimTimeout,settings.data().screenOffTimeout);
+        applyScreenPowerState(watchpower::ScreenState::Active);
+        if(wasDozing&&(_gestureActive||wakePressed)) {
+            bool pendingPowerClick=!powerClicked
+                &&(_powerButtonWakePressed||M5.BtnPWR.wasPressed());
+            _wakeInputGate.beginWake(pendingPowerClick);
             consumeWakeInput();
-            power.applyLevel(settings.data().brightness);
+            return;
+        }
+    } else if(wasDozing) {
+        if(watchpower::shouldWakeAndConsume(_screenPowerState,wakePressed)) {
+            _manualDozing=false;
+            _idleScreenPolicy.wake(now);
+            applyScreenPowerState(watchpower::ScreenState::Active);
+            bool pendingPowerClick=!powerClicked
+                &&(_powerButtonWakePressed||M5.BtnPWR.wasPressed());
+            _wakeInputGate.beginWake(pendingPowerClick);
+            consumeWakeInput();
+        } else {
+            auto automatic=_idleScreenPolicy.update(now,false,false,
+                settings.data().dimTimeout,settings.data().screenOffTimeout);
+            auto next=_manualDozing&&automatic!=watchpower::ScreenState::Off
+                ?watchpower::ScreenState::Dimmed:automatic;
+            applyScreenPowerState(next);
         }
         return;
+    } else {
+        auto next=_idleScreenPolicy.update(now,false,_gestureActive,
+            settings.data().dimTimeout,settings.data().screenOffTimeout);
+        applyScreenPowerState(next);
+        if(next!=watchpower::ScreenState::Active) return;
+    }
+    if(powerClicked) {
+        if(wakeGate.consumedPowerClick) return;
+        returnHome(); return;
     }
 
     if (_screen == Screen::Face) {
@@ -1867,11 +1963,18 @@ static void drawDisplayEditor() {
     drawTitle("DISPLAY & SOUND");
     char brightness[8];
     snprintf(brightness, sizeof(brightness), "%u / 5", settings.data().brightness);
-    drawArrowRow(watchcontrols::displayRowBounds(0),"BRIGHTNESS",brightness,_buttonNavigation&&_editField==0);
-    drawArrowRow(watchcontrols::displayRowBounds(1),"THEME",Settings::themeName(settings.data().theme),_buttonNavigation&&_editField==1);
-    drawArrowRow(watchcontrols::displayRowBounds(2),"SOUND",settings.data().sound?"ON":"OFF",_buttonNavigation&&_editField==2);
-    drawArrowRow(watchcontrols::displayRowBounds(3),"INDICATOR",settings.data().indicator?"ON":"OFF",_buttonNavigation&&_editField==3);
-    drawArrowRow(watchcontrols::displayRowBounds(4),"BUTTON FX",settings.data().buttonFeedback?"ON":"OFF",_buttonNavigation&&_editField==4);
+    auto layout=watchcontrols::displayList();
+    float offset=_editorScroll.offset();
+    canvas.setClipRect(layout.x,layout.y,layout.w,layout.h);
+    drawArrowRow(watchcontrols::displayRowBounds(0,offset),"BRIGHTNESS",brightness,_buttonNavigation&&_editField==0);
+    drawArrowRow(watchcontrols::displayRowBounds(1,offset),"THEME",Settings::themeName(settings.data().theme),_buttonNavigation&&_editField==1);
+    drawArrowRow(watchcontrols::displayRowBounds(2,offset),"DIM TIMEOUT",watchpower::timeoutLabel(settings.data().dimTimeout),_buttonNavigation&&_editField==2);
+    drawArrowRow(watchcontrols::displayRowBounds(3,offset),"SCREEN OFF",watchpower::timeoutLabel(settings.data().screenOffTimeout),_buttonNavigation&&_editField==3);
+    drawArrowRow(watchcontrols::displayRowBounds(4,offset),"WAKE",settings.data().buttonWakeOnly?"KEYS ONLY":"TOUCH + KEYS",_buttonNavigation&&_editField==4);
+    drawArrowRow(watchcontrols::displayRowBounds(5,offset),"SOUND",settings.data().sound?"ON":"OFF",_buttonNavigation&&_editField==5);
+    drawArrowRow(watchcontrols::displayRowBounds(6,offset),"INDICATOR",settings.data().indicator?"ON":"OFF",_buttonNavigation&&_editField==6);
+    drawArrowRow(watchcontrols::displayRowBounds(7,offset),"BUTTON FX",settings.data().buttonFeedback?"ON":"OFF",_buttonNavigation&&_editField==7);
+    canvas.clearClipRect();
     drawFooter();
 }
 
@@ -2494,8 +2597,8 @@ static void selectDiagnosticPage(uint8_t page) {
             _previewAnimation = (uint8_t)botux::BotUx::Animation::Wave;
         }
         _editField = 0;
-        if(watchcontrols::editorUsesPreviewList(_editor)) {
-            auto layout=watchcontrols::previewList();
+        if(watchcontrols::editorUsesScrollList(_editor)) {
+            auto layout=watchcontrols::editorList(_editor);
             _editorScroll.setBounds(watchcontrols::editorRowCount(_editor)*layout.step,layout.h);
             _editorScroll.setOffset(0);
         }
@@ -2639,7 +2742,9 @@ void setup() {
     if (!_renderReady) { Serial.println("HUD allocation failed"); return; }
     previewBot.begin(&previewSprite);
     applySettings();
-    refreshPower(millis());
+    uint32_t now=millis();
+    refreshPower(now);
+    _idleScreenPolicy.begin(now);
     _settingsList.configure(kMenuCount, kVisibleRows);
     _personalList.configure(kPersonalCount, kVisibleRows);
     _ambientCycle.begin(millis());
@@ -2651,16 +2756,37 @@ void setup() {
 
 void loop() {
     M5.update();
-    _soundOutput.update();
+    if(_screenPowerState!=watchpower::ScreenState::Off) _soundOutput.update();
     uint32_t now = millis();
     if (!_renderReady) { delay(20); return; }
 
     refreshPower(now);
     bool buttonFeedbackChanged = refreshButtonFeedback(now);
     if(_clickUntil && (int32_t)(now-_clickUntil)>=0) { _clickUntil=0; _uiDirty=true; _listBandOnly=false; }
-    updateMotion(now);
     handleInputs(now);
     if(_contactReplyPending) { _contactReplyPending=false; printUiState(); }
+    handleSerialCommands();
+    if(_screenPowerState==watchpower::ScreenState::Off) {
+        if(_soundOutput.busy()) {
+            _soundOutput.update();
+            delay(8);
+        } else if(watchpower::offWaitMode(_screenPowerState,
+                    settings.data().buttonWakeOnly,_externalPower,_gestureActive)
+                  ==watchpower::OffWaitMode::ButtonLightSleep) {
+            if(power.lightSleepForButtonPoll()) {
+                _manualDozing=false;
+                _idleScreenPolicy.wake(millis());
+                applyScreenPowerState(watchpower::ScreenState::Active);
+                _wakeInputGate.beginWake(false);
+                consumeWakeInput();
+            }
+        } else delay(8);
+        return;
+    }
+    // AMOLED wakeup includes a hardware-mandated delay. Use the current host
+    // time for the RTC read and the first restored animation frame.
+    now=millis();
+    updateMotion(now);
     _soundOutput.update();
     bool ambientEligible=watchcompanion::ambientEligible({
         _screen==Screen::Face,!_manualPreset,!_gestureActive,!_dozing,
@@ -2674,7 +2800,6 @@ void loop() {
         _ambientMood=(botux::BotUx::Mood)(_ambientCycle.phase()==watchinteraction::AmbientCycle::Phase::LookingAround
             ?watchcompanion::lookingAroundMood():watchcompanion::ambientMood(_ambientCycle.index()));
     }
-    handleSerialCommands();
     if (_diagnosticScroll && _screen == Screen::Settings) {
         _settingsScroll.setOffset((sinf(now*0.001f)+1)*0.5f
             *(kMenuCount*kMenuStep-watchcontrols::mainList().h));
@@ -2683,7 +2808,7 @@ void loop() {
     uint32_t scrollDt = _scrollMs ? now - _scrollMs : 0; _scrollMs = now;
     if (_screen == Screen::Settings && _settingsScroll.update(scrollDt)) markListMoved();
     if (_screen == Screen::Personalize && _personalScroll.update(scrollDt)) markListMoved();
-    if (_screen == Screen::Editor && watchcontrols::editorUsesPreviewList(_editor)
+    if (_screen == Screen::Editor && watchcontrols::editorUsesScrollList(_editor)
         && _editorScroll.update(scrollDt)) markListMoved();
 
     if (_screen != Screen::Face && !_uiDirty && !previewIsAnimated()

@@ -74,12 +74,29 @@ int main() {
     assert(colorPadBounds().y+colorPadBounds().h==338);
     assert(hueBarBounds().y+hueBarBounds().h==338);
     assert(at(Screen::Editor,Editor::Color,0,160,338).id==None);
-    assert(displayRowCount()==5);
+    assert(displayRowCount()==8);
+    auto display=displayList();
+    assert(display.x==58&&display.y==76&&display.w==350&&display.h==278&&display.step==58);
+    assert(editorUsesScrollList(Editor::Display));
+    assert(editorList(Editor::Display).h==display.h);
+    assert(!editorUsesPreviewList(Editor::Display));
+    // Display presents five rows at once and scrolls the remaining power and
+    // feedback controls through the same draw and hit geometry.
     for(uint8_t i=0;i<displayRowCount();++i) {
         auto row=displayRowBounds(i);
-        assert(row.y>=76&&row.y+row.h<=354);
-        assert(at(Screen::Editor,Editor::Display,0,233,displayRowCenter(i)).id==First+i);
+        assert(displayRowCenter(i)==100+i*58);
+        if(i<5) {
+            assert(row.y>=76&&row.y+row.h<=354);
+            assert(at(Screen::Editor,Editor::Display,0,233,displayRowCenter(i)).id==First+i);
+        } else {
+            assert(at(Screen::Editor,Editor::Display,0,233,displayRowCenter(i)).id!=First+i);
+        }
     }
+    constexpr float displayEndOffset=186;
+    assert(displayRowCenter(6,displayEndOffset)==262);
+    assert(displayRowCenter(7,displayEndOffset)==320);
+    assert(at(Screen::Editor,Editor::Display,displayEndOffset,233,displayRowCenter(6,displayEndOffset)).id==First+6);
+    assert(at(Screen::Editor,Editor::Display,displayEndOffset,233,displayRowCenter(7,displayEndOffset)).id==First+7);
     assert(at(Screen::Editor,Editor::Display,0,233,355).id==None);
     // Buttons accept up-inside through 1 s; page cancellation consumes the release.
     ux::PointerSession p; auto t=at(Screen::Editor,Editor::Format,0,doneLabelX(),doneLabelY());

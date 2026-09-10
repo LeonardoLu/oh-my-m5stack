@@ -54,7 +54,7 @@ constexpr uint32_t kActiveFrameMs = 16;
 constexpr uint32_t kPreviewFrameMs = 33;
 constexpr uint32_t kDozeFrameMs = 250;
 constexpr uint8_t kLowBattery = 15;
-constexpr uint8_t kDimBrightness = 1;
+constexpr uint8_t kDimBrightnessLevel = 1;
 
 const char* const kMenuLabels[(uint8_t)MenuItem::Count] = {
     "TIME", "DATE", "FORMAT", "BOT", "DISPLAY", "LAYOUT", "DONE"
@@ -831,7 +831,7 @@ static void applyScreenPowerState(watchpower::ScreenState next) {
         _settingsScroll.cancel();
         _personalScroll.cancel();
         _editorScroll.cancel();
-        if (next == watchpower::ScreenState::Dimmed) power.setBrightness(kDimBrightness);
+        if (next == watchpower::ScreenState::Dimmed) power.applyLevel(kDimBrightnessLevel);
         else {
             _ambientCycle.setPaused(true,millis());
             power.sleepDisplay();
@@ -868,7 +868,7 @@ static void applySettings() {
     if (_screenPowerState == watchpower::ScreenState::Active)
         power.applyLevel(settings.data().brightness);
     else if (_screenPowerState == watchpower::ScreenState::Dimmed)
-        power.setBrightness(kDimBrightness);
+        power.applyLevel(kDimBrightnessLevel);
     _uiDirty = true;
 }
 

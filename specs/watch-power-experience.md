@@ -19,7 +19,8 @@ than applying deadlines accumulated while plugged in.
 ## Battery idle states
 
 On battery power, activity resets two independent idle deadlines. The dim deadline
-changes the AMOLED to its minimum visible brightness. The display-off deadline puts
+changes the AMOLED to the lowest user-selectable brightness, level 1/5 (raw value 32).
+The display-off deadline puts
 the AMOLED panel into Sleep In. Both deadlines are measured from the same most recent
 activity, rather than making display-off an additional delay after dimming.
 
@@ -43,7 +44,7 @@ power-source sampling do not count as user activity.
 
 ## Power-save execution
 
-The dim state retains the current screen at minimum AMOLED brightness; on the face it
+The dim state retains the current screen at brightness level 1/5; on the face it
 uses the existing dozing/Sleepy presentation and slower frame interval.
 In the default `Touch + keys` mode, display-off keeps the ESP32-S3 awake so it can poll
 the raw CST820 touch, the A/B and power/home buttons, and VBUS. In `Keys only`, the app
@@ -116,6 +117,21 @@ The final StopWatch PlatformIO build reported 49,868 bytes of RAM (15.2%) and
 `.pio/build/m5stack-stopwatch/firmware.bin` artifact is 1,091,328 bytes with SHA-256
 `5a8985cbc7846e84b959c589b90e7b64068e7060010a3f7f8b23609dd5791325`.
 No firmware was uploaded for this validation.
+
+## Dim-level correction validation
+
+On 2026-09-11, a follow-up corrected the dim brightness unit. The runtime had passed
+the value `1` directly to the raw 0–255 display API, which made the AMOLED appear off.
+Both dim paths now apply user brightness level 1/5 through `Power::applyLevel()`, mapping
+to raw value 32. Display-off still uses AMOLED panel sleep, and all timeout and wake
+behavior remains unchanged.
+
+The focused power-policy and settings-timeout host tests passed, followed by
+`git diff --check`. The StopWatch PlatformIO build then succeeded with 49,868 bytes of
+RAM (15.2%) and 1,090,893 bytes of flash (16.6%). The ignored `firmware.bin` is
+1,091,296 bytes with SHA-256
+`5c26e0d3a1fdd0ab324d4f946f5f7b351fb8c064a4ea81e23ab78bab11dada37`.
+No firmware was uploaded.
 
 ## Hardware and platform references
 

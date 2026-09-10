@@ -184,6 +184,28 @@ of flash (16.7%). The ignored `firmware.bin` is 1,093,600 bytes with SHA-256
 `339910f688b0f370442882d8c6b755cc147bf67fd8d76a498af3ed77bf3e6139`.
 No firmware was uploaded for this pre-deployment validation.
 
+### Audio correction device deployment
+
+On 2026-09-11, the user authorized uploading commit `7e26bcb` and that exact artifact
+to the identified StopWatch at `/dev/cu.usbmodem214201`, without erasing NVS. Esptool
+identified an ESP32-S3 QFN56 revision v0.2 with MAC `28:84:85:44:5B:8C`, verified
+every written region and reset the board. The bounded serial capture saw a normal boot
+and the application-ready line, with no panic, exception, watchdog or brownout.
+
+The saved setting was Sound off. Read-only telemetry reported a bound, suspended
+transport with valid M5IOE1 reads and both audio power and amplifier enable low. An
+unsaved Display-editor replay temporarily selected Sound on; the transport reached
+Ready and both lines read high. The replay then cancelled the editor through Home,
+restoring Sound off, the suspended acknowledgement, both lines low and the production
+face. It never selected Done or invoked the NVS save path. An initial probe used the
+wrong host-side Display editor enum in its assertion and immediately recovered through
+Home; the corrected bounded replay passed. The serial port was closed after capture,
+and ignored logs are under `tmp/watch-sleep-audio-deploy/`.
+
+This confirms the deployed firmware's start, stop and restore hardware lifecycle. USB
+power kept the screen Active during the probe, so it does not verify battery-mode dim,
+the one-second light-sleep cycle or the physical absence of the reported sound.
+
 ## Hardware and platform references
 
 The [M5Stack StopWatch product documentation](https://docs.m5stack.com/en/core/StopWatch)

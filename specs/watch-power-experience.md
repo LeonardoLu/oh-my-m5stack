@@ -133,6 +133,26 @@ RAM (15.2%) and 1,090,893 bytes of flash (16.6%). The ignored `firmware.bin` is
 `5c26e0d3a1fdd0ab324d4f946f5f7b351fb8c064a4ea81e23ab78bab11dada37`.
 No firmware was uploaded.
 
+## Authorized device deployment
+
+On 2026-09-11, the user authorized deploying commit `0feed26` to the identified
+StopWatch at `/dev/cu.usbmodem214201` (USB VID:PID `303A:1001`, serial and ESP32-S3
+MAC `28:84:85:44:5B:8C`). Before upload, the ignored `firmware.bin` matched the
+dim-level validation artifact: 1,091,296 bytes with SHA-256
+`5c26e0d3a1fdd0ab324d4f946f5f7b351fb8c064a4ea81e23ab78bab11dada37`.
+
+PlatformIO uploaded the `m5stack-stopwatch` environment through that explicit port
+without erasing NVS. Esptool identified an ESP32-S3 QFN56 revision v0.2 with that MAC,
+verified every written region, and reset the board. A bounded serial capture then saw
+the normal ESP-ROM boot, the `bot-ux-watch ready` line with IMU available, and a
+read-only `ui` reply on the home screen with no held keys. It contained no panic,
+exception, watchdog, brownout or application error, and the serial port was closed
+after capture. Logs are retained under ignored `tmp/watch-dim-deploy/`.
+
+This deployment evidence establishes artifact identity, successful flash, boot and
+read-only application response. It does not establish physical AMOLED dim-level
+legibility, timeout timing, current draw or button/touch wake behavior.
+
 ## Hardware and platform references
 
 The [M5Stack StopWatch product documentation](https://docs.m5stack.com/en/core/StopWatch)

@@ -63,6 +63,17 @@ int main() {
     assert(!watchpower::shouldWakeAndConsume(ScreenState::Active,true));
     assert(!watchpower::shouldWakeAndConsume(ScreenState::Off,false));
 
+    // Sound hardware runs only while the screen is fully active. Light sleep
+    // additionally waits for a positive hardware-suspended acknowledgement.
+    assert(watchpower::audioShouldRun(ScreenState::Active,true));
+    assert(!watchpower::audioShouldRun(ScreenState::Active,false));
+    assert(!watchpower::audioShouldRun(ScreenState::Dimmed,true));
+    assert(!watchpower::audioShouldRun(ScreenState::Off,true));
+    assert(watchpower::audioSafeForLightSleep(ScreenState::Off,true));
+    assert(!watchpower::audioSafeForLightSleep(ScreenState::Off,false));
+    assert(!watchpower::audioSafeForLightSleep(ScreenState::Dimmed,true));
+    assert(!watchpower::audioSafeForLightSleep(ScreenState::Active,true));
+
     // A brief EXT1 key pulse can be released before the next M5.update. The
     // synthetic wake is consumed for one cycle and then controls reopen.
     WakeInputGate brief;

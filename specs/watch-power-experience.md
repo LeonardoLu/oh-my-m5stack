@@ -45,7 +45,9 @@ power-source sampling do not count as user activity.
 ## Power-save execution
 
 The dim state retains the current screen at brightness level 1/5; on the face it
-uses the existing dozing/Sleepy presentation and slower frame interval.
+uses the existing dozing/Sleepy presentation and slower frame interval. Both dim and
+display-off suspend the audio transport and power down the speaker hardware; sound is
+restored only after the display returns to Active and the persisted Sound setting is on.
 In the default `Touch + keys` mode, display-off keeps the ESP32-S3 awake so it can poll
 the raw CST820 touch, the A/B and power/home buttons, and VBUS. In `Keys only`, the app
 enters ESP32 light sleep after panel sleep and pauses both CPUs until a wake source
@@ -69,7 +71,7 @@ loop retries after its short awake delay rather than waiting for the one-second 
 
 While the display is off, only clock continuity and the polling required to wake are
 part of the user-visible experience. Bot animation, ambient scheduling, IMU motion,
-new sound-cue generation and display rendering remain paused. In keys-only light sleep,
+sound generation, speaker hardware and display rendering remain paused. In keys-only light sleep,
 FreeRTOS tasks and the normal loop are suspended between wake events. Display sleep preserves
 the current face, settings page or editor, including an unsaved editor snapshot. On
 wake, transient input state is cleared, the current screen is fully invalidated before
@@ -152,6 +154,35 @@ after capture. Logs are retained under ignored `tmp/watch-dim-deploy/`.
 This deployment evidence establishes artifact identity, successful flash, boot and
 read-only application response. It does not establish physical AMOLED dim-level
 legibility, timeout timing, current draw or button/touch wake behavior.
+
+## Audio sleep correction
+
+On 2026-09-11, a user report described repeated clicks or pops while the watch was
+sleeping. Code inspection found a plausible periodic mechanism in Keys-only mode: the
+one-second light-sleep timer stopped and restarted ESP32-S3 digital-peripheral clocks
+while the external ES8311 codec and speaker amplifier remained powered. This mechanism
+has not been confirmed by acoustic or electrical measurement.
+
+Dim and display-off now request a coordinated audio suspension. The sound source first
+finishes its short release, the transport retires its own buffers and the M5Unified
+speaker queue, and only the transport task that owns speaker calls powers down the
+speaker. Keys-only light sleep is allowed only after the transport reports a completed
+hardware suspension; a failure keeps the ordinary loop awake. One-second timer wakes
+do not restore audio. A true transition to Active restores it only when Sound is on.
+Persisted Sound-off startup binds the transport in its inactive state without starting
+speaker hardware, and muting while Active follows the same suspension path.
+
+Read-only serial telemetry exposes the desired audio state, transport binding,
+lifecycle state, ready, suspended and failed flags, plus the StopWatch audio-power and
+amplifier-enable pin levels and an I/O-read validity flag. This permits bounded device
+confirmation without changing sound or power settings; it does not by itself establish
+that the reported physical noise is absent.
+
+The focused power-policy, sound and sender-lifecycle host tests passed. The StopWatch
+PlatformIO build then succeeded with 50,140 bytes of RAM (15.3%) and 1,093,193 bytes
+of flash (16.7%). The ignored `firmware.bin` is 1,093,600 bytes with SHA-256
+`339910f688b0f370442882d8c6b755cc147bf67fd8d76a498af3ed77bf3e6139`.
+No firmware was uploaded for this pre-deployment validation.
 
 ## Hardware and platform references
 

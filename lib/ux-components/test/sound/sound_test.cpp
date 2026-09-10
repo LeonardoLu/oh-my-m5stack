@@ -33,14 +33,16 @@ static void wav(const std::string& path,const std::vector<int16_t>& audio) {
 }
 struct Slot { const int16_t* ptr;size_t size;std::vector<int16_t> snapshot;size_t consumed; };
 struct Speaker {
-    bool begin(){return true;}bool isRunning(){return true;}bool isEnabled(){return true;}
-    std::vector<Slot> queue;unsigned submissions=0;bool failNext=false;
+    bool begin(){running=true;++beginCalls;return true;}void end(){running=false;++endCalls;}
+    bool isRunning(){return running;}bool isEnabled(){return true;}
+    std::vector<Slot> queue;std::vector<size_t> submittedLengths;
+    unsigned submissions=0,beginCalls=0,endCalls=0;bool failNext=false,running=true;
     size_t isPlaying(uint8_t)const{return queue.size();}
     bool playRaw(const int16_t* p,size_t n,uint32_t hz,bool stereo,int repeat,uint8_t channel,bool stop) {
         assert(queue.size()<2 && hz==SampleRate&&!stereo&&repeat==1&&channel==6&&!stop);
         if(failNext){failNext=false;return false;}
         for(auto& slot:queue)assert(slot.ptr!=p); // producer cannot reuse a live buffer
-        queue.push_back({p,n,std::vector<int16_t>(p,p+n),0});++submissions;return true;
+        queue.push_back({p,n,std::vector<int16_t>(p,p+n),0});submittedLengths.push_back(n);++submissions;return true;
     }
     bool consumeSamples(size_t samples) {
         while(samples) {
@@ -157,5 +159,24 @@ int main(int argc,char**argv) {
             assert(pausedOutput.failures()==0);
         }
     }
+    // Real Synth cancellation keeps an 8 ms release active. Suspend must wait
+    // for that release and both borrowed SDK buffers before ending hardware.
+    Speaker sleepSpeaker;Synth sleepSynth;M5Output<Speaker> sleepOutput;
+    Note sustained;sustained.durationMs=1000;sustained.gapMs=0;
+    assert(sleepOutput.begin(sleepSpeaker,sleepSynth));assert(sleepSynth.play(sustained));
+    sleepOutput.update();sleepOutput.transportStep();assert(sleepSpeaker.queue.size()==2);
+    assert(sleepOutput.suspend());sleepOutput.update();assert(sleepSynth.active());
+    for(unsigned i=0;i<20&&!sleepOutput.suspended();++i) {
+        sleepSpeaker.consume();sleepOutput.transportStep();sleepOutput.update();sleepOutput.transportStep();
+    }
+    assert(sleepOutput.suspended()&&!sleepOutput.busy()&&sleepSpeaker.endCalls==1);
+    assert(sleepSpeaker.submissions==3&&sleepSpeaker.submittedLengths.back()==128);
+    // A cue accepted directly while suspended is canceled into the local sink;
+    // resuming does not replay it or submit while hardware is off.
+    const unsigned submissionsBefore=sleepSpeaker.submissions;
+    assert(sleepSynth.play(Cue::Tap));sleepOutput.update();assert(!sleepSynth.active());
+    assert(sleepOutput.resume());sleepOutput.transportStep();assert(sleepOutput.ready());
+    sleepOutput.update();sleepOutput.transportStep();
+    assert(sleepSpeaker.submissions==submissionsBefore&&sleepSpeaker.queue.empty());
     std::cout<<"all sound tests passed; max cue peak="<<maxPeak<<" max sample delta="<<maxJump<<" Synth bytes="<<sizeof(Synth)<<" M5Output bytes="<<sizeof(output)<<"\n";
 }

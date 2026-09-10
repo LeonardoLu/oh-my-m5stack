@@ -19,6 +19,7 @@ ux::sound::M5Output<m5::Speaker_Class> soundOutput;
 
 // After M5.begin():
 // bool ready = soundOutput.begin(M5.Speaker, sounds, 6);
+// bool boundMuted = soundOutput.begin(M5.Speaker, sounds, 6, false);
 // sounds.setEnabled(settings.sound);
 // sounds.setVolume(180); // 0..255, default 180; independent of M5 master volume
 
@@ -32,9 +33,38 @@ ux::sound::M5Output<m5::Speaker_Class> soundOutput;
 
 Reserve the chosen virtual channel for this output and call it from only one
 producer. The adapter never changes the device's speaker pins, master gain,
-sample-rate configuration, or any other channel. `begin` verifies the speaker is
-running/enabled; it must not be called for every cue. Objects and source storage
-must outlive queued playback. Do not copy a live output object.
+sample-rate configuration, or any other channel. The default `begin` starts and
+verifies the speaker synchronously as before; it must not be called for every cue.
+Objects and source storage must outlive queued playback. Do not copy a live output
+object.
+
+The optional fourth `begin` argument controls initial hardware state. Passing
+`false` binds the source and creates the sender without calling `Speaker.begin()`.
+The state begins as `Suspending`; if the speaker was already running, the sender
+closes it before acknowledging `Suspended`. This avoids an amplifier-on transient
+when persisted settings start muted.
+
+`suspend()` and `resume()` are nonblocking lifecycle requests. Continue calling
+`update()` while either transition is pending. Suspend cancels the Source on its
+host owner, renders its short release if hardware is active, drains every Ready,
+Submitted, published and playing borrowed buffer, and then lets the sender call
+`Speaker.end()`. `suspended()` becomes true only after `end()` returns. CPU light
+sleep must use that acknowledgement, not `busy()`, as its hardware-off gate.
+Resume lets the sender call and verify `Speaker.begin()`; `ready()` becomes true
+only after that request generation is acknowledged. A failed resume reports
+`PowerState::Failed` through `powerState()` and `failed()`, increments `failures()`,
+and is not retried in the sender's polling loop. A new `resume()` call retries it;
+`suspend()` can always return the adapter to `Suspended` first. Repeated suspend
+calls while off do not repeat `end()`.
+
+Lifecycle control owns the whole `Speaker`, because `Speaker.end()` tears down the
+shared I2S/codec/amplifier hardware rather than one virtual channel. Do not use
+another speaker producer while an `M5Output` may suspend or resume it. The initial
+active `begin` runs before the sender exists; every later `begin`, `end`, `playRaw`
+and `isPlaying` call is serialized on that one sender. A sender blocked inside the
+SDK prevents suspension acknowledgement instead of racing teardown. A resume
+racing a slow `end()` remains non-ready until end returns and the subsequent
+begin succeeds.
 
 Call `update()` at least every 100 ms during playback. Three fixed buffers of
 2,048 signed 16-bit mono samples consume **12,288 bytes**, plus small bookkeeping.
@@ -65,9 +95,10 @@ audio continues when that driver stops progressing. `failures()` counts returned
 submission failures, not an SDK call that has not returned.
 
 The speaker's I2S/DMA task and buffers remain M5Unified's responsibility. Failed
-submissions retain the prepared block for retry. No frame-time allocation occurs
-in either adapter task. Normal 100 ms producer-pause coverage assumes the sender
-and speaker consumer remain scheduled and the driver is functioning.
+submissions retain the prepared block for retry. Steady-state host updates and
+transport buffering do not allocate; lifecycle `Speaker.begin()` may recreate SDK
+driver/task resources on the sender. Normal 100 ms producer-pause coverage assumes
+the sender and speaker consumer remain scheduled and the driver is functioning.
 
 `cancel()` and `setEnabled(false)` apply an 8 ms release to material not yet
 queued. Already queued material drains naturally: **maximum queued cancellation
@@ -211,7 +242,10 @@ The separate transport test includes the SDK's published/adoption phase and an
 actual blocked sender. While it waits with `isPlaying()==1`, 10,000 host updates
 return without waiting or touching the SDK. A concurrent producer/sender/consumer
 stress test verifies all bytes across 200 chunks, Source thread ownership,
-complete FIFO order and borrowed-buffer lifetime:
+complete FIFO order and borrowed-buffer lifetime. Lifecycle cases cover initial
+hardware-off binding, a blocked publication and queued drain before one `end`,
+idempotent sleep polling, failed-resume retry edges, pre-running hardware, rapid
+suspend/resume, and resume while `end()` is deliberately blocked:
 
 ```sh
 c++ -std=c++11 -O2 -Wall -Wextra -Werror -pthread -Ilib/ux-components/src \
@@ -221,4 +255,5 @@ c++ -std=c++11 -O2 -Wall -Wextra -Werror -pthread -Ilib/ux-components/src \
 
 Host transports use explicit `transportStep()` scheduling; on ESP targets that
 method is not exposed and the sender task runs automatically. Existing device APIs
-remain `begin/update/busy/cancel/failures/setSource`.
+remain available, with additive `suspend/resume/powerState/ready/suspended/failed`
+lifecycle controls.

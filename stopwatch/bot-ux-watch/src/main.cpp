@@ -55,6 +55,8 @@ constexpr uint32_t kPreviewFrameMs = 33;
 constexpr uint32_t kDozeFrameMs = 250;
 constexpr uint8_t kLowBattery = 15;
 constexpr uint8_t kDimBrightnessLevel = 1;
+constexpr uint8_t kAudioPowerIo = 2;     // M5IOE1 G3, zero-based index.
+constexpr uint8_t kAudioAmplifierIo = 9; // M5IOE1 G10, zero-based index.
 
 const char* const kMenuLabels[(uint8_t)MenuItem::Count] = {
     "TIME", "DATE", "FORMAT", "BOT", "DISPLAY", "LAYOUT", "DONE"
@@ -112,7 +114,7 @@ ux::PointerSession _pointer;
 ux::Rect _clickRect{0,0,0,0};
 uint32_t _clickUntil=0;
 int _capturedTarget=watchcontrols::None;
-bool _soundReady=false;
+bool _soundBound=false;
 ux::sound::Synth _sounds;
 ux::sound::M5Output<m5::Speaker_Class> _soundOutput;
 bool _diagnosticScroll = false;
@@ -458,9 +460,24 @@ static void revealRow(ux::ScrollModel& scroll, uint8_t index) {
         scroll.setOffset(top + kMenuStep - layout.h);
 }
 
-static void clickSound()   { _sounds.play(ux::sound::Cue::Select); }
-static void confirmSound() { _sounds.play(ux::sound::Cue::Confirm); }
-static void pokeSound()    { _sounds.play(ux::sound::Cue::Poke); }
+static bool soundDesired() {
+    return watchpower::audioShouldRun(_screenPowerState,settings.data().sound);
+}
+
+static void applySoundDemand() {
+    bool desired=soundDesired();
+    if(desired) {
+        if(_soundBound) _soundOutput.resume();
+        _sounds.setEnabled(true);
+    } else {
+        _sounds.setEnabled(false);
+        if(_soundBound) _soundOutput.suspend();
+    }
+}
+
+static void clickSound()   { if(_soundOutput.ready()) _sounds.play(ux::sound::Cue::Select); }
+static void confirmSound() { if(_soundOutput.ready()) _sounds.play(ux::sound::Cue::Confirm); }
+static void pokeSound()    { if(_soundOutput.ready()) _sounds.play(ux::sound::Cue::Poke); }
 
 static void resetUiPointer() {
     _faceTracking=false; _pointer.cancel(); _clickUntil=0; _settingsScroll.cancel(); _personalScroll.cancel(); _editorScroll.cancel();
@@ -818,6 +835,7 @@ static void applyScreenPowerState(watchpower::ScreenState next) {
     _dozing = next != watchpower::ScreenState::Active;
     if (next == watchpower::ScreenState::Active) {
         power.wakeDisplay(settings.data().brightness);
+        applySoundDemand();
         _faceNeedsClear = true;
         _buttonFeedbackFaceBaseValid = false;
         _buttonFeedbackHudMs = 0;
@@ -827,7 +845,7 @@ static void applyScreenPowerState(watchpower::ScreenState next) {
         face.invalidate();
         _buttonFeedbackDirty = true;
     } else {
-        _soundOutput.cancel();
+        applySoundDemand();
         _settingsScroll.cancel();
         _personalScroll.cancel();
         _editorScroll.cancel();
@@ -843,7 +861,7 @@ static void applySettings() {
     watchstrings::chinese()=settings.data().language!=0;
     settings.rebuildStyle();
     power.setIndicator(settings.data().indicator);
-    _sounds.setEnabled(settings.data().sound);
+    applySoundDemand();
     settings.apply(face.bot());
     settings.apply(previewBot);
     face.bot().setName(settings.data().botName);
@@ -2067,7 +2085,7 @@ static void recordFrame(uint32_t now, uint32_t updateUs, uint32_t drawUs, uint32
     uint32_t elapsed = now - _telemetry.windowStartMs;
     if (elapsed < 5000 || _telemetry.frames == 0) return;
 
-    Serial.printf("PERF screen=%u fps=%.1f update=%luus draw=%luus push=%luus max=%luus heap=%u largest=%u psram=%u sound=%u sound_fail=%lu\n",
+    Serial.printf("PERF screen=%u fps=%.1f update=%luus draw=%luus push=%luus max=%luus heap=%u largest=%u psram=%u sound=%u audio_state=%u audio_suspended=%u sound_fail=%lu\n",
                   (unsigned)_screen, (double)_telemetry.frames * 1000.0 / elapsed,
                   (unsigned long)(_telemetry.updateUs / _telemetry.frames),
                   (unsigned long)(_telemetry.drawUs / _telemetry.frames),
@@ -2075,7 +2093,9 @@ static void recordFrame(uint32_t now, uint32_t updateUs, uint32_t drawUs, uint32
                   (unsigned long)_telemetry.maxFrameUs,
                   (unsigned)ESP.getFreeHeap(),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                  (unsigned)ESP.getFreePsram(),_soundReady,(unsigned long)_soundOutput.failures());
+                  (unsigned)ESP.getFreePsram(),_soundOutput.ready(),
+                  (unsigned)_soundOutput.powerState(),_soundOutput.suspended(),
+                  (unsigned long)_soundOutput.failures());
     _telemetry = {};
     _telemetry.windowStartMs = now;
     _telemetry.screen = screen;
@@ -2608,9 +2628,13 @@ static void selectDiagnosticPage(uint8_t page) {
 
 static uint32_t _diagnosticSeq=0;
 static void printUiState() {
-    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u language=%u gaze=%u indicator=%u button_fx=%u status=%u charging=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u keys_held=%u pwr_valid=%u pwr_held=%u keys_diag=%u keys_px=%lu keys_us=%lu keys_max_us=%lu\n",
+    auto& ioe1=M5.getIOExpander(0);
+    bool audioPower=false,audioPa=false;
+    bool audioIoValid=ioe1.getInputLevel(kAudioPowerIo,&audioPower)
+        &&ioe1.getInputLevel(kAudioAmplifierIo,&audioPa);
+    Serial.printf("UI seq=%lu screen=%u editor=%u pressed=%d scrolling=%u offset=%.1f sound=%u audio_desired=%u audio_bound=%u audio_state=%u audio_ready=%u audio_suspended=%u audio_failed=%u audio_io_valid=%u audio_power=%u audio_pa=%u language=%u gaze=%u indicator=%u button_fx=%u status=%u charging=%u manual=%u mood=%u effective=%u expression=%u effective_expr=%u animation=%u keys_held=%u pwr_valid=%u pwr_held=%u keys_diag=%u keys_px=%lu keys_us=%lu keys_max_us=%lu\n",
         (unsigned long)_diagnosticSeq,(unsigned)_screen,(unsigned)_editor,exactPressedTarget(),_pointer.scrolling(),
-        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,settings.data().language,settings.data().gaze,settings.data().indicator,settings.data().buttonFeedback,_statusPanelUntilMs!=0,_charging,
+        _screen==Screen::Personalize?_personalScroll.offset():_screen==Screen::Editor?_editorScroll.offset():_settingsScroll.offset(),settings.data().sound,soundDesired(),_soundBound,(unsigned)_soundOutput.powerState(),_soundOutput.ready(),_soundOutput.suspended(),_soundOutput.failed(),audioIoValid,audioPower,audioPa,settings.data().language,settings.data().gaze,settings.data().indicator,settings.data().buttonFeedback,_statusPanelUntilMs!=0,_charging,
         _manualPreset,(unsigned)face.bot().mood(),(unsigned)face.bot().effectiveMood(),(unsigned)face.bot().expression(),(unsigned)face.bot().effectiveExpression(),(unsigned)face.bot().animation(),
         (unsigned)_buttonFeedback.held(),_powerButtonValid,_powerButtonPressed,_diagnosticButtons,
         (unsigned long)_buttonFeedbackPixels,(unsigned long)_buttonFeedbackRenderUs,
@@ -2688,7 +2712,8 @@ static void handleSerialCommands() {
         else if(!strcmp(line,"p")) pokeBot();
         else if(!strcmp(line,"s")) showStatusPanel(millis());
         else if(!strcmp(line,"c")) emitFrameCapture();
-        else if(!strncmp(line,"sound ",6)) _sounds.play((ux::sound::Cue)atoi(line+6));
+        else if(!strncmp(line,"sound ",6)&&soundDesired()&&_soundOutput.ready())
+            _sounds.play((ux::sound::Cue)atoi(line+6));
     }
 }
 
@@ -2699,10 +2724,12 @@ void setup() {
     M5.begin(cfg);
     M5.Touch.end(); // Raw contacts have one host gesture owner; SDK flick state is unused.
     loadTouchAffine();
-    _soundReady=_soundOutput.begin(M5.Speaker, _sounds, 6);
     Serial.begin(115200);
 
     settings.begin();
+    bool initialSound=soundDesired();
+    _sounds.setEnabled(initialSound);
+    _soundBound=_soundOutput.begin(M5.Speaker,_sounds,6,initialSound);
     power.begin();
     seedRtcIfNeeded();
 
@@ -2756,7 +2783,7 @@ void setup() {
 
 void loop() {
     M5.update();
-    if(_screenPowerState!=watchpower::ScreenState::Off) _soundOutput.update();
+    _soundOutput.update();
     uint32_t now = millis();
     if (!_renderReady) { delay(20); return; }
 
@@ -2767,8 +2794,8 @@ void loop() {
     if(_contactReplyPending) { _contactReplyPending=false; printUiState(); }
     handleSerialCommands();
     if(_screenPowerState==watchpower::ScreenState::Off) {
-        if(_soundOutput.busy()) {
-            _soundOutput.update();
+        if(!watchpower::audioSafeForLightSleep(_screenPowerState,
+                                               _soundOutput.suspended())) {
             delay(8);
         } else if(watchpower::offWaitMode(_screenPowerState,
                     settings.data().buttonWakeOnly,_externalPower,_gestureActive)

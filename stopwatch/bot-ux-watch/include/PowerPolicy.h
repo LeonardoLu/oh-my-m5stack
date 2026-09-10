@@ -31,6 +31,14 @@ inline const char* timeoutLabel(uint8_t index) {
 enum class ScreenState : uint8_t { Active, Dimmed, Off };
 enum class OffWaitMode : uint8_t { AwakePoll, ButtonLightSleep };
 
+inline bool audioShouldRun(ScreenState state, bool soundEnabled) {
+    return state == ScreenState::Active && soundEnabled;
+}
+
+inline bool audioSafeForLightSleep(ScreenState state, bool suspended) {
+    return state == ScreenState::Off && suspended;
+}
+
 inline OffWaitMode offWaitMode(ScreenState state, bool buttonWakeOnly,
                                bool externalPower, bool inputActive) {
     return state == ScreenState::Off && buttonWakeOnly
